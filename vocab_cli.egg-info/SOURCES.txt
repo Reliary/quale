@@ -3,6 +3,7 @@ vocab/__init__.py
 vocab/__main__.py
 vocab/analyze.py
 vocab/cli.py
+vocab/concepts.py
 vocab/git.py
 vocab/index.py
 vocab/scanner.py

@@ -1,13 +1,14 @@
-"""Terminal output formatter — improved UIUX."""
+"""Terminal output formatter — concept-driven output."""
 
 from __future__ import annotations
 
 from vocab.scanner import CodebaseAnalysis
+from vocab.concepts import ConceptGroup
 
 
 def _bar(pct: float, width: int = 20) -> str:
     filled = int(pct / 100 * width)
-    return "█" * filled + "░" * (width - filled)
+    return "\033[36m" + "█" * filled + "\033[0m" + "░" * (width - filled)
 
 
 def _color(text: str, color: str) -> str:
@@ -20,119 +21,180 @@ def _color(text: str, color: str) -> str:
     return f"{codes.get(color, '')}{text}{codes['reset']}"
 
 
-def _lang_icon(lang: str) -> str:
+def _icon_for_category(cat: str) -> str:
     icons = {
-        "Go": "🔵", "Python": "🟡", "TypeScript": "🔷", "JavaScript": "🟨",
-        "Rust": "🦀", "C": "⚪", "C++": "🔷", "Java": "☕", "Kotlin": "🟣",
-        "SQL": "🗄️", "JSON": "📋", "YAML": "📄", "Markdown": "📝",
-        "Shell": "🐚", "Dockerfile": "🐳", "HTML": "🌐", "CSS": "🎨",
-        "TOML": "⚙️", "Unknown": "❓",
+        "exported": "🔷", "identifier": "🔹", "error": "❌", "api": "🔗",
+        "config": "⚙️", "db": "🗄️", "import_path": "📦",
+        "syntax": "　", "other": "📄",
     }
-    return icons.get(lang, "📄")
+    return icons.get(cat, "📄")
 
 
-def format_terminal(analysis: CodebaseAnalysis, use_color: bool = True) -> str:
+def format_terminal(analysis: CodebaseAnalysis) -> str:
+    g = analysis.concept_groups
     lines = []
-    c = lambda t, color: _color(t, color) if use_color else t
 
-    header = f"vocab analyze — {analysis.path}"
-    lines.append(c(f"{'━' * 60}", "cyan"))
-    lines.append(c(f"  {header}", "header"))
-    lines.append(c(f"  files: {analysis.total_files}  phrases: {analysis.total_phrases}  unique: {analysis.total_unique_phrases}", "gray"))
-    lines.append(c(f"{'━' * 60}", "cyan"))
+    h = lambda t: _color(t, "header")
+    sh = lambda t: _color(t, "subheader")
+    gr = lambda t: _color(t, "green")
+    r = lambda t: _color(t, "red")
+    y = lambda t: _color(t, "yellow")
+    gy = lambda t: _color(t, "gray")
+
+    lines.append(h(f"{'━' * 60}"))
+    lines.append(f"  {h('vocab analyze — ')}{_color(analysis.path, 'bold')}")
+    lines.append(gy(f"  {analysis.total_files} files  {analysis.total_phrases} phrases  {analysis.total_unique_phrases} unique  {len(analysis.languages)} langs"))
+    lines.append(gy(""))
+    lines.append(h(f"{'━' * 60}"))
     lines.append("")
 
-    # Languages with bars
-    lines.append(c("LANGUAGES:", "subheader"))
+    # ── Languages ──
+    lines.append(sh("LANGUAGES:"))
     sorted_langs = sorted(analysis.languages.items(), key=lambda x: -x[1])
     for lang, count in sorted_langs[:10]:
         pct = count / analysis.total_files * 100 if analysis.total_files else 0
         phrases = analysis.phrases_by_language.get(lang, 0)
-        icon = _lang_icon(lang)
         bar = _bar(pct, 15)
-        line = f"  {icon} {lang:<12} {c(bar, 'cyan')} {count:>4} files  {pct:>5.1f}%  {phrases:>6} phrases"
+        line = f"  {bar} {lang:<12} {count:>4} files  {pct:>5.1f}%  {phrases:>6} phrases"
         lines.append(line)
     if analysis.shared_across_languages > 0:
         shared_pct = analysis.shared_across_languages / analysis.total_unique_phrases * 100
-        lines.append(c(f"  {'─' * 50}", "gray"))
-        lines.append(c(f"  Cross-language shared: {analysis.shared_across_languages} ({shared_pct:.1f}%)", "yellow"))
+        lines.append(f"  {gy('─' * 50)}")
+        lines.append(f"  {y(f'{analysis.shared_across_languages} phrases shared across languages ({shared_pct:.1f}%)')}")
     lines.append("")
 
-    # Top phrases — categorized
-    lines.append(c("TOP CONCEPTS:", "subheader"))
-    for phrase, freq in analysis.top_phrases[:15]:
-        pct = freq / analysis.total_phrases * 100 if analysis.total_phrases else 0
-        phrase_disp = phrase[:55] + "..." if len(phrase) > 55 else phrase
-        bar = _bar(min(pct * 10, 100), 8)
-        lines.append(f"  {c(bar, 'green')} {phrase_disp:<58} {freq:>6} ({pct:.2f}%)")
+    # ── Key Concepts (grouped, filtered) ──
+    lines.append(sh("KEY CONCEPTS:"))
+    shown_groups = 0
+
+    # Exported types/functions first (most meaningful)
+    if g.exported:
+        sample = ", ".join(p[:30] for p, _ in g.exported[:5])
+        lines.append(f"  {_icon_for_category('exported')} Types/Exports:  {gr(sample)}")
+        shown_groups += 1
+
+    # Identifiers
+    if g.identifier:
+        sample = ", ".join(p[:30] for p, _ in g.identifier[:5])
+        lines.append(f"  {_icon_for_category('identifier')} Idents:         {sample}")
+        shown_groups += 1
+
+    # Errors
+    if g.error:
+        sample = ", ".join(p[:35] for p, _ in g.error[:4])
+        lines.append(f"  {_icon_for_category('error')} Errors:         {r(sample)}")
+        shown_groups += 1
+
+    # API
+    if g.api:
+        sample = ", ".join(p[:35] for p, _ in g.api[:4])
+        lines.append(f"  {_icon_for_category('api')} API:            {sample}")
+        shown_groups += 1
+
+    # Config
+    if g.config:
+        sample = ", ".join(p[:30] for p, _ in g.config[:4])
+        lines.append(f"  {_icon_for_category('config')} Config:         {sample}")
+        shown_groups += 1
+
+    # DB
+    if g.db:
+        sample = ", ".join(p[:30] for p, _ in g.db[:4])
+        lines.append(f"  {_icon_for_category('db')} DB:             {sample}")
+        shown_groups += 1
+
+    # Import paths
+    if g.import_path:
+        sample = ", ".join(p[:35] for p, _ in g.import_path[:3])
+        lines.append(f"  {_icon_for_category('import_path')} Imports:        {sample}")
+        shown_groups += 1
+
+    if not shown_groups:
+        # Fallback: show top frequency
+        sample = ", ".join(p[:40] for p, _ in analysis.top_phrases[:5])
+        lines.append(f"  Top: {sample}")
     lines.append("")
 
-    # Co-occurrence clusters
+    # ── Co-occurrence Clusters ──
     if analysis.clusters:
-        lines.append(c("CO-OCCURRENCE CLUSTERS (discovered patterns):", "subheader"))
-        for cluster in analysis.clusters[:8]:
-            display = ", ".join(c[:25] for c in cluster[:4])
-            if len(cluster) > 4:
-                display += f" ... +{len(cluster) - 4}"
-            lines.append(f"  [{c(str(len(cluster)), 'yellow')} concepts] {display}")
+        lines.append(sh("DISCOVERED PATTERNS:"))
+        for i, (label, cluster) in enumerate(zip(analysis.cluster_labels, analysis.clusters)):
+            if i >= 10:
+                lines.append(gy(f"  … +{len(analysis.clusters) - 10} more patterns"))
+                break
+            size = _color(f"[{len(cluster)} files]", "cyan")
+            lines.append(f"  {i+1}. {label} {size}")
         lines.append("")
 
-    # Structural clones
-    if analysis.structural_clones:
-        lines.append(c("STRUCTURAL CLONE GROUPS:", "subheader"))
-        for clone in analysis.structural_clones[:6]:
-            langs = "/".join(clone["languages"])
-            sim_bar = _bar(clone["similarity"] * 100, 10)
-            files_short = [f.split("/")[-1][:30] for f in clone["files"]]
-            lines.append(f"  {c(sim_bar, 'cyan')} {clone['similarity']:.0%}  {langs:<10}  {', '.join(files_short[:3])}")
-        lines.append("")
-
-    # Landmarks
+    # ── Landmarks ──
     if analysis.landmarks:
-        lines.append(c("UNIQUE FILES (characteristic code):", "subheader"))
+        lines.append(sh("WHAT MAKES THIS CODEBASE UNIQUE:"))
         for lm in analysis.landmarks[:8]:
-            icon = _lang_icon(lm["language"])
-            uniq_bar = _bar(lm["uniqueness"] * 100, 8)
-            lines.append(f"  {icon} {c(uniq_bar, 'green')} {lm['uniqueness']:.0%}  {lm['path']}")
+            lines.append(f"  {lm['path']}")
+            # Show what makes it unique
+            top = lm.get("unique_phrases", [])
+            if top:
+                reasons = ", ".join(p[:35] for p in top[:3])
+                lines.append(f"    {gy('only file with:')} {reasons}")
         lines.append("")
 
-    # Dead exports
+    # ── Cleanup ──
     if analysis.dead_exports:
-        lines.append(c("SINGLE-FILE CONCEPTS (cleanup candidates):", "subheader"))
-        for de in analysis.dead_exports[:12]:
-            phrase_short = de["phrase"][:45]
-            lines.append(f"  • {phrase_short}  {c(de['file'], 'gray')}")
+        lines.append(sh("POTENTIAL DEAD CODE:"))
+        for de in analysis.dead_exports[:10]:
+            lines.append(f"  {r('✗')} {gr(de['phrase'][:45])}  {gy(de['file'])}")
+        if len(analysis.dead_exports) > 10:
+            lines.append(gy(f"  … +{len(analysis.dead_exports) - 10} more candidates"))
         lines.append("")
 
     return "\n".join(lines)
 
 
-def format_quick(analysis: CodebaseAnalysis, use_color: bool = True) -> str:
-    """One-glance summary in 10 lines."""
-    c = lambda t, color: _color(t, color) if use_color else t
+def format_quick(analysis: CodebaseAnalysis) -> str:
+    """One-glance summary — concept driven."""
+    g = analysis.concept_groups
     lines = []
 
     langs = sorted(analysis.languages.items(), key=lambda x: -x[1])[:3]
     lang_str = " ".join(f"{l}({n})" for l, n in langs)
-    top3 = analysis.top_phrases[:3]
-    top_str = " ".join(f"{p[:20]}({f})" for p, f in top3)
 
-    lines.append(c(f"{'━' * 50}", "cyan"))
+    concepts = []
+    # Prefer meaningful categories over errors/syntax
+    for group_name in ["exported", "api", "config", "identifier"]:
+        items = getattr(g, group_name, [])
+        if items:
+            concepts.append(items[0][0][:30])
+        if len(concepts) >= 3:
+            break
+    if not concepts and g.error:
+        concepts.append(g.error[0][0][:30])
+
+    unique_explanation = ""
+    if analysis.landmarks:
+        l = analysis.landmarks[0]
+        top = l.get("unique_phrases", [])
+        if top:
+            unique_explanation = f"({top[0][:30]})"
+        else:
+            unique_explanation = l['path'].split("/")[-1]
+
+    lines.append(_color(f"{'━' * 50}", "cyan"))
     lines.append(f"  {analysis.path}")
     lines.append(f"  {analysis.total_files} files  {analysis.total_phrases} phrases  {len(analysis.languages)} langs")
-    lines.append(c(f"{'━' * 50}", "cyan"))
+    lines.append(_color(f"{'━' * 50}", "cyan"))
     lines.append(f"  Top langs:    {lang_str}")
-    lines.append(f"  Top concepts: {top_str}")
-    lines.append(f"  Clusters:     {len(analysis.clusters)} discovered")
-    lines.append(f"  Unique files: {len(analysis.landmarks)} high-signal")
-    lines.append(f"  Cleanup:      {len(analysis.dead_exports)} candidates")
-    lines.append(c(f"{'━' * 50}", "cyan"))
+    lines.append(f"  Concepts:     {' | '.join(concepts[:3])}")
+    lines.append(f"  Patterns:     {len(analysis.clusters)} discovered")
+    lines.append(f"  Unique:       {len(analysis.landmarks)} files {unique_explanation}")
+    lines.append(f"  Dead code:    {len(analysis.dead_exports)} candidates")
+    lines.append(_color(f"{'━' * 50}", "cyan"))
 
     return "\n".join(lines)
 
 
 def format_json(analysis: CodebaseAnalysis) -> str:
     import json
+    g = analysis.concept_groups
     data = {
         "path": analysis.path,
         "summary": {
@@ -144,78 +206,86 @@ def format_json(analysis: CodebaseAnalysis) -> str:
         "languages": analysis.languages,
         "phrases_by_language": analysis.phrases_by_language,
         "shared_across_languages": analysis.shared_across_languages,
-        "top_phrases": [{"phrase": p, "frequency": f} for p, f in analysis.top_phrases[:30]],
-        "clusters": analysis.clusters[:20],
-        "structural_clones": analysis.structural_clones[:20],
-        "landmarks": analysis.landmarks[:20],
-        "dead_exports": analysis.dead_exports[:50],
+        "concepts": {
+            "exported": [{"name": p, "frequency": f} for p, f in g.exported[:20]],
+            "error": [{"name": p, "frequency": f} for p, f in g.error[:10]],
+            "api": [{"name": p, "frequency": f} for p, f in g.api[:10]],
+            "config": [{"name": p, "frequency": f} for p, f in g.config[:10]],
+            "identifier": [{"name": p, "frequency": f} for p, f in g.identifier[:20]],
+            "import_path": [{"name": p, "frequency": f} for p, f in g.import_path[:10]],
+        },
+        "patterns": [{"label": l, "size": len(c)} for l, c in zip(analysis.cluster_labels, analysis.clusters)],
+        "landmarks": [{"path": lm["path"], "uniqueness": lm["uniqueness"], "unique_phrases": lm.get("unique_phrases", [])} for lm in analysis.landmarks[:20]],
+        "dead_exports": [{"phrase": de["phrase"], "file": de["file"]} for de in analysis.dead_exports[:30]],
     }
     return json.dumps(data, indent=2)
 
 
 def format_html(analysis: CodebaseAnalysis) -> str:
-    lang_rows = []
-    for lang, count in sorted(analysis.languages.items(), key=lambda x: -x[1]):
-        pct = count / analysis.total_files * 100 if analysis.total_files else 0
-        phrases = analysis.phrases_by_language.get(lang, 0)
-        lang_rows.append(f"""
-        <tr>
-          <td>{lang}</td>
-          <td><div style="background:#1e90ff;height:20px;width:{pct}%"></div></td>
-          <td>{count}</td>
-          <td>{pct:.1f}%</td>
-          <td>{phrases}</td>
-        </tr>""")
-    phrase_rows = []
-    for phrase, freq in analysis.top_phrases[:20]:
-        pct = freq / analysis.total_phrases * 100 if analysis.total_phrases else 0
-        phrase_rows.append(f"""
-        <tr>
-          <td style="font-family:monospace">{phrase[:60]}</td>
-          <td>{freq}</td>
-          <td>{pct:.2f}%</td>
-        </tr>""")
+    g = analysis.concept_groups
+
+    lang_rows = "".join(f"""
+    <tr>
+      <td>{lang}</td>
+      <td><div class="bar" style="width:{count / analysis.total_files * 100:.1f}%"></div></td>
+      <td>{count}</td>
+      <td>{count / analysis.total_files * 100:.1f}%</td>
+      <td>{analysis.phrases_by_language.get(lang, 0)}</td>
+    </tr>""" for lang, count in sorted(analysis.languages.items(), key=lambda x: -x[1]))
+
+    concept_sections = ""
+    for title, items in [("Types/Exports", g.exported[:15]), ("API Routes", g.api[:10]),
+                         ("Error Types", g.error[:10]), ("Config Keys", g.config[:10])]:
+        if not items:
+            continue
+        rows = "".join(f"<tr><td>{p}</td><td>{f}</td></tr>" for p, f in items)
+        concept_sections += f"<h2>{title}</h2><table>{rows}</table>"
+
+    cluster_rows = "".join(f"<tr><td>{i+1}</td><td>{l}</td><td>{len(c)}</td></tr>"
+                           for i, (l, c) in enumerate(zip(analysis.cluster_labels, analysis.clusters)))
+
+    unique_rows = "".join(f"""
+    <tr><td>{lm['path'][:60]}</td><td>{lm.get('unique_phrases', [''])[0][:40] if lm.get('unique_phrases') else ''}</td></tr>
+    """ for lm in analysis.landmarks[:15])
+
+    dead_rows = "".join(f"<tr><td>{de['phrase'][:50]}</td><td>{de['file'][:40]}</td></tr>"
+                        for de in analysis.dead_exports[:20])
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>vocab — {analysis.path}</title>
+<meta charset="UTF-8"><title>vocab — {analysis.path}</title>
 <style>
-  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 20px; }}
-  h1 {{ color: #00d4ff; }}
-  h2 {{ color: #ffd700; margin-top: 30px; }}
+  body {{ font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 20px; }}
+  h1 {{ color: #00d4ff; }} h2 {{ color: #ffd700; margin-top: 30px; }}
   table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
   th, td {{ padding: 8px 12px; border: 1px solid #333; }}
   th {{ background: #16213e; color: #00d4ff; }}
   tr:nth-child(even) {{ background: #16213e; }}
-  .bar {{ background: linear-gradient(90deg, #1e90ff, #00d4ff); height: 20px; }}
+  .bar {{ background: #00d4ff; height: 18px; border-radius: 3px; }}
   .summary {{ background: #16213e; padding: 16px; border-radius: 8px; margin-bottom: 20px; }}
 </style>
 </head>
 <body>
-<h1>vocab analyze</h1>
+<h1>vocab analyze — {analysis.path}</h1>
 <div class="summary">
-  <strong>Path:</strong> {analysis.path}<br>
-  <strong>Files:</strong> {analysis.total_files} | <strong>Phrases:</strong> {analysis.total_phrases} | <strong>Languages:</strong> {len(analysis.languages)}
+  <strong>{analysis.total_files}</strong> files &middot;
+  <strong>{analysis.total_phrases}</strong> phrases &middot;
+  <strong>{len(analysis.languages)}</strong> languages
 </div>
 
 <h2>Languages</h2>
-<table>
-  <tr><th>Language</th><th>Distribution</th><th>Files</th><th>%</th><th>Phrases</th></tr>
-  {''.join(lang_rows)}
-</table>
+<table><tr><th>Language</th><th>%</th><th>Files</th><th>%</th><th>Phrases</th></tr>{lang_rows}</table>
 
-<h2>Top Concepts</h2>
-<table>
-  <tr><th>Phrase</th><th>Frequency</th><th>%</th></tr>
-  {''.join(phrase_rows)}
-</table>
+{concept_sections}
 
 <h2>Discovered Patterns</h2>
-<p><strong>Co-occurrence clusters:</strong> {len(analysis.clusters)}</p>
-<p><strong>Unique files:</strong> {len(analysis.landmarks)}</p>
-<p><strong>Cleanup candidates:</strong> {len(analysis.dead_exports)}</p>
+<table><tr><th>#</th><th>Pattern</th><th>Files</th></tr>{cluster_rows}</table>
 
+<h2>Unique Files</h2>
+<table><tr><th>File</th><th>Characteristic</th></tr>{unique_rows}</table>
+
+<h2>Dead Code Candidates</h2>
+<table><tr><th>Phrase</th><th>Location</th></tr>{dead_rows}</table>
 </body>
 </html>"""

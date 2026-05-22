@@ -59,9 +59,9 @@ def analyze(
     elif format == "html":
         typer.echo(format_html(analysis))
     elif format == "quick":
-        typer.echo(format_quick(analysis, use_color=not no_color))
+        typer.echo(format_quick(analysis))
     else:
-        typer.echo(format_terminal(analysis, use_color=not no_color))
+        typer.echo(format_terminal(analysis))
 
 
 @cli.command()

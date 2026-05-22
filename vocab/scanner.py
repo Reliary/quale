@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import re
 from pathlib import Path
 from collections import defaultdict, Counter
 from dataclasses import dataclass, field
@@ -13,6 +14,7 @@ from vocab.segmenter import segment
 from vocab.vocabulary import build_vocabulary, Vocabulary
 from vocab.index import structural_similarity
 from vocab.analyze import FileVocab, CoOccurrenceMatrix, classify_language, compute_uniqueness
+from vocab.concepts import extract_concepts, cluster_labels, ConceptGroup
 from vocab import git as vgit
 
 
@@ -26,9 +28,11 @@ class CodebaseAnalysis:
     phrases_by_language: dict[str, int]
     shared_across_languages: int
     top_phrases: list[tuple[str, int]]
+    concept_groups: ConceptGroup
     file_vocabs: list[FileVocab]
     co_occurrence: CoOccurrenceMatrix
     clusters: list[list[str]]
+    cluster_labels: list[str]
     dead_exports: list[dict]
     structural_clones: list[dict]
     landmarks: list[dict]
@@ -163,9 +167,12 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
               f"(skipped {skipped_binary} binary, {skipped_empty} empty)",
               file=sys.stderr)
 
-    top_phrases = all_phrase_counter.most_common(30)
+    top_phrases = all_phrase_counter.most_common(200)
     total_phrases = sum(fv.total_phrases for fv in all_file_vocabs)
     total_unique = len(all_phrase_counter)
+
+    # Extract categorized concepts — scan deep enough to find real identifiers
+    concept_groups = extract_concepts(all_phrase_counter)
 
     # Shared across languages
     lang_sets: dict[str, set[str]] = defaultdict(set)
@@ -202,6 +209,9 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
     # Dead exports — sample-based for large repos
     dead_exports = _find_dead_exports(all_file_vocabs)
 
+    # Label clusters for readability
+    cluster_labels_list = [cluster_labels(c) for c in clusters]
+
     return CodebaseAnalysis(
         path=path,
         total_files=len(all_file_vocabs),
@@ -211,9 +221,11 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
         phrases_by_language=dict(lang_phrases),
         shared_across_languages=len(shared),
         top_phrases=top_phrases,
+        concept_groups=concept_groups,
         file_vocabs=all_file_vocabs,
         co_occurrence=co_matrix,
         clusters=clusters,
+        cluster_labels=cluster_labels_list,
         dead_exports=dead_exports,
         structural_clones=clone_groups,
         landmarks=landmarks,
@@ -282,13 +294,13 @@ def _compute_landmarks(file_vocabs: list[FileVocab]) -> list[dict]:
     for fv, (path, phrases) in zip(file_vocabs, file_phrases):
         if not phrases:
             continue
-        unique_count = sum(1 for p in phrases if phrase_file_count[p] == 1)
-        uniqueness = unique_count / len(phrases)
+        unique_phrases = [p for p in phrases if phrase_file_count[p] == 1]
+        uniqueness = len(unique_phrases) / len(phrases) if phrases else 0
         if uniqueness > 0.7:
             landmarks.append({
                 "path": path,
                 "uniqueness": round(uniqueness, 3),
-                "unique_phrases": unique_count,
+                "unique_phrases": sorted(unique_phrases, key=lambda x: -len(x))[:5],
                 "language": fv.language,
             })
     landmarks.sort(key=lambda x: -x["uniqueness"])
@@ -296,20 +308,26 @@ def _compute_landmarks(file_vocabs: list[FileVocab]) -> list[dict]:
 
 
 def _find_dead_exports(file_vocabs: list[FileVocab]) -> list[dict]:
+    """Find phrases appearing in exactly 1 file. Filters to code-level exports."""
     phrase_files: dict[str, str] = {}
     single_file: dict[str, str] = {}
+
+    # Must match an identifier pattern (exported function/type/variable name)
+    _ID_PATTERN = re.compile(r'^[A-Z][A-Za-z0-9_]+$')
+
     for fv in file_vocabs:
         for phrase in fv.vocabulary:
-            if phrase in phrase_files:                # Already seen in another file — remove from single_file
+            if not _ID_PATTERN.match(phrase):
+                continue
+            if phrase in phrase_files:
                 single_file.pop(phrase, None)
             else:
                 phrase_files[phrase] = fv.path
                 single_file[phrase] = fv.path
-            # Keep only first occurrence tracking
+
     dead = []
     for phrase, filepath in sorted(single_file.items(), key=lambda x: -len(x[0])):
-        if len(phrase) >= 5 and phrase[0].isupper():
-            dead.append({"phrase": phrase[:80], "file": filepath})
+        dead.append({"phrase": phrase, "file": filepath})
     return dead[:50]
 
 
