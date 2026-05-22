@@ -15,7 +15,9 @@ except ImportError:
     sys.exit(1)
 
 from vocab.scanner import (scan_codebase, concept_timeline, search_cross_repo,
-                           compute_lifecycles, pr_blast_radius, search_cross_repo_ranked)
+                           compute_lifecycles, pr_blast_radius, search_cross_repo_ranked,
+                           compute_stability, compare_repos, phrase_provenance,
+                           explore_repo, repo_fingerprint)
 from vocab.formats.terminal import (format_terminal, format_json, format_html, format_quick,
                                     format_lifecycles, format_blast_radius,
                                     format_lifecycles_json, format_blast_json,
@@ -244,44 +246,7 @@ def blast(
         typer.echo(format_blast_radius(pr_files, results, ref_a, ref_b))
 
 
-@cli.command()
-def fingerprint(
-    path: Annotated[str, typer.Argument(help="Path to file")],
-):
-    if not os.path.isfile(path):
-        typer.echo("Not a file.", err=True)
-        raise typer.Exit(1)
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
-    except Exception as e:
-        typer.echo(f"Error reading file: {e}", err=True)
-        raise typer.Exit(1)
 
-    seg_result = segment(content)
-    if not seg_result.phrases:
-        typer.echo("No phrases found.")
-        return
-
-    vocab = build_vocabulary(seg_result.phrases, seg_result.strategy, seg_result.delimiter)
-    from collections import Counter
-    indices = [vocab.lookup(i) for i in range(1, vocab.size + 1)]
-    phrase_counter: dict[str, int] = {}
-    for p in seg_result.phrases:
-        phrase_counter[p] = phrase_counter.get(p, 0) + 1
-
-    index_list = []
-    phrase_to_idx = {e.text: e.index for e in vocab.entries}
-    for p in seg_result.phrases:
-        idx = phrase_to_idx.get(p, 0)
-        if idx:
-            index_list.append(idx)
-
-    h = index_sequence_hash(index_list)
-    typer.echo(f"Fingerprint: v0-{h}")
-    typer.echo(f"Strategy:    {seg_result.strategy}")
-    typer.echo(f"Phrases:     {vocab.size} unique / {len(seg_result.phrases)} total")
-    typer.echo(f"Indices:     {len(index_list)}")
 
 
 @cli.command()
@@ -362,6 +327,248 @@ def timeline(
         else:
             trend = c("→ 0", "yellow")
         typer.echo(f"  {wk['week']:<10} {wk['commits']:<8} {c(str(new), 'green'):>8} {c(str(retired), 'red'):>8} {wk['stable_concepts']:<8} {wk['total_concepts']:<8} {trend}")
+
+
+@cli.command()
+def stable(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 12,
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Max results")] = 20,
+):
+    """Stability anchors: files with highest/lowest phrase persistence.
+
+    High-persistence files barely change — they're stable core infrastructure.
+    Low-persistence files are churn hotspots — they change every week.
+    """
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = compute_stability(path, weeks=weeks)
+    if not data:
+        typer.echo("Not enough snapshot data.")
+        return
+
+    c = lambda t, color: _color(t, color)
+
+    # Anchors (top persistence)
+    anchors = sorted(data, key=lambda x: -x["persistence"])[:limit]
+    churn = sorted(data, key=lambda x: x["persistence"])[:limit]
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c(f"  STABILITY ANCHORS (last {weeks} weeks)", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo("")
+    typer.echo(c("  STABLE FILES (barely change):", "subheader"))
+    for item in anchors:
+        if item["persistence"] >= 0.8:
+            bar_n = int(item["persistence"] * 10)
+            bar = "█" * bar_n + "░" * (10 - bar_n)
+            typer.echo(f"  {bar} {c(f'{item["persistence"]:.0%}', 'green'):>6}  {item['file']:<55} {c(f'({item["stable_phrases"]} stable)', 'gray')}")
+
+    typer.echo("")
+    typer.echo(c("  CHURN HOTSPOTS (change every week):", "subheader"))
+    for item in churn:
+        if item["persistence"] <= 0.3 and item["total_phrases"] >= 5:
+            bar_n = max(1, int((1 - item["persistence"]) * 10))
+            bar = "░" * bar_n + "█" * (10 - bar_n)
+            typer.echo(f"  {bar} {c(f'{item["persistence"]:.0%}', 'red'):>6}  {item['file']:<55} {c(f'(turnover {item["avg_turnover"]:.0%}/wk)', 'gray')}")
+
+    typer.echo(c(f"\n  {len([x for x in data if x['persistence'] >= 0.8])} stable files, {len([x for x in data if x['persistence'] <= 0.3])} churn hotspots", "gray"))
+
+
+@cli.command()
+def explore(
+    path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
+):
+    """Onboarding map: best files to read first.
+
+    Ranks files by vocabulary coverage — files with highest coverage
+    contain the most representative concepts. Start here.
+    """
+    path = os.path.abspath(path)
+    data = explore_repo(path)
+    if not data:
+        typer.echo("No files found.")
+        return
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, color: _color(t, color)
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  {c('EXPLORE —', 'header')} {_color(path, 'bold')}")
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("\n  FILES WITH BROADEST COVERAGE (read these first):", "subheader"))
+    typer.echo(f"  {'Score':<6} {'Lang':<10} {'Identifiers':<12} {'File'}")
+    typer.echo(f"  {'─' * 55}")
+
+    for item in data[:15]:
+        cov_str = f"{item['unique_score']:.1f}"
+        typer.echo(f"  {c(cov_str, 'cyan'):<6} {item['language']:<10} {c(str(item['identifiers']), 'yellow'):<12} {item['file']}")
+
+
+@cli.command()
+def compare(
+    repo_a: Annotated[str, typer.Argument(help="First repo path")],
+    repo_b: Annotated[str, typer.Argument(help="Second repo path")],
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
+):
+    """Cross-repo vocabulary alignment. Finds drift between repos.
+
+    Measures how much vocabulary two repos share. High drift suggests
+    integration gaps — types/APIs in A that don't appear in B.
+    """
+    repo_a = os.path.abspath(repo_a)
+    repo_b = os.path.abspath(repo_b)
+
+    if not vgit.is_repo(repo_a) or not vgit.is_repo(repo_b):
+        typer.echo("Both paths must be git repositories.", err=True)
+        raise typer.Exit(1)
+
+    result = compare_repos(repo_a, repo_b)
+
+    if format == "json":
+        typer.echo(json.dumps(result, indent=2))
+        return
+
+    c = lambda t, color: _color(t, color)
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  {c('VOCABULARY ALIGNMENT', 'header')}: {result['repo_a']} ↔ {result['repo_b']}")
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo("")
+    typer.echo(f"  {c(result['repo_a'], 'bold'):<30} {result['a_total_phrases']:>5} concepts")
+    typer.echo(f"  {c(result['repo_b'], 'bold'):<30} {result['b_total_phrases']:>5} concepts")
+
+    align = result["alignment"]
+    align_color = "green" if align >= 0.5 else "yellow" if align >= 0.2 else "red"
+    typer.echo(f"  {'':>30} {c(f'{align:.0%} aligned', align_color)}")
+
+    typer.echo(f"  {'':>30} {result['shared_phrases']:>5} shared")
+    typer.echo(f"  {'':>30} {result['only_in_a']:>5} only in {result['repo_a']}")
+    typer.echo(f"  {'':>30} {result['only_in_b']:>5} only in {result['repo_b']}")
+
+    if result["drift_candidates"]:
+        typer.echo("")
+        typer.echo(c(f"  DRIFT from {result['repo_b']} (concepts in {result['repo_a']} not found in {result['repo_b']}):", "subheader"))
+        for phrase in result["drift_candidates"][:15]:
+            typer.echo(f"  {c('-', 'red')} {phrase}")
+
+    if result["drift_candidates"]:
+        typer.echo("")
+        typer.echo(c(f"  Languages:", "subheader"))
+        for lang, count in sorted(result["a_languages"].items(), key=lambda x: -x[1])[:3]:
+            typer.echo(f"    {result['repo_a']}: {lang} {count} files")
+        for lang, count in sorted(result["b_languages"].items(), key=lambda x: -x[1])[:3]:
+            typer.echo(f"    {result['repo_b']}: {lang} {count} files")
+
+
+@cli.command()
+def provenance(
+    phrase: Annotated[str, typer.Argument(help="Phrase to trace")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 24,
+):
+    """Trace a phrase's presence through git history.
+
+    Shows when each identified concept entered, persisted, or left the codebase.
+    Useful for understanding how a specific type/API evolved.
+    """
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = phrase_provenance(path, phrase, weeks=weeks)
+    if not data:
+        typer.echo("No history data available.")
+        return
+
+    c = lambda t, color: _color(t, color)
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  {c('PROVENANCE', 'header')}: '{phrase}'")
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo("")
+
+    # Segment into present / absent blocks
+    typer.echo(f"  {'Week':<12} {'Status':<8} {'Files':<6} {'Details'}")
+    typer.echo(f"  {'─' * 55}")
+
+    for wk in data:
+        if wk["present"]:
+            status = c("PRESENT", "green")
+            files_str = ", ".join(wk["files"][:3])
+            typer.echo(f"  {wk['week']:<12} {status:<8} {c(str(wk['file_count']), 'cyan'):<6} {files_str}")
+        else:
+            status = c("ABSENT", "red")
+            typer.echo(f"  {wk['week']:<12} {status:<8} {c('0', 'gray'):<6}")
+
+    present_weeks = sum(1 for wk in data if wk["present"])
+    total_weeks = len(data)
+    typer.echo(c(f"\n  Present in {present_weeks}/{total_weeks} weeks ({present_weeks/max(total_weeks, 1)*100:.0f}%)", "gray"))
+
+
+@cli.command(name="fingerprint")
+def fingerprint_cmd(
+    target: Annotated[str, typer.Argument(help="File or repo path")],
+):
+    """Structural fingerprint of a file or entire repo.
+
+    For a file: produces the deterministic index-sequence hash.
+    For a repo directory: produces the canonical structural manifest hash.
+    Two structurally identical repos produce the same hash.
+
+    Usage:
+      vocab fingerprint main.go
+      vocab fingerprint /path/to/repo   # <-- directory = whole repo
+    """
+    target = os.path.abspath(target)
+    if os.path.isdir(target):
+        # Repo-level fingerprint
+        result = repo_fingerprint(target)
+        c = lambda t, color: _color(t, color)
+        typer.echo(c(f"{'━' * 50}", "cyan"))
+        typer.echo(f"  {c('REPO FINGERPRINT', 'header')}")
+        typer.echo(c(f"{'━' * 50}", "cyan"))
+        typer.echo(f"  Hash:     {c(result['fingerprint'], 'bold')}")
+        typer.echo(f"  Files:    {result['files']}")
+        typer.echo(f"  Phrases:  {result['total_phrases']}")
+        typer.echo(f"  Indices:  {result['total_indices']}")
+        typer.echo(f"  Langs:    {result['languages']}")
+    else:
+        # File-level fingerprint (existing behavior)
+        if not os.path.isfile(target):
+            typer.echo("Not a file or directory.", err=True)
+            raise typer.Exit(1)
+        try:
+            with open(target, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception as e:
+            typer.echo(f"Error reading file: {e}", err=True)
+            raise typer.Exit(1)
+
+        seg_result = segment(content)
+        if not seg_result.phrases:
+            typer.echo("No phrases found.")
+            return
+
+        vocab = build_vocabulary(seg_result.phrases, seg_result.strategy, seg_result.delimiter)
+        from collections import Counter
+        indices = [vocab.lookup(i) for i in range(1, vocab.size + 1)]
+
+        index_list = []
+        phrase_to_idx = {e.text: e.index for e in vocab.entries}
+        for p in seg_result.phrases:
+            idx = phrase_to_idx.get(p, 0)
+            if idx:
+                index_list.append(idx)
+
+        h = index_sequence_hash(index_list)
+        typer.echo(f"Fingerprint: v0-{h}")
+        typer.echo(f"Strategy:    {seg_result.strategy}")
+        typer.echo(f"Phrases:     {vocab.size} unique / {len(seg_result.phrases)} total")
+        typer.echo(f"Indices:     {len(index_list)}")
 
 
 @cli.command()
@@ -475,11 +682,14 @@ def main():
         typer.echo("  vocab lifecycle [path]             concept lifecycles")
         typer.echo("  vocab timeline [path]              weekly concept history")
         typer.echo("  vocab search <phrase> [repos]      cross-repo search")
+        typer.echo("  vocab compare <a> <b>              cross-repo alignment")
+        typer.echo("  vocab stable [path]                stability anchors")
+        typer.echo("  vocab explore [path]               onboarding map")
+        typer.echo("  vocab provenance <phrase>          phrase git history")
+        typer.echo("  vocab fingerprint <file|dir>       structural fingerprint")
         typer.echo("  vocab orphans [path]               structural orphans")
-        typer.echo("  vocab fingerprint <file>           structural fingerprint")
         typer.echo("  vocab clone [path]                 structural clones")
         typer.echo("  vocab landmarks [path]             unique files")
-        typer.echo("  vocab gate <check> <a> <b>         CI gate (blast|orphans|drift)")
         typer.echo("  vocab pr-report <a> <b>            PR structural report (markdown)")
         typer.echo("  vocab init                         generate .vocab.yml")
         typer.echo("")

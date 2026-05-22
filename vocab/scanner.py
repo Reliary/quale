@@ -736,3 +736,282 @@ def search_cross_repo(phrase: str, repo_paths: list[str]) -> list[dict]:
                     "language": fv.language,
                 })
     return results
+
+
+# ── Stability anchors ──────────────────────────────────────────────
+
+def compute_stability(path: str, weeks: int = 12, min_appearances: int = 4) -> list[dict]:
+    """Find files whose vocabulary barely changes across git history.
+
+    For each file present in at least `min_appearances` snapshots, compute
+    phrase persistence (% of phrases that survive across all snapshots).
+    Files with high persistence are stability anchors — they change rarely.
+    Low persistence files are churn hotspots.
+    """
+    if not vgit.is_repo(path):
+        return []
+
+    week_data = vgit.weekly_commits(path, weeks=weeks)
+    if not week_data:
+        return []
+
+    # For each file, track: total phrases seen, phrases that persist in latest snapshot
+    file_snapshots: dict[str, list[set[str]]] = defaultdict(list)
+
+    for wk in week_data:
+        shas = wk.get("shas", [])
+        if not shas:
+            continue
+        try:
+            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True)
+        except Exception:
+            continue
+        for fv in analysis.file_vocabs:
+            file_snapshots[fv.path].append(set(fv.vocabulary.keys()))
+
+    results = []
+    for filepath, snapshots in file_snapshots.items():
+        if len(snapshots) < min_appearances:
+            continue
+        if len(snapshots) <= 1:
+            continue
+
+        # Compute phrase persistence: phrases that appear in ALL snapshots / total unique phrases
+        if not snapshots:
+            continue
+        all_phrases: set[str] = set()
+        for s in snapshots:
+            all_phrases.update(s)
+        preserved = snapshots[0]
+        for s in snapshots[1:]:
+            preserved &= s
+
+        total_unique = len(all_phrases) if all_phrases else 1
+        persistence = len(preserved) / total_unique
+
+        # Turnover rate: average phrase churn per snapshot
+        turnover_rates = []
+        for i in range(1, len(snapshots)):
+            if snapshots[i-1]:
+                churn = len(snapshots[i] - snapshots[i-1]) / max(len(snapshots[i-1]), 1)
+                turnover_rates.append(churn)
+
+        avg_turnover = sum(turnover_rates) / max(len(turnover_rates), 1) if turnover_rates else 0
+
+        results.append({
+            "file": filepath,
+            "persistence": round(persistence, 3),
+            "avg_turnover": round(avg_turnover, 3),
+            "snapshots": len(snapshots),
+            "total_phrases": total_unique,
+            "stable_phrases": len(preserved),
+        })
+
+    results.sort(key=lambda x: x["persistence"])
+    return results
+
+
+def _snapshot_phrases(analysis: CodebaseAnalysis) -> set[str]:
+    """Extract all qualifying identifiers from a codebase snapshot."""
+    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
+    phrases: set[str] = set()
+    for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in _DEAD_CODE_EXTS:
+            continue
+        if _is_lock_file(fv.path) or _is_generated(fv.path):
+            continue
+        for phrase in fv.vocabulary:
+            for m in _EXPORT_TOKEN.finditer(phrase):
+                phrases.add(m.group())
+    return phrases
+
+
+# ── Cross-repo vocabulary alignment ───────────────────────────────
+
+def compare_repos(repo_a: str, repo_b: str) -> dict:
+    """Structural vocabulary alignment between two repos.
+
+    Returns A-only, B-only, and shared phrase sets, plus drift analysis:
+    phrases in A's code files that don't appear in B.
+    """
+    analysis_a = scan_codebase(repo_a, quiet=True)
+    analysis_b = scan_codebase(repo_b, quiet=True)
+
+    phrases_a = _snapshot_phrases(analysis_a)
+    phrases_b = _snapshot_phrases(analysis_b)
+
+    shared = phrases_a & phrases_b
+    only_a = phrases_a - phrases_b
+    only_b = phrases_b - phrases_a
+
+    # Repo metadata
+    a_name = os.path.basename(os.path.normpath(repo_a))
+    b_name = os.path.basename(os.path.normpath(repo_b))
+
+    # Drift: what's in A that isn't in B's code files (potential integration gaps)
+    drift = sorted(only_a, key=lambda x: -len(x))[:30]
+
+    # Alignment score
+    union = len(phrases_a | phrases_b) or 1
+    alignment = len(shared) / union
+
+    return {
+        "repo_a": a_name,
+        "repo_b": b_name,
+        "a_total_phrases": len(phrases_a),
+        "b_total_phrases": len(phrases_b),
+        "shared_phrases": len(shared),
+        "only_in_a": len(only_a),
+        "only_in_b": len(only_b),
+        "alignment": round(alignment, 3),
+        "drift_candidates": drift,
+        "a_languages": dict(sorted(analysis_a.languages.items(), key=lambda x: -x[1])),
+        "b_languages": dict(sorted(analysis_b.languages.items(), key=lambda x: -x[1])),
+    }
+
+
+# ── Phrase provenance ─────────────────────────────────────────────
+
+def phrase_provenance(path: str, phrase: str, weeks: int = 24) -> list[dict]:
+    """Trace a phrase through git history.
+
+    For each week, report whether the phrase was present and in which files.
+    """
+    if not vgit.is_repo(path):
+        return []
+
+    week_data = vgit.weekly_commits(path, weeks=weeks)
+    if not week_data:
+        return []
+
+    timeline = []
+    for wk in week_data:
+        shas = wk.get("shas", [])
+        if not shas:
+            continue
+        try:
+            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True)
+        except Exception:
+            continue
+
+        files_present = []
+        for fv in analysis.file_vocabs:
+            ext = os.path.splitext(fv.path)[1].lower()
+            if ext not in _DEAD_CODE_EXTS:
+                continue
+            if _is_lock_file(fv.path) or _is_generated(fv.path):
+                continue
+            for p in fv.vocabulary:
+                if phrase.lower() in p.lower():
+                    files_present.append(fv.path)
+                    break
+
+        timeline.append({
+            "week": wk["week"],
+            "present": len(files_present) > 0,
+            "file_count": len(files_present),
+            "files": files_present[:5],
+        })
+
+    return timeline
+
+
+# ── Explore / onboarding map ──────────────────────────────────────
+
+def explore_repo(path: str) -> list[dict]:
+    """Find code files that best characterize the codebase.
+
+    Scores each code file by how many unique qualifying identifiers it
+    contains (exported-format tokens like `SpoolManager`, `IngestRequest`).
+    Excludes docs, config, lock files, and generated files.
+    Best first picks for onboarding: high-concept-density source files.
+    """
+    analysis = scan_codebase(path, quiet=True)
+    if not analysis.file_vocabs:
+        return []
+
+    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
+
+    # Compute global identifier frequency (for rare-concept scoring)
+    identifier_file_count: Counter[str] = Counter()
+    file_identifiers: list[tuple[str, str, set[str]]] = []  # (path, lang, identifiers)
+
+    for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in _DEAD_CODE_EXTS:
+            continue
+        if _is_lock_file(fv.path) or _is_generated(fv.path):
+            continue
+        if "/tests/" in fv.path or "/testdata/" in fv.path:
+            continue
+
+        identifiers: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in _EXPORT_TOKEN.finditer(phrase):
+                identifiers.add(m.group())
+
+        if not identifiers:
+            continue
+
+        for ident in identifiers:
+            identifier_file_count[ident] += 1
+        file_identifiers.append((fv.path, fv.language, identifiers))
+
+    total_files = max(sum(1 for _, _, _ in file_identifiers), 1)
+
+    scored = []
+    for path, lang, identifiers in file_identifiers:
+        # Unique-concept score: identifiers that appear in few files (rare = more characteristic)
+        unique_score = sum(1 / max(identifier_file_count[i], 1) for i in identifiers)
+
+        # Total identifiers
+        ident_count = len(identifiers)
+
+        scored.append({
+            "file": path,
+            "language": lang,
+            "identifiers": ident_count,
+            "unique_score": round(unique_score, 2),
+            "coverage": round(ident_count / max(len(identifier_file_count), 1), 4),
+        })
+
+    # Sort by unique_score descending (files with most rare/specialized identifiers first)
+    scored.sort(key=lambda x: -x["unique_score"])
+
+    return scored[:20]
+
+
+# ── Repo-level structural fingerprint ─────────────────────────────
+
+def repo_fingerprint(path: str) -> dict:
+    """Produce a single structural hash for an entire repo.
+
+    Combines all file index sequences into one canonical hash.
+    Two structurally identical repos produce the same hash.
+    """
+    analysis = scan_codebase(path, quiet=True)
+
+    # Sort files by path for deterministic ordering
+    # For each file, encode: path_hash + index_sequence
+    import hashlib
+    combined = hashlib.sha256()
+    total_indices = 0
+
+    for fv in sorted(analysis.file_vocabs, key=lambda x: x.path):
+        indices = list(fv.vocabulary.values())
+        if not indices:
+            continue
+        total_indices += len(indices)
+        # Feed path hash + index bytes
+        path_hash = hashlib.sha256(fv.path.encode()).digest()
+        combined.update(path_hash)
+        combined.update(str(indices).encode())
+
+    return {
+        "fingerprint": f"v0-{combined.hexdigest()[:16]}",
+        "files": analysis.total_files,
+        "total_phrases": analysis.total_phrases,
+        "total_indices": total_indices,
+        "languages": len(analysis.languages),
+    }
