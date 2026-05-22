@@ -1163,8 +1163,12 @@ def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | N
         is_generated = _is_generated(path)
         gen_penalty = 0.3 if is_generated else 1.0
 
+        # Role weighting: source files first, tests/scripts/examples lower
+        role = _task_file_role(path)
+        role_penalty = {"source": 1.0, "script": 0.6, "example": 0.3, "test": 0.3}.get(role, 0.5)
+
         # Unique-concept score: identifiers that appear in few files (rare = more characteristic)
-        unique_score = sum(1 / max(identifier_file_count[i], 1) for i in identifiers) * gen_penalty
+        unique_score = sum(1 / max(identifier_file_count[i], 1) for i in identifiers) * gen_penalty * role_penalty
 
         # Total identifiers
         ident_count = len(identifiers)
@@ -1458,13 +1462,17 @@ def _compute_agent_notes(path: str, explore_data: dict, modules_data: dict,
 
 def _binding_concepts(analysis: CodebaseAnalysis, limit: int = 15) -> list[dict]:
     """Concept-first architecture map: identifiers binding many source files."""
-    total_files = max(len([fv for fv in _code_file_vocabs(analysis) if not _is_test_path(fv.path)]), 1)
+    source_files = [fv for fv in _code_file_vocabs(analysis) if not _is_test_path(fv.path)]
+    total_files = max(len(source_files), 1)
     concept_files, concept_langs = _identifier_file_map(analysis, include_tests=False)
     rows = []
     for ident, files in concept_files.items():
         if len(files) < 3:
             continue
         score = _structural_information_score(len(files), total_files, len(concept_langs[ident]))
+        # Single-language concepts at ≥30% prevalence are likely language built-ins, not architecture
+        if score > 0 and len(concept_langs.get(ident, [])) <= 1 and len(files) / total_files >= 0.30:
+            score = 0.0
         if score <= 0:
             continue
         rows.append({

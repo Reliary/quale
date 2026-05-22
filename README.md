@@ -72,6 +72,21 @@ The report includes deterministic numeric fields for automation:
 
 Gate flags are opt-in. Maintainers choose policy; `vocab` only provides structural measurements.
 
+## Reliary Integration
+
+```bash
+reliary init  # runs vocab agent-bootstrap internally, caches under .reliary/
+```
+
+`reliary init` uses `vocab agent-bootstrap` as the primary adapter surface:
+
+- **Fast**: working-tree scan only, no git history traversal.
+- **Lightweight**: cached as `.reliary/vocab.json`, reused across agent sessions.
+- **Privacy**: scan output is structural identifiers and paths — no code content leaves the repo.
+- **Not uploaded** by default: `vocab` output stays local unless the user explicitly enables sharing.
+
+Full `vocab inspect` is available as an explicit command for deeper analysis but is not part of the default `init` scan due to its heavier historical traversal.
+
 ## Useful Commands
 
 ```bash
