@@ -1470,9 +1470,6 @@ def _binding_concepts(analysis: CodebaseAnalysis, limit: int = 15) -> list[dict]
         if len(files) < 3:
             continue
         score = _structural_information_score(len(files), total_files, len(concept_langs[ident]))
-        # Single-language concepts at ≥30% prevalence are likely language built-ins, not architecture
-        if score > 0 and len(concept_langs.get(ident, [])) <= 1 and len(files) / total_files >= 0.30:
-            score = 0.0
         if score <= 0:
             continue
         rows.append({
