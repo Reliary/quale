@@ -112,6 +112,11 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
         if content is None:
             continue
 
+        try:
+            if isinstance(content, bytes):
+                content = content.decode("utf-8", errors="replace")
+        except Exception:
+            pass
         # Quick binary check on content
         if "\x00" in content[:4096]:
             skipped_binary += 1

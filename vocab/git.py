@@ -54,8 +54,19 @@ def read_file_at_ref(path: str, filepath: str, ref: str | None = None) -> str | 
         except FileNotFoundError:
             return None
     try:
-        return _git("show", f"{ref}:{filepath}", cwd=path)
-    except RuntimeError:
+        # Use raw binary mode to handle non-UTF8 files
+        result = subprocess.run(
+            ["git", "show", f"{ref}:{filepath}"],
+            capture_output=True, cwd=path, timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+        raw = result.stdout
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return raw.decode("utf-8", errors="replace")
+    except (subprocess.TimeoutExpired, RuntimeError):
         return None
 
 
