@@ -193,5 +193,44 @@ class TestIndex(unittest.TestCase):
             self.assertEqual(_base36_to_int(_int_to_base36(n)), n)
 
 
+class TestScanCache(unittest.TestCase):
+
+    def test_cache_hits_on_repeated_ref_scans(self):
+        import tempfile, subprocess
+        from pathlib import Path
+        from vocab.scanner import scan_codebase, _scan_cache_clear, _SCAN_CACHE
+
+        tmp = tempfile.TemporaryDirectory()
+        repo = Path(tmp.name)
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        (repo / "src").mkdir(parents=True, exist_ok=True)
+        (repo / "src" / "a.ts").write_text("export const A = 1;\n")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=T", "-c", "user.email=t@t.test", "commit", "-q", "-m", "init"],
+            cwd=repo, check=True,
+        )
+
+        _scan_cache_clear()
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+
+        a = scan_codebase(str(repo), git_ref=head, quiet=True)
+        self.assertEqual(len(_SCAN_CACHE), 1)
+
+        b = scan_codebase(str(repo), git_ref=head, quiet=True)
+        self.assertIs(a, b)
+
+        _scan_cache_clear()
+
+    def test_cache_respects_limit(self):
+        from vocab.scanner import _scan_cache_clear, _SCAN_CACHE, _SCAN_CACHE_MAX
+        _scan_cache_clear()
+        # Fill one past limit
+        for i in range(_SCAN_CACHE_MAX + 1):
+            _SCAN_CACHE[(f"/tmp/fake{i}", None)] = None  # type: ignore
+        self.assertEqual(len(_SCAN_CACHE), _SCAN_CACHE_MAX + 1)
+        _scan_cache_clear()
+
+
 if __name__ == "__main__":
     unittest.main()

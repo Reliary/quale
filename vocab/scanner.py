@@ -5,10 +5,10 @@ from __future__ import annotations
 import os
 import sys
 import re
+import time
 from pathlib import Path
 from collections import defaultdict, Counter
 from dataclasses import dataclass, field
-import time
 
 from vocab.segmenter import segment
 from vocab.vocabulary import build_vocabulary, Vocabulary
@@ -100,11 +100,29 @@ def _skip_path(path: str) -> bool:
     return False
 
 
+# ── Scan cache: shares snapshot results across history-based commands ──
+# Cache key: (abs_path, git_ref). 50-entry limit. Cleared per-invocation.
+_SCAN_CACHE: dict[tuple[str, str | None], CodebaseAnalysis] = {}
+_SCAN_CACHE_MAX = 50
+
+
+def _scan_cache_key(path: str, git_ref: str | None) -> tuple[str, str | None]:
+    return (os.path.abspath(path), git_ref)
+
+
+def _scan_cache_clear() -> None:
+    _SCAN_CACHE.clear()
+
+
 def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
                   clones: bool = False, deep: bool = False,
                   max_files: int | None = None,
                   max_seconds: float | None = None) -> CodebaseAnalysis:
     path = os.path.abspath(path)
+    key = _scan_cache_key(path, git_ref)
+    if key in _SCAN_CACHE:
+        return _SCAN_CACHE[key]
+
     if git_ref is not None:
         files = vgit.list_files(path, ref=git_ref)
     elif vgit.is_repo(path):
@@ -248,7 +266,7 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
 
     dead_exports = _find_dead_exports(all_file_vocabs)
 
-    return CodebaseAnalysis(
+    result = CodebaseAnalysis(
         path=path,
         total_files=len(all_file_vocabs),
         total_phrases=total_phrases,
@@ -266,6 +284,9 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
         landmarks=landmarks,
         structure_clusters=structure_clusters_list,
     )
+    if len(_SCAN_CACHE) < _SCAN_CACHE_MAX:
+        _SCAN_CACHE[key] = result
+    return result
 
 
 # ── Shared constants ──────────────────────────────────────────────
