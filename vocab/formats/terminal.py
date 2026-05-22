@@ -122,7 +122,7 @@ def format_terminal(analysis: CodebaseAnalysis) -> str:
             if i >= 10:
                 lines.append(gy(f"  … +{len(analysis.clusters) - 10} more patterns"))
                 break
-            size = _color(f"[{len(cluster)} files]", "cyan")
+            size = _color(f"[{len(cluster)} phrases]", "cyan")
             lines.append(f"  {i+1}. {label} {size}")
         lines.append("")
 
@@ -145,6 +145,22 @@ def format_terminal(analysis: CodebaseAnalysis) -> str:
             lines.append(f"  {r('✗')} {gr(de['phrase'][:45])}  {gy(de['file'])}")
         if len(analysis.dead_exports) > 10:
             lines.append(gy(f"  … +{len(analysis.dead_exports) - 10} more candidates"))
+        lines.append("")
+
+    # ── Structure Clusters ──
+    if analysis.structure_clusters:
+        lines.append(sh("STRUCTURE CLUSTERS (architectural groups):"))
+        for sc in analysis.structure_clusters[:8]:
+            lines.append(f"  {sc['label']:<20} [{sc['file_count']:>3} files] {gy(sc['top_files'][0] if sc['top_files'] else '')}")
+            if sc['characteristic_phrases']:
+                cp = ", ".join(p[:30] for p in sc['characteristic_phrases'][:4])
+                lines.append(f"  {'':>22} phrases: {gy(cp)}")
+        if len(analysis.structure_clusters) > 8:
+            lines.append(gy(f"  … +{len(analysis.structure_clusters) - 8} more groups"))
+        # Show ungrouped count
+        grouped_files = sum(sc["file_count"] for sc in analysis.structure_clusters)
+        ungrouped = analysis.total_files - grouped_files
+        lines.append(f"  {'':>22} {gy(f'{ungrouped} files ungrouped (no cluster match)')}")
         lines.append("")
 
     return "\n".join(lines)
@@ -289,3 +305,121 @@ def format_html(analysis: CodebaseAnalysis) -> str:
 <table><tr><th>Phrase</th><th>Location</th></tr>{dead_rows}</table>
 </body>
 </html>"""
+
+
+def format_lifecycles(lifecycles: list[dict], weeks: int, show_all: bool = False) -> str:
+    """Format lifecycle signals for terminal output."""
+    lines = []
+    h = lambda t: _color(t, "header")
+    sh = lambda t: _color(t, "subheader")
+    gr = lambda t: _color(t, "green")
+    r = lambda t: _color(t, "red")
+    y = lambda t: _color(t, "yellow")
+    gy = lambda t: _color(t, "gray")
+
+    lines.append(h(f"{'━' * 60}"))
+    lines.append(f"  {h('CONCEPT LIFECYCLES')} (last {weeks} weeks)")
+    lines.append(h(f"{'━' * 60}"))
+
+    signal_order = ["DEAD", "ABANDONED", "DECAYING", "SEASONAL", "RENAMED",
+                    "GROWING", "EMERGING", "SPORADIC", "RENAMED_TO", "ACTIVE", "STABLE"]
+    signal_labels = {
+        "DEAD": "DEAD (gone ≥8 weeks, ≤3 appearances)",
+        "ABANDONED": "ABANDONED (brief experiment, 2-4 weeks)",
+        "DECAYING": "DECAYING (absent ≥4 weeks, aged ≥12)",
+        "SEASONAL": "SEASONAL (disappeared then reappeared)",
+        "RENAMED": "RENAMED (this concept was replaced)",
+        "GROWING": "GROWING (≤4 weeks old, appearing consistently)",
+        "EMERGING": "EMERGING (first seen this week)",
+        "SPORADIC": "SPORADIC (comes and goes, <30% appearance)",
+        "RENAMED_TO": "RENAMED → (this replaced another concept)",
+        "ACTIVE": "ACTIVE (in use, not yet mature)",
+        "STABLE": f"STABLE ({sum(1 for l in lifecycles if l['signal'] == 'STABLE')} mature concepts — not listed)",
+    }
+
+    for signal in signal_order:
+        items = [l for l in lifecycles if l["signal"] == signal]
+        if not items:
+            continue
+        if signal == "STABLE":
+            continue
+        if not show_all and signal in ("GROWING", "ACTIVE", "SPORADIC", "RENAMED_TO"):
+            continue
+        lines.append("")
+        lines.append(sh(f"{signal_labels.get(signal, signal)}:"))
+        for item in items[:15]:
+            tag = {"DEAD": r("DEAD"), "DECAYING": y("DECAY"), "GROWING": gr("GROW"),
+                   "EMERGING": gr("NEW"), "ABANDONED": y("ABAN")}.get(signal, "")
+            concept_str = item["concept"][:40]
+            detail = gy(f"[age:{item['age_weeks']}w stale:{item['stale_weeks']}w ratio:{item['appearance_ratio']:.0%}]")
+
+            notes = ""
+            if "renamed_to" in item:
+                notes = gr(f" → {item['renamed_to'][:25]}")
+            elif "renamed_from" in item:
+                notes = gy(f" ← {item['renamed_from'][:25]}")
+
+            lines.append(f"  {tag} {concept_str:<42} {detail}{notes}")
+
+        if len(items) > 15:
+            lines.append(gy(f"  … +{len(items) - 15} more"))
+
+    lines.append("")
+    lines.append(h(f"{'━' * 60}"))
+    return "\n".join(lines)
+
+
+def format_blast_radius(pr_files: list[str], results: dict, ref_a: str, ref_b: str) -> str:
+    """Format PR blast radius for terminal output."""
+    lines = []
+    h = lambda t: _color(t, "header")
+    sh = lambda t: _color(t, "subheader")
+    gr = lambda t: _color(t, "green")
+    r = lambda t: _color(t, "red")
+    y = lambda t: _color(t, "yellow")
+    gy = lambda t: _color(t, "gray")
+
+    lines.append(h(f"{'━' * 60}"))
+    lines.append(f"  {h('PR BLAST RADIUS')} {ref_a} → {ref_b}")
+    lines.append(h(f"{'━' * 60}"))
+    lines.append("")
+    lines.append(sh("Changed files:"))
+    for f in pr_files[:10]:
+        lines.append(f"  {gr('+')} {f}")
+    if len(pr_files) > 10:
+        lines.append(gy(f"  … +{len(pr_files) - 10} more"))
+    lines.append("")
+
+    impacts = results.get("impacts", [])
+    if not impacts:
+        lines.append(gy("  No measurable blast radius"))
+        lines.append("")
+        return "\n".join(lines)
+
+    lines.append(sh("Blast radius (unchanged files sharing concepts):"))
+    high = [i for i in impacts if i["shared_concepts"] >= 5]
+    med = [i for i in impacts if 3 <= i["shared_concepts"] < 5]
+    low = [i for i in impacts if 1 <= i["shared_concepts"] < 3]
+
+    for label, bucket, limit in [("HIGH", high, 8), ("MED", med, 6), ("LOW", low, 4)]:
+        if not bucket:
+            continue
+        color_fn = r if label == "HIGH" else (y if label == "MED" else gy)
+        lines.append(f"  {color_fn(label)} — {len(bucket)} files")
+        for item in bucket[:limit]:
+            conc_bar = _bar(item["concentration"] * 1000, 8)
+            concepts = ", ".join(item["concepts"][:4])
+            lines.append(f"    {conc_bar} {item['file'][:55]}  {gy('shares:')} {concepts}")
+
+    if len(impacts) > 18:
+        lines.append(gy(f"  … +{len(impacts) - 18} more files"))
+
+    rename_warnings = results.get("rename_warnings", [])
+    if rename_warnings:
+        lines.append("")
+        lines.append(y("Suspected renames:"))
+        for rw in rename_warnings[:5]:
+            lines.append(f"  {r('✗')} {rw['old_name'][:30]}  {gr('→')}  {rw['new_name'][:30]}")
+
+    lines.append("")
+    return "\n".join(lines)

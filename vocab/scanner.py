@@ -36,6 +36,7 @@ class CodebaseAnalysis:
     dead_exports: list[dict]
     structural_clones: list[dict]
     landmarks: list[dict]
+    structure_clusters: list[dict] = None
 
 
 _BINARY_EXTS = frozenset({
@@ -212,6 +213,9 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
     # Label clusters for readability
     cluster_labels_list = [cluster_labels(c) for c in clusters]
 
+    # Structure clusters — file groups from phrase co-occurrence
+    structure_clusters_list = find_structure_clusters(all_file_vocabs, clusters, quiet=quiet)
+
     return CodebaseAnalysis(
         path=path,
         total_files=len(all_file_vocabs),
@@ -229,6 +233,7 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
         dead_exports=dead_exports,
         structural_clones=clone_groups,
         landmarks=landmarks,
+        structure_clusters=structure_clusters_list,
     )
 
 
@@ -349,10 +354,338 @@ def _find_dead_exports(file_vocabs: list[FileVocab]) -> list[dict]:
         dead.append({"phrase": phrase, "file": filepath})
     return dead[:50]
 
-    dead = []
-    for phrase, filepath in sorted(single_file.items(), key=lambda x: -len(x[0])):
-        dead.append({"phrase": phrase, "file": filepath})
-    return dead[:50]
+
+# ── Language-common stop-phrases for structural clustering ──
+# Computed per-run from most common phrases in each language
+_LANG_COMMON_CACHE: dict[str, set[str]] = {}
+
+
+def _get_language_common(file_vocabs: list[FileVocab], top_n: int = 20) -> dict[str, set[str]]:
+    """Compute top N most common phrases per language to subtract from clustering."""
+    if _LANG_COMMON_CACHE:
+        return _LANG_COMMON_CACHE
+    lang_phrase_count: dict[str, Counter[str]] = defaultdict(Counter)
+    for fv in file_vocabs:
+        for p in fv.vocabulary:
+            lang_phrase_count[fv.language][p] += 1
+    result = {}
+    for lang, counter in lang_phrase_count.items():
+        result[lang] = set(p for p, _ in counter.most_common(top_n))
+    _LANG_COMMON_CACHE.update(result)
+    return result
+
+
+def find_structure_clusters(file_vocabs: list[FileVocab], phrase_clusters: list[list[str]],
+                            min_file_count: int = 3, quiet: bool = False) -> list[dict]:
+    """Convert phrase co-occurrence clusters into file structure groups.
+
+    For each phrase cluster, find files that contain ≥2 unique characteristing
+    phrases from that cluster (excluding language-common noise). Groups files
+    by shared vocabulary → discovers architectural patterns without parsers.
+    """
+    if not phrase_clusters or len(file_vocabs) < min_file_count:
+        return []
+
+    # Precompute language-common phrases to subtract
+    lang_common = _get_language_common(file_vocabs, top_n=20)
+
+    structure_groups = []
+
+    for i, cluster_phrases in enumerate(phrase_clusters):
+        if len(cluster_phrases) < 2:
+            continue
+
+        # Score each file by how many distinct cluster phrases it contains
+        file_scores: list[tuple[str, int, str]] = []
+        for fv in file_vocabs:
+            # Filter out language-common noise and short noise phrases
+            common = lang_common.get(fv.language, set())
+            meaningful = [p for p in cluster_phrases
+                          if p not in common and len(p) >= 3 and p not in common]
+            if len(meaningful) < 2:
+                # If filtering removed too many, use original set
+                meaningful = cluster_phrases
+
+            matches = sum(1 for p in meaningful if p in fv.vocabulary)
+            if matches >= 2:
+                file_scores.append((fv.path, matches, fv.language))
+
+        if len(file_scores) >= min_file_count:
+            # Determine group label
+            langs = Counter(l for _, _, l in file_scores)
+            top_lang = langs.most_common(1)[0][0]
+            test_count = sum(1 for f, _, _ in file_scores
+                             if "_test." in f or "/tests/" in f or ".test." in f)
+
+            # Characteristic phrases for labeling
+            all_hit_phrases: Counter[str] = Counter()
+            for fv in file_vocabs:
+                if any(fv.path == f for f, _, _ in file_scores):
+                    for p in cluster_phrases:
+                        if p in fv.vocabulary and p not in lang_common.get(fv.language, set()):
+                            all_hit_phrases[p] += fv.vocabulary[p]
+
+            char_phrases = [p for p, _ in all_hit_phrases.most_common(5)]
+
+            structure_groups.append({
+                "cluster_id": i,
+                "label": f"{top_lang} {'test' if test_count / max(len(file_scores), 1) > 0.5 else 'source'} group",
+                "file_count": len(file_scores),
+                "top_files": sorted(f for f, _, _ in file_scores)[:10],
+                "characteristic_phrases": char_phrases,
+                "languages": dict(langs.most_common(3)),
+                "test_ratio": round(test_count / max(len(file_scores), 1), 2),
+            })
+
+    # Sort by file_count descending
+    structure_groups.sort(key=lambda x: -x["file_count"])
+    return structure_groups
+
+
+def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
+    """Track each exported concept over git history and classify lifecycle phase.
+
+    Returns lifecycle signals per concept: GROWING, STABLE, DECAYING, DEAD,
+    SEASONAL, ABANDONED, SPORADIC, EMERGING.
+    """
+    from collections import defaultdict
+
+    if not vgit.is_repo(path):
+        return []
+
+    week_data = vgit.weekly_commits(path, weeks=weeks)
+    if not week_data:
+        return []
+
+    # Track: concept → set of weeks present
+    concept_weeks: dict[str, set[int]] = defaultdict(set)
+    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
+
+    previous_phrases: set[str] = set()
+    rename_pairs: list[tuple[str, str, int]] = []  # (old, new, week_index)
+
+    for week_idx, wk in enumerate(week_data):
+        shas = wk.get("shas", [])
+        if not shas:
+            continue
+        try:
+            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True)
+        except Exception:
+            continue
+
+        current_phrases: set[str] = set()
+        for fv in analysis.file_vocabs:
+            # Only look at code files
+            ext = os.path.splitext(fv.path)[1].lower()
+            if ext not in _DEAD_CODE_EXTS:
+                continue
+            if _is_lock_file(fv.path) or _is_generated(fv.path):
+                continue
+            for phrase in fv.vocabulary:
+                for m in _EXPORT_TOKEN.finditer(phrase):
+                    token = m.group()
+                    current_phrases.add(token)
+                    concept_weeks[token].add(week_idx)
+
+        # Detect rename pairs: old concepts that disappeared + new concepts that appeared same week
+        if previous_phrases and week_idx > 0:
+            disappeared = previous_phrases - current_phrases
+            appeared = current_phrases - previous_phrases
+            if disappeared and appeared:
+                # Simple heuristic: if a new concept contains an old concept's name
+                for old in list(disappeared)[:5]:
+                    old_base = old.replace("V1", "").replace("V2", "").replace("V3", "").replace("V4", "").replace("V5", "")
+                    old_base = old_base.replace("Old", "").replace("Legacy", "")
+                    for new in list(appeared)[:5]:
+                        if old_base and (old_base in new or new.replace("New", "").replace("V2", "").replace("V3", "") == old_base):
+                            rename_pairs.append((old, new, week_idx))
+
+        previous_phrases = current_phrases
+
+    total_weeks = len(week_data)
+    lifecycles = []
+
+    # Common tokens that appear in every codebase — always noise
+    _COMMON_TOKEN = re.compile(r'^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|FROM|WHERE|AND|OR|NOT|IN|'
+                               r'COUNT|SUM|AVG|MIN|MAX|ORDER|GROUP|HAVING|LIMIT|OFFSET|JOIN|ON|AS|SET|'
+                               r'Getenv|Printf|Println|Fatal|Close|String|Error|Nil|True|False|None|'
+                               r'Type|Struct|Interface|Return|Import|Package|Func|Const|Var|Int|Int64|Int32|'
+                               r'Float32|Float64|Bool|Byte|Rune|Uint|Uint8|Uint16|Uint32|Uint64|'
+                               r'Get|Set|Has|Is|To|From|New|Make|Append|Copy|Len|Cap|Add|Del|'
+                               r'http|HTTP|URL|JSON|XML|HTML|YAML|Base64|UTF8|ASCII|'
+                               r'Config|Logger|Handler|Router|Server|Client|DB|'
+                               r'WithTimeout|Background|Second|Ping|Database|Identifier|Sanitize|QueryRow|'
+                               r'Scan|Query|Exec|Row|Rows|Desc|GroupBy|OrderBy|'
+                               r'Encoding|Parsing|Formatting|Validating|Reading|Writing|Serializing)$')
+
+    for concept, weeks_present in concept_weeks.items():
+        # Skip extremely common noise tokens
+        if _COMMON_TOKEN.match(concept):
+            continue
+        first = min(weeks_present)
+        last = max(weeks_present)
+        age = total_weeks - first
+        stale = total_weeks - last
+        appearances = len(weeks_present)
+        ratio = appearances / max(total_weeks, 1)
+
+        # Check if this concept was in a rename pair
+        renamed_to = [n for o, n, _ in rename_pairs if o == concept]
+        renamed_from = [o for o, n, _ in rename_pairs if n == concept]
+
+        # Check for seasonal pattern: disappeared then reappeared
+        has_gap = False
+        if len(weeks_present) >= 2:
+            sorted_weeks = sorted(weeks_present)
+            for i in range(len(sorted_weeks) - 1):
+                if sorted_weeks[i + 1] - sorted_weeks[i] > 4:  # >4 week gap
+                    has_gap = True
+                    break
+
+        # Classify
+        if has_gap:
+            signal = "SEASONAL"
+        elif stale >= 8 and appearances <= 3:
+            signal = "DEAD"
+        elif stale >= 4 and age >= 12:
+            signal = "DECAYING"
+        elif appearances <= 2 and stale <= 1:
+            signal = "EMERGING"
+        elif age <= 4 and ratio >= 0.5:
+            signal = "GROWING"
+        elif ratio < 0.3 and age > 8:
+            signal = "SPORADIC"
+        elif first <= 2 and last <= 6 and stale >= 4:
+            signal = "ABANDONED"
+        elif renamed_to:
+            signal = "RENAMED"
+        elif renamed_from:
+            signal = "RENAMED_TO"
+        elif age >= 12 and ratio >= 0.8:
+            signal = "STABLE"
+        else:
+            signal = "ACTIVE"
+
+        item = {
+            "concept": concept,
+            "signal": signal,
+            "age_weeks": age,
+            "stale_weeks": stale,
+            "appearance_ratio": round(ratio, 2),
+            "first_week": first,
+            "last_week": last,
+        }
+        if renamed_to:
+            item["renamed_to"] = renamed_to[0]
+        if renamed_from:
+            item["renamed_from"] = renamed_from[0]
+
+        lifecycles.append(item)
+
+    lifecycles.sort(key=lambda x: ({"DEAD": 0, "ABANDONED": 1, "DECAYING": 2, "SEASONAL": 3,
+                                    "RENAMED": 4, "GROWING": 5, "EMERGING": 6, "SPORADIC": 7,
+                                    "RENAMED_TO": 8, "ACTIVE": 9, "STABLE": 10}.get(x["signal"], 99),
+                                   -x["age_weeks"]))
+    return lifecycles
+
+
+def pr_blast_radius(pr_files: list[str], all_file_vocabs: list[FileVocab],
+                    min_shared: int = 2) -> dict:
+    """Score unchanged files by vocabulary overlap with PR files.
+
+    For each PR file, extract exported-format identifiers. Then for every
+    unchanged file, compute how many identifiers it shares.
+
+    Returns dict with HIGH/MED/LOW buckets and rename warnings.
+    """
+    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
+    pr_set = set(pr_files)
+
+    # Extract all exported identifiers from PR files
+    pr_vocab: set[str] = set()
+    for fv in all_file_vocabs:
+        if fv.path in pr_set:
+            for phrase in fv.vocabulary:
+                for m in _EXPORT_TOKEN.finditer(phrase):
+                    pr_vocab.add(m.group())
+
+    if not pr_vocab:
+        return {"impacts": [], "rename_warnings": []}
+
+    # Score unchanged files
+    impacts = []
+    for fv in all_file_vocabs:
+        if fv.path in pr_set:
+            continue
+        shared: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in _EXPORT_TOKEN.finditer(phrase):
+                token = m.group()
+                if token in pr_vocab:
+                    shared.add(token)
+        if len(shared) >= min_shared:
+            impacts.append({
+                "file": fv.path,
+                "shared_concepts": len(shared),
+                "concepts": sorted(shared, key=lambda x: -len(x))[:8],
+                "concentration": round(len(shared) / max(len(pr_vocab), 1), 3),
+            })
+
+    impacts.sort(key=lambda x: -x["shared_concepts"])
+
+    # Detect renames: concepts removed from PR files replaced by new ones
+    rename_warnings = []
+    # Get old names (present in all non-PR files but not in PR)
+    old_names: set[str] = set()
+    for fv in all_file_vocabs:
+        if fv.path not in pr_set:
+            for phrase in fv.vocabulary:
+                for m in _EXPORT_TOKEN.finditer(phrase):
+                    old_names.add(m.group())
+    old_names -= pr_vocab
+
+    # Check if PR file vocabulary has partial name matches with old names
+    for old in list(old_names)[:10]:
+        for new in list(pr_vocab)[:20]:
+            if old[:3] and old[:3].lower() in new.lower():
+                rename_warnings.append({"old_name": old, "new_name": new})
+
+    return {"impacts": impacts, "rename_warnings": rename_warnings}
+
+
+def search_cross_repo_ranked(phrase: str, repo_paths: list[str]) -> list[dict]:
+    """Cross-repo concept search with concentration ranking.
+
+    Each result shows how central the phrase is to its repo
+    (file_count_with_phrase / total_files_in_repo).
+    """
+    results = []
+    for repo in repo_paths:
+        try:
+            analysis = scan_codebase(repo, quiet=True)
+        except Exception:
+            continue
+        total = len(analysis.file_vocabs)
+        matches = []
+        for fv in analysis.file_vocabs:
+            # Case-insensitive substring match
+            if phrase.lower() in " ".join(fv.vocabulary.keys()).lower():
+                matches.append({
+                    "file": fv.path,
+                    "language": fv.language,
+                })
+        if matches:
+            concentration = len(matches) / max(total, 1)
+            results.append({
+                "repo": os.path.basename(repo),
+                "total_files": total,
+                "matches": len(matches),
+                "concentration": round(concentration, 3),
+                "files": matches[:15],
+            })
+
+    results.sort(key=lambda x: -x["concentration"])
+    return results
 
 
 def _is_lock_file(path: str) -> bool:

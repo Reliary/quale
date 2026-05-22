@@ -71,9 +71,25 @@ def read_file_at_ref(path: str, filepath: str, ref: str | None = None) -> str | 
 
 
 def diff_refs(path: str, ref_a: str, ref_b: str) -> list[str]:
-    """List files changed between ref_a and ref_b."""
+    """List files changed between ref_a and ref_b (code files only)."""
     out = _git("diff", "--name-only", ref_a, ref_b, cwd=path)
-    return [f for f in out.splitlines() if f.strip()]
+    _skip_exts = frozenset({".pyc", ".pyo"})
+    _skip_dirs = frozenset({"__pycache__", ".git", "node_modules"})
+    files = []
+    for f in out.splitlines():
+        f = f.strip()
+        if not f:
+            continue
+        parts = f.split("/")
+        if any(p.endswith(".egg-info") for p in parts):
+            continue
+        base = parts[-1]
+        if any(base.endswith(e) for e in _skip_exts):
+            continue
+        if any(d in parts for d in _skip_dirs):
+            continue
+        files.append(f)
+    return files
 
 
 def ref_log(path: str, count: int = 100) -> list[GitRef]:

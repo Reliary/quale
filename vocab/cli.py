@@ -13,8 +13,10 @@ except ImportError:
     print("vocab needs `typer` and `typing-extensions`. Install: pip install typer typing-extensions")
     sys.exit(1)
 
-from vocab.scanner import scan_codebase, concept_timeline, search_cross_repo
-from vocab.formats.terminal import format_terminal, format_json, format_html, format_quick
+from vocab.scanner import (scan_codebase, concept_timeline, search_cross_repo,
+                           compute_lifecycles, pr_blast_radius, search_cross_repo_ranked)
+from vocab.formats.terminal import (format_terminal, format_json, format_html, format_quick,
+                                    format_lifecycles, format_blast_radius)
 from vocab.index import encode_indices, decode_indices, index_sequence_hash, structural_similarity
 from vocab.vocabulary import build_vocabulary
 from vocab.segmenter import segment
@@ -126,15 +128,107 @@ def diff(
 def search(
     phrase: Annotated[str, typer.Argument(help="Phrase to search for")],
     paths: Annotated[list[str], typer.Argument(help="Repo paths to search")] = ["."],
+    related: Annotated[bool, typer.Option("--related", "-r", help="Show co-occurring concepts")] = False,
 ):
     """Search for a phrase across one or more repos."""
-    results = search_cross_repo(phrase, paths)
+    results = search_cross_repo_ranked(phrase, paths)
     if not results:
         typer.echo(f"'{phrase}' not found in any repo.")
         return
-    typer.echo(f"'{phrase}' found in {len(results)} locations:")
-    for r in results[:30]:
-        typer.echo(f"  {r['repo']:<20} {r['file']:<50} {r['language']}")
+
+    # Use ranked formatter
+    typer.echo(f"'{phrase}' found in {sum(r['matches'] for r in results)} locations across {len(results)} repos:")
+    for r in results:
+        pct_bar = _bar(r["concentration"] * 100, 10)
+        typer.echo(f"  {r['repo']:<20} {pct_bar} {_color(str(r['matches']), 'cyan'):>4} / {r['total_files']:<4} files ({r['concentration']*100:.0f}%)")
+        for f in r["files"][:5]:
+            typer.echo(f"    {f['file']:<55} {f['language']}")
+
+        if related:
+            # Show co-occurring concepts for this repo
+            typer.echo(f"    {_color('(co-occurs with:)', 'gray')}")
+            # Get the first result file's vocabulary
+            repo_path = next((p for p in paths if os.path.basename(p) == r["repo"] or p == r["repo"]), ".")
+            try:
+                analysis = scan_codebase(repo_path, quiet=True)
+                for f in r["files"][:1]:
+                    for fv in analysis.file_vocabs:
+                        if fv.path == f["file"]:
+                            # Find concepts co-occurring with the search phrase
+                            co_occuring = [p for p in fv.vocabulary if phrase.lower() in p.lower() or p.lower() in phrase.lower()]
+                            for p in fv.vocabulary:
+                                if p not in co_occuring and len(p) >= 5:
+                                    co_occuring.append(p)
+                            sample = ", ".join(co_occuring[:5])
+                            typer.echo(f"      {sample}")
+                            break
+            except Exception:
+                pass
+
+    if sum(r["matches"] for r in results) > 30:
+        remaining = sum(r["matches"] for r in results) - 5 * len(results)
+        if remaining > 0:
+            typer.echo(f"  … and {remaining} more matches")
+
+
+@cli.command()
+def lifecycle(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 24,
+    signal: Annotated[str | None, typer.Option("--signal", "-s", help="Filter by signal type: DEAD, GROWING, STABLE, etc.")] = None,
+    show_all: Annotated[bool, typer.Option("--show-all", help="Show GROWING, ACTIVE, and STABLE concepts too")] = False,
+):
+    """Track concept lifecycles across git history."""
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(_color("Computing lifecycles across history...", "gray"), err=True)
+    data = compute_lifecycles(path, weeks=weeks)
+    if not data:
+        typer.echo("No lifecycle data available.")
+        return
+
+    if signal:
+        data = [d for d in data if d["signal"] == signal.upper()]
+
+    if not data:
+        typer.echo(f"No concepts with signal '{signal}' found.")
+        return
+
+    typer.echo(format_lifecycles(data, weeks, show_all=show_all))
+
+
+@cli.command()
+def blast(
+    ref_a: Annotated[str, typer.Argument(help="Base git ref")],
+    ref_b: Annotated[str, typer.Argument(help="Target git ref")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+):
+    """Measure PR blast radius by vocabulary overlap."""
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    # Get changed files
+    pr_files = vgit.diff_refs(path, ref_a, ref_b)
+
+    if len(pr_files) > 500:
+        typer.echo(_color(f"WARNING: {len(pr_files)} files changed. Blast radius is approximate for large PRs.", "yellow"))
+
+    if len(pr_files) < 3:
+        typer.echo(_color(f"WARNING: Only {len(pr_files)} files changed. Blast radius is approximate for small PRs.", "yellow"))
+
+    # Scan codebase at target ref
+    try:
+        analysis = scan_codebase(path, git_ref=ref_b, quiet=True)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    results = pr_blast_radius(pr_files, analysis.file_vocabs)
+
+    typer.echo(format_blast_radius(pr_files, results, ref_a, ref_b))
 
 
 @cli.command()
@@ -265,23 +359,79 @@ def timeline(
         typer.echo(f"  {wk['week']:<10} {wk['commits']:<8} {c(str(new), 'green'):>8} {c(str(retired), 'red'):>8} {wk['stable_concepts']:<8} {wk['total_concepts']:<8} {trend}")
 
 
+@cli.command()
+def orphans(
+    path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
+    min_risk: Annotated[str, typer.Option("--min-risk", "-r", help="Minimum risk level: RED, YELLOW, ORANGE")] = "YELLOW",
+):
+    """Find structural orphans — exports that exist in only one file."""
+    try:
+        analysis = scan_codebase(path)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not analysis.dead_exports:
+        typer.echo("No orphan exports found.")
+        return
+
+    risk_order = {"RED": 0, "YELLOW": 1, "ORANGE": 2, "GREEN": 3}
+    min_level = risk_order.get(min_risk.upper(), 1)
+
+    # Classify each export
+    c = lambda t, color: _color(t, color)
+
+    typer.echo(c(f"{'━' * 50}", "cyan"))
+    typer.echo(f"  STRUCTURAL ORPHANS — {len(analysis.dead_exports)} candidates")
+    typer.echo(c(f"{'━' * 50}", "cyan"))
+    typer.echo("")
+
+    for de in analysis.dead_exports[:20]:
+        # Simple risk heuristic by file pattern
+        if "_test." in de["file"] or "/tests/" in de["file"]:
+            risk = "GREEN"
+        elif "/internal/" in de["file"]:
+            risk = "ORANGE"
+        else:
+            risk = "RED"
+
+        if risk_order.get(risk, 99) > min_level:
+            continue
+
+        tags = {
+            "RED": c("RED", "red"),
+            "ORANGE": c("ORANGE", "yellow"),
+            "GREEN": c("GREEN", "green"),
+        }
+        typer.echo(f"  {c('✗', 'red')} {tags.get(risk, '')} {c(de['phrase'][:45], 'bold')}  {c(de['file'], 'gray')}")
+
+    if len(analysis.dead_exports) > 20:
+        typer.echo(c(f"  … +{len(analysis.dead_exports) - 20} more candidates", "gray"))
+    typer.echo("")
+
+
 def main():
     if len(sys.argv) == 1:
         typer.echo("vocab — grammar-free structural codebase analyzer")
         typer.echo("")
-        typer.echo("Usage:")
-        typer.echo("  vocab analyze [path]               analyze codebase structure")
-        typer.echo("  vocab diff <ref_a> <ref_b>         compare two git refs")
-        typer.echo("  vocab search <phrase> [repos]      search across repos")
+        typer.echo("Commands:")
+        typer.echo("  vocab analyze [path]               structural report")
+        typer.echo("  vocab diff <a> <b>                 concept delta")
+        typer.echo("  vocab blast <a> <b>                PR blast radius")
+        typer.echo("  vocab lifecycle [path]             concept lifecycles")
+        typer.echo("  vocab timeline [path]              weekly concept history")
+        typer.echo("  vocab search <phrase> [repos]      cross-repo search")
+        typer.echo("  vocab orphans [path]               structural orphans")
         typer.echo("  vocab fingerprint <file>           structural fingerprint")
-        typer.echo("  vocab clone [path]                 find structural clones")
-        typer.echo("  vocab landmarks [path]             find unique files")
-        typer.echo("  vocab timeline [path]              concept history")
+        typer.echo("  vocab clone [path]                 structural clones")
+        typer.echo("  vocab landmarks [path]             unique files")
         typer.echo("")
         typer.echo("Options:")
         typer.echo("  vocab analyze --clones             include clone detection (slower)")
         typer.echo("  vocab analyze --format json/html   output format")
-        typer.echo("  vocab analyze --ref <git-ref>      analyze a specific git ref")
+        typer.echo("  vocab analyze --ref <git-ref>      analyze specific ref")
+        typer.echo("  vocab lifecycle --signal DEAD      filter by lifecycle phase")
+        typer.echo("  vocab search --related             show co-occurring concepts")
         return
     cli()
 
