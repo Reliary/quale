@@ -17,12 +17,14 @@ except ImportError:
 from vocab.scanner import (scan_codebase, concept_timeline, search_cross_repo,
                            compute_lifecycles, pr_blast_radius, search_cross_repo_ranked,
                            compute_stability, compare_repos, phrase_provenance,
-                           explore_repo, repo_fingerprint)
+                           explore_repo, repo_fingerprint, compute_modules,
+                           bootstrap_repo, ci_report, inspect_repo)
 from vocab.formats.terminal import (format_terminal, format_json, format_html, format_quick,
-                                    format_lifecycles, format_blast_radius,
-                                    format_lifecycles_json, format_blast_json,
-                                    format_orphans_json, format_pr_report_markdown,
-                                    format_search_json, format_search_compact)
+                                     format_lifecycles, format_blast_radius,
+                                     format_lifecycles_json, format_blast_json,
+                                     format_orphans_json, format_pr_report_markdown,
+                                     format_search_json, format_search_compact,
+                                     format_modules, format_modules_json)
 from vocab.index import encode_indices, decode_indices, index_sequence_hash, structural_similarity
 from vocab.vocabulary import build_vocabulary
 from vocab.segmenter import segment
@@ -46,6 +48,41 @@ def _color(text: str, color: str) -> str:
         "reset": "\033[0m",
     }
     return f"{codes.get(color, '')}{text}{codes['reset']}"
+
+
+def _gate_evaluation(data: dict, fail_mirror_gap: float | None,
+                     fail_blast_tier: str | None,
+                     fail_stable_touched: bool) -> tuple[list[tuple[int, str]], list[str]]:
+    failures = []
+    checks = []
+    if fail_mirror_gap is not None:
+        ratio = data.get("mirror_gap_ratio", 1.0)
+        checks.append(f"mirror gap {ratio:.0%} >= {fail_mirror_gap:.0%}")
+        if ratio < fail_mirror_gap:
+            failures.append((1, f"mirror gap {ratio:.0%} < {fail_mirror_gap:.0%}"))
+    if fail_blast_tier is not None:
+        tier_order = {"none": 0, "local": 1, "moderate": 2, "high": 3, "critical": 4}
+        threshold = tier_order.get(fail_blast_tier.lower())
+        if threshold is None:
+            raise ValueError("Invalid blast tier. Use: local, moderate, high, critical.")
+        current_tier = data.get("max_blast_tier", "none")
+        checks.append(f"blast tier {current_tier} < {fail_blast_tier.lower()}")
+        if tier_order.get(current_tier, 0) >= threshold:
+            failures.append((2, f"blast tier {current_tier} >= {fail_blast_tier.lower()}"))
+    if fail_stable_touched:
+        count = data.get("stable_touched_count", 0)
+        checks.append(f"stable anchors touched {count} == 0")
+        if count > 0:
+            failures.append((3, f"{count} stable anchors touched"))
+    return failures, checks
+
+
+def _relevance_label(score: float) -> tuple[str, str, str]:
+    if score >= 0.80:
+        return "HIGH", "green", "suggested files contain the task terms"
+    if score >= 0.50:
+        return "MIXED", "yellow", "some suggestions may be broad matches"
+    return "LOW", "red", "inspect manually or use a more specific task"
 
 
 @cli.command()
@@ -298,6 +335,7 @@ def landmarks(
 def timeline(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 12,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
 ):
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
@@ -309,6 +347,14 @@ def timeline(
         return
 
     c = lambda t, color: _color(t, color)
+
+    if format == "json":
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "weeks": weeks,
+            "timeline": data,
+        }, indent=2))
+        return
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c(f"  CONCEPT TIMELINE (last {weeks} weeks)", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -334,6 +380,7 @@ def stable(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 12,
     limit: Annotated[int, typer.Option("--limit", "-l", help="Max results")] = 20,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
 ):
     """Stability anchors: files with highest/lowest phrase persistence.
 
@@ -350,6 +397,16 @@ def stable(
         return
 
     c = lambda t, color: _color(t, color)
+
+    if format == "json":
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "stability_anchors": sorted([x for x in data if x["persistence"] >= 0.8], key=lambda x: -x["persistence"]),
+            "churn_hotspots": sorted([x for x in data if x["persistence"] <= 0.3 and x["total_phrases"] >= 5], key=lambda x: x["persistence"]),
+            "total_files": len(data),
+            "weeks": weeks,
+        }, indent=2))
+        return
 
     # Anchors (top persistence)
     anchors = sorted(data, key=lambda x: -x["persistence"])[:limit]
@@ -381,15 +438,20 @@ def stable(
 def explore(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
+    themes: Annotated[bool, typer.Option("--themes", "-t", help="Also detect latent structural themes (slower)")] = False,
 ):
     """Onboarding map: best files to read first.
 
     Ranks files by vocabulary coverage — files with highest coverage
     contain the most representative concepts. Start here.
+
+    With --themes, runs deeper analysis to discover conceptual groupings
+    across the codebase.
     """
     path = os.path.abspath(path)
-    data = explore_repo(path)
-    if not data:
+    data = explore_repo(path, themes=themes)
+    files = data.get("files", [])
+    if not files:
         typer.echo("No files found.")
         return
 
@@ -397,17 +459,419 @@ def explore(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, color: _color(t, color)
+    c = lambda t, col: _color(t, col)
     typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(f"  {c('EXPLORE —', 'header')} {_color(path, 'bold')}")
+    typer.echo(c("  EXPLORE", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("\n  FILES WITH BROADEST COVERAGE (read these first):", "subheader"))
-    typer.echo(f"  {'Score':<6} {'Lang':<10} {'Identifiers':<12} {'File'}")
-    typer.echo(f"  {'─' * 55}")
+    typer.echo("")
+    typer.echo(c("  READ FIRST:", "subheader"))
+    for f in files[:15]:
+        score_str = f'{f["unique_score"]:6.1f}'
+        typer.echo(f"    {c(f['language'], 'cyan'):<10} {c(score_str, 'green')}  {f['file']:<50}")
+    typer.echo("")
 
-    for item in data[:15]:
-        cov_str = f"{item['unique_score']:.1f}"
-        typer.echo(f"  {c(cov_str, 'cyan'):<6} {item['language']:<10} {c(str(item['identifiers']), 'yellow'):<12} {item['file']}")
+    for theme in data.get("themes", [])[:3]:
+        files_str = f"{theme['files']} files ({theme['variance_explained']:.0%})"
+        typer.echo(f"    {c(theme['label'][:35], 'cyan'):<35} {c(files_str, 'yellow')}")
+    if data.get("themes"):
+        typer.echo("")
+
+
+@cli.command(name="agent-bootstrap")
+def agent_bootstrap(
+    path: Annotated[str, typer.Argument(help="Repository path")] = ".",
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description to find related files")] = None,
+    verify_relevance: Annotated[bool, typer.Option("--verify-relevance", help="Verify surfaced files contain task keywords")] = False,
+    summary: Annotated[bool, typer.Option("--summary", help="Only show the decision-oriented startup summary")] = False,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """One-shot agent bootstrap: explore + modules + stability + related files.
+
+    Examples:
+      vocab agent-bootstrap . --task "fix upload" --summary
+      vocab agent-bootstrap . --task "fix upload" --verify-relevance --format json
+    """
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    try:
+        data = bootstrap_repo(path, task=task)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    if verify_relevance and "task_relevance_score" in data:
+        score = data["task_relevance_score"]
+        label, color, reason = _relevance_label(score)
+        typer.echo(_color(f"  Task relevance: {label} ({score:.0%}) - {reason}", color), err=True)
+
+    c = lambda t, col: _color(t, col)
+    relevance = data.get("task_relevance_score", 1.0)
+    relevance_label, relevance_color, relevance_reason = _relevance_label(relevance)
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  AGENT BOOTSTRAP", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+
+    reads = data.get("recommended_next_reads", [])
+    related = data.get("related_files_for_task", [])
+    modules = data.get("module_boundaries", [])
+    likely = data.get("task_plan", {}).get("likely_edit_files", [])
+    source_related = [item for item in related if item.get("role") != "test"]
+    test_related = [item for item in related if item.get("role") == "test"]
+    first_task_read = source_related[0]["file"] if source_related else (related[0]["file"] if task and related else None)
+    first_arch_read = reads[0]["file"] if reads else None
+    typer.echo(c("  START HERE:", "subheader"))
+    typer.echo(f"    Read: {c(first_task_read or first_arch_read or 'no files found', 'green')}")
+    if task:
+        typer.echo(f"    Task match: {c(relevance_label, relevance_color)} ({relevance:.0%}) - {c(relevance_reason, 'gray')}")
+        if likely:
+            typer.echo(f"    Likely edit: {c(likely[0], 'yellow')}")
+        if test_related:
+            typer.echo(f"    Verification hint: {c(test_related[0]['file'], 'cyan')}")
+        if first_arch_read and first_arch_read != first_task_read:
+            typer.echo(f"    Architecture context: {c(first_arch_read, 'cyan')}")
+    typer.echo(f"    Modules: {c(str(len(modules)), 'cyan')} structural groups detected")
+    typer.echo("")
+
+    if summary:
+        return
+
+    notes = data.get("agent_notes", [])
+    if notes:
+        for n in notes:
+            typer.echo(f"  {c('→', 'green')} {c(n, 'gray')}")
+    typer.echo("")
+
+    if reads:
+        read_label = "ARCHITECTURE READS:" if task else "READ FIRST:"
+        typer.echo(c(f"  {read_label}", "subheader"))
+        for r in reads:
+            score_str = f'{r["score"]:6.1f}'
+            typer.echo(f"    {c(r['language'], 'cyan'):<10} {c(score_str, 'green')}  {r['file']:<50}  {c(r['reason'], 'gray')}")
+        typer.echo("")
+
+    avoid = data.get("avoid_touching_without_context", [])
+    if avoid:
+        typer.echo(c("  AVOID TOUCHING WITHOUT CONTEXT:", "subheader"))
+        for a in avoid:
+            pct_str = f'{a["persistence"]:.0%}'
+            typer.echo(f"    {c(pct_str, 'red'):>6}  {a['file']:<50}  {c(a['reason'], 'gray')}")
+        typer.echo("")
+
+    if related:
+        typer.echo(c(f"  RELATED FILES (task: {task}):", "subheader"))
+        for r in related[:5]:
+            role = r.get("role", "source")
+            role_color = "yellow" if role == "source" else "cyan"
+            typer.echo(f"    {c(role, role_color):<10} {r['file']:<50}  {c(r['phrase'], 'gray')}")
+        typer.echo("")
+
+    task_plan = data.get("task_plan", {})
+    if task_plan:
+        likely = task_plan.get("likely_edit_files", [])
+        if likely:
+            typer.echo(c("  TASK PLAN:", "subheader"))
+            for f in likely[:5]:
+                typer.echo(f"    {c('edit?', 'yellow'):<8} {f}")
+            for step in task_plan.get("sequence", [])[:3]:
+                typer.echo(f"    {c('→', 'green')} {c(step, 'gray')}")
+            typer.echo("")
+
+    if modules:
+        typer.echo(c(f"  MODULE BOUNDARIES ({len(modules)} found):", "subheader"))
+        for m in modules[:5]:
+            files_preview = ", ".join(f.split("/")[-1] for f in m["files"][:3])
+            pr = m.get("persistence_range", [1, 2])
+            typer.echo(f"    {m['size']} files  thr {pr[0]}→{pr[1]}  {c(files_preview, 'gray')}")
+        if len(modules) > 5:
+            typer.echo(c(f"    … +{len(modules) - 5} more", "gray"))
+        typer.echo("")
+
+    themes = data.get("themes", [])
+    if themes:
+        typer.echo(c("  THEMES:", "subheader"))
+        for th in themes[:2]:
+            files_str = f"{th['files']} files ({th['variance_explained']:.0%})"
+            typer.echo(f"    {c(th['label'][:35], 'cyan'):<35} {c(files_str, 'yellow')}")
+        typer.echo("")
+
+
+@cli.command(name="ci-report")
+def ci_report_cmd(
+    ref_a: Annotated[str, typer.Argument(help="Base git ref (e.g. origin/main)")],
+    ref_b: Annotated[str, typer.Argument(help="Target git ref (e.g. HEAD)")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    fail_mirror_gap: Annotated[float | None, typer.Option("--fail-on-mirror-gap", help="Fail if mirror_gap_ratio < threshold")] = None,
+    fail_blast_tier: Annotated[str | None, typer.Option("--fail-on-blast-tier", help="Fail if max_blast_tier >= tier (local/moderate/high/critical)")] = None,
+    fail_stable_touched: Annotated[bool, typer.Option("--fail-on-stable-touched", help="Fail if any stable anchors touched")] = False,
+    summary: Annotated[bool, typer.Option("--summary", help="Only show pass/fail, reason, and core metrics")] = False,
+):
+    """CI-ready structural report: blast radius + stable file check + flags.
+
+    Analyzes the structural impact of a change set without blocking.
+    Designed for CI pipelines that want a summary, not a gate.
+
+    Examples:
+      vocab ci-report origin/main HEAD --summary
+      vocab ci-report origin/main HEAD --fail-on-mirror-gap 0.70
+      vocab ci-report origin/main HEAD --fail-on-blast-tier high
+      vocab ci-report origin/main HEAD --fail-on-stable-touched
+    """
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    try:
+        data = ci_report(ref_a, ref_b, path)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    try:
+        gate_failures, gate_checks = _gate_evaluation(
+            data, fail_mirror_gap, fail_blast_tier, fail_stable_touched
+        )
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        if gate_failures:
+            raise typer.Exit(gate_failures[0][0])
+        return
+
+    c = lambda t, col: _color(t, col)
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c(f"  CI REPORT: {data['base_ref']} → {data['head_ref']}", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo("")
+
+    configured_gates = bool(gate_checks)
+    if gate_failures:
+        typer.echo(f"  {c('FAIL', 'red')}: {gate_failures[0][1]}")
+    elif configured_gates:
+        typer.echo(f"  {c('PASS', 'green')}: configured gates passed")
+    else:
+        typer.echo(f"  {c('INFO', 'cyan')}: no gates configured")
+    typer.echo(
+        f"  {c('Metrics:', 'subheader')} mirror {data.get('mirror_gap_ratio', 0.0):.0%}, "
+        f"blast {data.get('max_blast_tier', 'none')}, "
+        f"stable touched {data.get('stable_touched_count', 0)}"
+    )
+    if gate_failures:
+        for _, failure in gate_failures[1:]:
+            typer.echo(f"  {c('also:', 'gray')} {failure}")
+    typer.echo("")
+
+    if summary:
+        if gate_failures:
+            raise typer.Exit(gate_failures[0][0])
+        return
+
+    changed = data.get("changed_files", [])
+    typer.echo(c(f"  Changed files: {len(changed)}", "subheader"))
+    for f in changed[:8]:
+        typer.echo(f"    {c('+', 'green')} {f}")
+    if len(changed) > 8:
+        typer.echo(c(f"    … +{len(changed) - 8} more", "gray"))
+    typer.echo("")
+
+    blast = data.get("blast_radius", [])
+    if blast:
+        typer.echo(c(f"  BLAST RADIUS ({len(blast)} impacted files):", "subheader"))
+        for item in blast[:10]:
+            conc_bar = _bar(min(item.get("shared_concepts", 0) * 5, 100), 8)
+            conc = ", ".join(item.get("concepts", [])[:3])
+            typer.echo(f"    {conc_bar} {item['file'][:50]}  {c(str(item.get('shared_concepts', 0)), 'yellow')} shared {c(conc, 'gray')}")
+        if len(blast) > 10:
+            typer.echo(c(f"    … +{len(blast) - 10} more", "gray"))
+        typer.echo("")
+
+    stable_touched = data.get("stable_files_touched", [])
+    if stable_touched:
+        typer.echo(c("  STABLE FILES TOUCHED:", "subheader"))
+        for s in stable_touched:
+            status_color = "yellow" if s["status"] == "churn_hotspot" else "red"
+            typer.echo(f"    {c(s['file'][:55], status_color)}  {c(s['status'], 'gray')}")
+        typer.echo("")
+
+    flags = data.get("risk_flags", [])
+    if flags:
+        typer.echo(c("  RISK FLAGS:", "subheader"))
+        for flag in flags:
+            typer.echo(f"    {c('⚠', 'yellow')} {flag}")
+        typer.echo("")
+
+    mirror = data.get("mirror_signals", {})
+    gaps = mirror.get("unmirrored_source_concepts", [])
+    if gaps:
+        typer.echo(c("  SOURCE/TEST MIRROR GAPS:", "subheader"))
+        typer.echo(c(f"    {mirror.get('mirrored_source_concepts', 0)}/{mirror.get('source_concepts_changed', 0)} changed source concepts mirrored in tests", "gray"))
+        typer.echo(f"    {', '.join(gaps[:12])}")
+        typer.echo(c(f"    {mirror.get('note', '')}", "gray"))
+        typer.echo("")
+
+    typer.echo(c("  GATE METRICS:", "subheader"))
+    typer.echo(f"    Mirror gap: {c(f'{data.get('mirror_gap_ratio', 0.0):.0%}', 'cyan')}")
+    typer.echo(f"    Max blast tier: {c(data.get('max_blast_tier', 'none'), 'yellow')}")
+    typer.echo(f"    Stable anchors touched: {c(str(data.get('stable_touched_count', 0)), 'cyan')}")
+    for check in gate_checks:
+        typer.echo(f"    {c('check', 'gray')} {check}")
+    for _, failure in gate_failures:
+        typer.echo(f"    {c('FAIL', 'red')} {failure}")
+    if (fail_mirror_gap is not None or fail_blast_tier is not None or fail_stable_touched) and not gate_failures:
+        typer.echo(f"    {c('PASS', 'green')} configured gates passed")
+    typer.echo("")
+
+    typer.echo(c(f"  Summary: {data.get('summary', '')}", "gray"))
+    typer.echo("")
+
+    if gate_failures:
+        raise typer.Exit(gate_failures[0][0])
+
+
+@cli.command()
+def inspect(
+    path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Comprehensive codebase overview: explore + modules + timeline.
+
+    Single command that tells you what matters about a codebase:
+    top files, module boundaries, structural themes, stability, and churn.
+    """
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    try:
+        data = inspect_repo(path)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    explore_data = data.get("explore", {})
+    modules_data = data.get("modules", {})
+    timeline_data = data.get("timeline", [])
+    avg_age = data.get("avg_concept_age_weeks", 0)
+    files = explore_data.get("files", [])
+    themes = explore_data.get("themes", [])
+    total_code = explore_data.get("total_code_files", 0)
+    module_count = len(modules_data.get("modules", []))
+    grouped = modules_data.get("grouped_files", 0)
+    latest = timeline_data[-1] if timeline_data else {}
+    latest_commits = latest.get("commits", 0)
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  {c('INSPECT —', 'header')} {c(path, 'bold')} ({total_code} files)")
+    if avg_age:
+        typer.echo(c(f"  Avg concept age: {avg_age} weeks", "gray"))
+
+    if module_count:
+        ungrouped = total_code - grouped
+        typer.echo(c(f"  {module_count} module boundaries ({grouped}/{ungrouped} files grouped/ungrouped)", "gray"))
+    if timeline_data:
+        typer.echo(c(f"  Latest week: {latest_commits} commits, {latest.get('new_concepts', 0)} new concepts", "gray"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo("")
+
+    if files:
+        typer.echo(c("  TOP FILES (read first):", "subheader"))
+        for f in files[:10]:
+            prefix = c("→", "green") if f["unique_score"] > 30 else c("·", "gray")
+            score_str = f'{f["unique_score"]:6.1f}'
+            lang = f['language']
+            typer.echo(f"    {prefix} {c(score_str, 'cyan')}  {c(lang, 'gray'):<8} {f['file']}")
+
+        if themes:
+            typer.echo("")
+            typer.echo(c("  THEMES:", "subheader"))
+            for th in themes[:3]:
+                bar = _bar(th["variance_explained"] * 100, 12)
+                pct = f'{th["variance_explained"]:.0%}'
+                typer.echo(f"    {bar} {c(th['label'][:35], 'cyan'):<35} {c(th['files'], 'yellow'):>4} files ({pct})")
+        typer.echo("")
+
+    binding = data.get("binding_concepts", [])
+    if binding:
+        typer.echo(c("  BINDING CONCEPTS:", "subheader"))
+        for bc in binding[:8]:
+            langs = ",".join(bc.get("languages", []))
+            typer.echo(f"    {c(bc['concept'], 'cyan'):<35} {c(str(bc['file_count']), 'yellow'):>3} files  {c(langs, 'gray')}")
+        typer.echo("")
+
+    if module_count > 0:
+        typer.echo(c(f"  MODULE BOUNDARIES ({module_count} found):", "subheader"))
+        for m in modules_data.get("modules", [])[:5]:
+            pr = m.get("persistence_range", [1, 3])
+            bar = _bar((pr[1] - pr[0] + 1) * 10, 10)
+            files_preview = ", ".join(f.split("/")[-1] for f in m["files"][:3])
+            typer.echo(f"    {bar} {m['size']} files  thr {pr[0]}→{pr[1]}  {c(files_preview, 'gray')}")
+        if module_count > 5:
+            typer.echo(c(f"    … +{module_count - 5} more modules", "gray"))
+        typer.echo("")
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+
+
+@cli.command()
+def modules(
+    path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
+):
+    """Detect parser-free module boundaries from rare identifier overlap."""
+    data = compute_modules(os.path.abspath(path))
+    if format == "json":
+        typer.echo(format_modules_json(data))
+    else:
+        typer.echo(format_modules(data))
+
+
+@cli.command(name="help-agent")
+def help_agent(task: Annotated[str, typer.Argument(help="Engineering task description")]):
+    """Recommend useful vocab commands for an agent task."""
+    task_lower = task.lower()
+    commands = [
+        ("vocab agent-bootstrap . --task \"<task>\" --format json", "Start with task-aware orientation.", True),
+        ("vocab inspect . --format json", "Read repo structure and stable anchors.", False),
+    ]
+    if any(word in task_lower for word in ("pr", "review", "change", "refactor", "edit")):
+        commands.append(("vocab ci-report origin/main HEAD --format json", "Check structural impact before PR.", False))
+    if any(word in task_lower for word in ("api", "client", "server", "contract", "integration")):
+        commands.append(("vocab compare ../repo-a ../repo-b --format json", "Compare paired repo vocabulary.", True))
+    if any(word in task_lower for word in ("history", "why", "when", "provenance")):
+        commands.append(("vocab provenance <phrase> --format json", "Trace when a concept appeared or disappeared.", True))
+
+    typer.echo(json.dumps({
+        "schema_version": 1,
+        "task": task,
+        "commands": [
+            {"cmd": cmd, "why": why, "requires_user_value": requires_value}
+            for cmd, why, requires_value in commands
+        ],
+    }, indent=2))
 
 
 @cli.command()
@@ -416,53 +880,27 @@ def compare(
     repo_b: Annotated[str, typer.Argument(help="Second repo path")],
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
 ):
-    """Cross-repo vocabulary alignment. Finds drift between repos.
-
-    Measures how much vocabulary two repos share. High drift suggests
-    integration gaps — types/APIs in A that don't appear in B.
-    """
+    """Cross-repo vocabulary alignment and drift asymmetry."""
     repo_a = os.path.abspath(repo_a)
     repo_b = os.path.abspath(repo_b)
-
     if not vgit.is_repo(repo_a) or not vgit.is_repo(repo_b):
         typer.echo("Both paths must be git repositories.", err=True)
         raise typer.Exit(1)
 
     result = compare_repos(repo_a, repo_b)
-
     if format == "json":
         typer.echo(json.dumps(result, indent=2))
         return
 
     c = lambda t, color: _color(t, color)
     typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(f"  {c('VOCABULARY ALIGNMENT', 'header')}: {result['repo_a']} ↔ {result['repo_b']}")
+    typer.echo(f"  {c('VOCABULARY ALIGNMENT', 'header')}: {result['repo_a']} <-> {result['repo_b']}")
     typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo("")
-    typer.echo(f"  {c(result['repo_a'], 'bold'):<30} {result['a_total_phrases']:>5} concepts")
-    typer.echo(f"  {c(result['repo_b'], 'bold'):<30} {result['b_total_phrases']:>5} concepts")
-
-    align = result["alignment"]
-    align_color = "green" if align >= 0.5 else "yellow" if align >= 0.2 else "red"
-    typer.echo(f"  {'':>30} {c(f'{align:.0%} aligned', align_color)}")
-
-    typer.echo(f"  {'':>30} {result['shared_phrases']:>5} shared")
-    typer.echo(f"  {'':>30} {result['only_in_a']:>5} only in {result['repo_a']}")
-    typer.echo(f"  {'':>30} {result['only_in_b']:>5} only in {result['repo_b']}")
-
-    if result["drift_candidates"]:
-        typer.echo("")
-        typer.echo(c(f"  DRIFT from {result['repo_b']} (concepts in {result['repo_a']} not found in {result['repo_b']}):", "subheader"))
-        for phrase in result["drift_candidates"][:15]:
-            typer.echo(f"  {c('-', 'red')} {phrase}")
-
-    if result["drift_candidates"]:
-        typer.echo("")
-        typer.echo(c(f"  Languages:", "subheader"))
-        for lang, count in sorted(result["a_languages"].items(), key=lambda x: -x[1])[:3]:
-            typer.echo(f"    {result['repo_a']}: {lang} {count} files")
-        for lang, count in sorted(result["b_languages"].items(), key=lambda x: -x[1])[:3]:
-            typer.echo(f"    {result['repo_b']}: {lang} {count} files")
+    typer.echo(f"  {result['repo_a']}: {result['a_total_phrases']} concepts")
+    typer.echo(f"  {result['repo_b']}: {result['b_total_phrases']} concepts")
+    typer.echo(f"  Shared: {result['shared_phrases']} ({result['alignment']:.0%} aligned)")
+    for phrase in result.get("drift_candidates", [])[:15]:
+        typer.echo(f"  - {phrase}")
 
 
 @cli.command()
@@ -470,105 +908,39 @@ def provenance(
     phrase: Annotated[str, typer.Argument(help="Phrase to trace")],
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 24,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
 ):
-    """Trace a phrase's presence through git history.
-
-    Shows when each identified concept entered, persisted, or left the codebase.
-    Useful for understanding how a specific type/API evolved.
-    """
+    """Trace a phrase's presence through git history."""
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
-
     data = phrase_provenance(path, phrase, weeks=weeks)
-    if not data:
-        typer.echo("No history data available.")
+    if format == "json":
+        typer.echo(json.dumps({"schema_version": 1, "phrase": phrase, "weeks": weeks, "history": data}, indent=2))
         return
-
-    c = lambda t, color: _color(t, color)
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(f"  {c('PROVENANCE', 'header')}: '{phrase}'")
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo("")
-
-    # Segment into present / absent blocks
-    typer.echo(f"  {'Week':<12} {'Status':<8} {'Files':<6} {'Details'}")
-    typer.echo(f"  {'─' * 55}")
-
-    for wk in data:
-        if wk["present"]:
-            status = c("PRESENT", "green")
-            files_str = ", ".join(wk["files"][:3])
-            typer.echo(f"  {wk['week']:<12} {status:<8} {c(str(wk['file_count']), 'cyan'):<6} {files_str}")
-        else:
-            status = c("ABSENT", "red")
-            typer.echo(f"  {wk['week']:<12} {status:<8} {c('0', 'gray'):<6}")
-
-    present_weeks = sum(1 for wk in data if wk["present"])
-    total_weeks = len(data)
-    typer.echo(c(f"\n  Present in {present_weeks}/{total_weeks} weeks ({present_weeks/max(total_weeks, 1)*100:.0f}%)", "gray"))
+    for item in data:
+        status = "present" if item["present"] else "absent"
+        typer.echo(f"{item['week']} {status} {item.get('file_count', 0)} files")
 
 
 @cli.command(name="fingerprint")
-def fingerprint_cmd(
-    target: Annotated[str, typer.Argument(help="File or repo path")],
-):
-    """Structural fingerprint of a file or entire repo.
-
-    For a file: produces the deterministic index-sequence hash.
-    For a repo directory: produces the canonical structural manifest hash.
-    Two structurally identical repos produce the same hash.
-
-    Usage:
-      vocab fingerprint main.go
-      vocab fingerprint /path/to/repo   # <-- directory = whole repo
-    """
+def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo path")]):
+    """Structural fingerprint of a file or entire repo."""
     target = os.path.abspath(target)
     if os.path.isdir(target):
-        # Repo-level fingerprint
-        result = repo_fingerprint(target)
-        c = lambda t, color: _color(t, color)
-        typer.echo(c(f"{'━' * 50}", "cyan"))
-        typer.echo(f"  {c('REPO FINGERPRINT', 'header')}")
-        typer.echo(c(f"{'━' * 50}", "cyan"))
-        typer.echo(f"  Hash:     {c(result['fingerprint'], 'bold')}")
-        typer.echo(f"  Files:    {result['files']}")
-        typer.echo(f"  Phrases:  {result['total_phrases']}")
-        typer.echo(f"  Indices:  {result['total_indices']}")
-        typer.echo(f"  Langs:    {result['languages']}")
-    else:
-        # File-level fingerprint (existing behavior)
-        if not os.path.isfile(target):
-            typer.echo("Not a file or directory.", err=True)
-            raise typer.Exit(1)
-        try:
-            with open(target, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-        except Exception as e:
-            typer.echo(f"Error reading file: {e}", err=True)
-            raise typer.Exit(1)
-
-        seg_result = segment(content)
-        if not seg_result.phrases:
-            typer.echo("No phrases found.")
-            return
-
-        vocab = build_vocabulary(seg_result.phrases, seg_result.strategy, seg_result.delimiter)
-        from collections import Counter
-        indices = [vocab.lookup(i) for i in range(1, vocab.size + 1)]
-
-        index_list = []
-        phrase_to_idx = {e.text: e.index for e in vocab.entries}
-        for p in seg_result.phrases:
-            idx = phrase_to_idx.get(p, 0)
-            if idx:
-                index_list.append(idx)
-
-        h = index_sequence_hash(index_list)
-        typer.echo(f"Fingerprint: v0-{h}")
-        typer.echo(f"Strategy:    {seg_result.strategy}")
-        typer.echo(f"Phrases:     {vocab.size} unique / {len(seg_result.phrases)} total")
-        typer.echo(f"Indices:     {len(index_list)}")
+        typer.echo(json.dumps(repo_fingerprint(target), indent=2))
+        return
+    if not os.path.isfile(target):
+        typer.echo("Not a file or directory.", err=True)
+        raise typer.Exit(1)
+    with open(target, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    seg_result = segment(content)
+    vocab = build_vocabulary(seg_result.phrases, seg_result.strategy, seg_result.delimiter)
+    phrase_to_idx = {e.text: e.index for e in vocab.entries}
+    index_list = [phrase_to_idx[p] for p in seg_result.phrases if p in phrase_to_idx]
+    typer.echo(f"Fingerprint: v0-{index_sequence_hash(index_list)}")
+    typer.echo(f"Phrases: {vocab.size} unique / {len(seg_result.phrases)} total")
 
 
 @cli.command()
@@ -576,40 +948,19 @@ def orphans(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
 ):
-    """Heuristic: find exported identifiers appearing in exactly 1 file.
-
-    This is a best-effort signal, not authoritative dead code detection.
-    Review before acting.
-    """
-    try:
-        analysis = scan_codebase(path)
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-
-    if not analysis.dead_exports:
-        typer.echo("No single-file exports found.")
-        return
-
+    """Heuristic single-file exported identifier scan."""
+    analysis = scan_codebase(path)
     if format == "json":
         typer.echo(format_orphans_json(analysis))
         return
-
-    c = lambda t, color: _color(t, color)
-    typer.echo(c(f"{'━' * 50}", "cyan"))
-    typer.echo(f"  SINGLE-FILE EXPORTS — heuristic scan")
-    typer.echo(c(f"{'━' * 50}", "cyan"))
-
-    for de in analysis.dead_exports[:30]:
-        typer.echo(f"  {c('?', 'red')} {c(de['phrase'][:45], 'bold')}  {c(de['file'], 'gray')}")
-
-    if len(analysis.dead_exports) > 30:
-        typer.echo(c(f"  … +{len(analysis.dead_exports) - 30} more candidates", "gray"))
-
-    typer.echo(c(f"\n  Note: heuristic — review before treating as dead code.", "gray"))
+    if not analysis.dead_exports:
+        typer.echo("No single-file exports found.")
+        return
+    for item in analysis.dead_exports[:30]:
+        typer.echo(f"? {item['phrase']} {item['file']}")
 
 
-@cli.command()
+@cli.command(name="pr-report")
 def pr_report(
     ref_a: Annotated[str, typer.Argument(help="Base git ref")],
     ref_b: Annotated[str, typer.Argument(help="Target git ref")],
@@ -619,25 +970,13 @@ def pr_report(
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
-
     pr_files = vgit.diff_refs(path, ref_a, ref_b)
     if not pr_files:
         typer.echo("No changed files.")
         return
-
-    # Blast radius
     analysis = scan_codebase(path, git_ref=ref_b, quiet=True)
     blast_results = pr_blast_radius(pr_files, analysis.file_vocabs)
-
-    # New orphans (heuristic)
-    analysis_a = scan_codebase(path, git_ref=ref_a, quiet=True)
-    a_dead = {d["phrase"] for d in analysis_a.dead_exports}
-    b_dead = {d["phrase"] for d in analysis.dead_exports}
-    new_orphans_set = b_dead - a_dead
-    orphan_details = [d for d in analysis.dead_exports if d["phrase"] in new_orphans_set]
-
-    md = format_pr_report_markdown(pr_files, blast_results, orphan_details, ref_a, ref_b)
-    typer.echo(md)
+    typer.echo(format_pr_report_markdown(pr_files, blast_results, [], ref_a, ref_b))
 
 
 @cli.command()
@@ -675,27 +1014,30 @@ def main():
     if len(sys.argv) == 1:
         typer.echo("vocab — grammar-free structural codebase analyzer")
         typer.echo("")
-        typer.echo("Commands:")
-        typer.echo("  vocab analyze [path]               structural report")
-        typer.echo("  vocab diff <a> <b>                 concept delta")
-        typer.echo("  vocab blast <a> <b>                PR blast radius")
-        typer.echo("  vocab lifecycle [path]             concept lifecycles")
-        typer.echo("  vocab timeline [path]              weekly concept history")
-        typer.echo("  vocab search <phrase> [repos]      cross-repo search")
-        typer.echo("  vocab compare <a> <b>              cross-repo alignment")
-        typer.echo("  vocab stable [path]                stability anchors")
-        typer.echo("  vocab explore [path]               onboarding map")
-        typer.echo("  vocab provenance <phrase>          phrase git history")
-        typer.echo("  vocab fingerprint <file|dir>       structural fingerprint")
-        typer.echo("  vocab orphans [path]               structural orphans")
-        typer.echo("  vocab clone [path]                 structural clones")
-        typer.echo("  vocab landmarks [path]             unique files")
-        typer.echo("  vocab pr-report <a> <b>            PR structural report (markdown)")
-        typer.echo("  vocab init                         generate .vocab.yml")
+        typer.echo("Start here:")
+        typer.echo("  vocab agent-bootstrap . --task \"fix upload\" --summary")
+        typer.echo("  vocab inspect .")
+        typer.echo("  vocab help-agent \"change API client\"")
         typer.echo("")
-        typer.echo("CI examples:")
+        typer.echo("CI / PR:")
+        typer.echo("  vocab ci-report origin/main HEAD --summary")
+        typer.echo("  vocab ci-report origin/main HEAD --fail-on-blast-tier high")
         typer.echo("  vocab blast origin/main HEAD")
-        typer.echo("  vocab pr-report origin/main HEAD  # markdown output")
+        typer.echo("  vocab pr-report origin/main HEAD")
+        typer.echo("")
+        typer.echo("History / structure:")
+        typer.echo("  vocab stable .")
+        typer.echo("  vocab timeline . --format json")
+        typer.echo("  vocab provenance SpoolManager . --format json")
+        typer.echo("  vocab modules .")
+        typer.echo("  vocab fingerprint .")
+        typer.echo("")
+        typer.echo("Cross-repo / search:")
+        typer.echo("  vocab search SpoolManager ../repo-a ../repo-b")
+        typer.echo("  vocab compare ../repo-a ../repo-b --format json")
+        typer.echo("")
+        typer.echo("Other commands: analyze, diff, lifecycle, explore, clone, landmarks, orphans, init")
+        typer.echo("Tip: most agent-facing commands support --format json.")
         return
     cli()
 

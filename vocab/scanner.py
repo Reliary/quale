@@ -1496,8 +1496,13 @@ def _rank_related_files(path: str, keywords: list[str]) -> list[dict]:
                 matched.append(kw)
         if not score:
             continue
-        if _is_test_path(fv.path):
+        role = _task_file_role(fv.path)
+        if role == "test":
             score += 1
+        elif role == "script":
+            score -= 1
+        elif role == "example":
+            score -= 2
         if _is_generated(fv.path):
             score -= 5
         if score <= 0:
@@ -1506,8 +1511,27 @@ def _rank_related_files(path: str, keywords: list[str]) -> list[dict]:
             "file": fv.path,
             "phrase": ",".join(dict.fromkeys(matched)),
             "matches": score,
+            "role": role,
         }
-    return sorted(scores.values(), key=lambda x: (-x["matches"], x["file"]))[:15]
+    ranked = sorted(scores.values(), key=lambda x: (_task_role_rank(x["role"]), -x["matches"], x["file"]))
+    source_matches = [item for item in ranked if item["role"] != "test"][:10]
+    test_matches = [item for item in ranked if item["role"] == "test"][:5]
+    return source_matches + test_matches
+
+
+def _task_file_role(path: str) -> str:
+    parts = [p.lower() for p in path.split("/")]
+    if _is_test_path(path):
+        return "test"
+    if "examples" in parts or "example" in parts:
+        return "example"
+    if "scripts" in parts or "script" in parts:
+        return "script"
+    return "source"
+
+
+def _task_role_rank(role: str) -> int:
+    return {"source": 0, "script": 1, "example": 2, "test": 3}.get(role, 4)
 
 
 def _task_plan(task: str | None, related: list[dict], reads: list[dict],
@@ -1517,7 +1541,8 @@ def _task_plan(task: str | None, related: list[dict], reads: list[dict],
         return {}
     likely_edit = []
     seen: set[str] = set()
-    for item in related:
+    ordered_related = sorted(related, key=lambda x: (_task_role_rank(x.get("role", "source")), -x.get("matches", 0), x["file"]))
+    for item in ordered_related:
         path = item["file"]
         if path not in seen:
             seen.add(path)
@@ -1554,10 +1579,11 @@ def _task_plan(task: str | None, related: list[dict], reads: list[dict],
         "stable_anchors_to_read_first": anchors[:5],
         "module_context": module_context[:3],
         "sequence": [
-            "Read recommended_next_reads before editing.",
+            "Read source related_files_for_task before editing.",
+            "Use recommended_next_reads for architecture context.",
             "Inspect likely_edit_files and their module_context.",
             "Avoid changing stable_anchors_to_read_first unless the task explicitly requires it.",
-            "Use related tests as mirror hints, not coverage proof.",
+            "Use related test files as verification hints, not primary edit targets.",
         ],
     }
 
@@ -1608,6 +1634,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
 
     # related_files_for_task
     related = []
+    keywords = []
     if task:
         task_lower = task.lower()
         keywords = [w for w in task_lower.split() if len(w) > 3 and w not in
@@ -1624,6 +1651,24 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
             except Exception:
                 related = []
 
+    verified_files = []
+    unverified_files = []
+    task_relevance_score = 1.0
+    if related and keywords:
+        for item in related:
+            filepath = item["file"]
+            try:
+                with open(os.path.join(path, filepath), "r", errors="replace") as f:
+                    content = f.read().lower()
+            except Exception:
+                unverified_files.append(filepath)
+                continue
+            if any(keyword in content for keyword in keywords[:5]):
+                verified_files.append(filepath)
+            else:
+                unverified_files.append(filepath)
+        task_relevance_score = len(verified_files) / max(len(related), 1)
+
     notes = _compute_agent_notes(path, explore_data, modules_data, stability_data)
     themes_out = explore_data.get("themes", [])
     task_plan = _task_plan(task, related, reads, modules_data, stability_data)
@@ -1634,6 +1679,9 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
         "task_plan": task_plan,
         "avoid_touching_without_context": avoid,
         "related_files_for_task": related[:15] if related else [],
+        "task_relevance_score": round(task_relevance_score, 3),
+        "verified_files": verified_files,
+        "unverified_files": unverified_files,
         "module_boundaries": modules_data.get("modules", []),
         "themes": themes_out,
         "agent_notes": notes,
@@ -1655,6 +1703,11 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
             "head_ref": head_ref,
             "changed_files": [],
             "blast_radius": [],
+            "mirror_signals": {},
+            "mirror_gap_ratio": 1.0,
+            "max_blast_tier": "none",
+            "stable_touched_count": 0,
+            "blast_tier_counts": {"local": 0, "moderate": 0, "high": 0, "critical": 0},
             "stable_files_touched": [],
             "risk_flags": [],
             "summary": "No changed files.",
@@ -1709,6 +1762,28 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
     if mirror.get("unmirrored_source_concepts"):
         risk_flags.append(f"Mirror gap: {len(mirror['unmirrored_source_concepts'])} changed source concepts not seen in tests")
 
+    blast_tier_counts = {"local": 0, "moderate": 0, "high": 0, "critical": 0}
+    max_blast_tier = "none"
+    tier_order = {"none": 0, "local": 1, "moderate": 2, "high": 3, "critical": 4}
+    for item in blast_results:
+        count = item.get("shared_concepts", 0)
+        if count <= 10:
+            tier = "local"
+        elif count <= 20:
+            tier = "moderate"
+        elif count <= 50:
+            tier = "high"
+        else:
+            tier = "critical"
+        blast_tier_counts[tier] += 1
+        current_rank = tier_order.get(tier, 0)
+        max_rank = tier_order.get(max_blast_tier, 0)
+        if current_rank > max_rank:
+            max_blast_tier = tier
+
+    mirror_gap_ratio = mirror.get("mirror_ratio", 0.0) if mirror else 0.0
+    stable_touched_count = len([s for s in stable_touched if s["status"] == "stable_anchor"])
+
     return {
         "schema_version": 1,
         "base_ref": base_ref,
@@ -1716,6 +1791,10 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
         "changed_files": changed,
         "blast_radius": blast_results[:30],
         "mirror_signals": mirror,
+        "mirror_gap_ratio": mirror_gap_ratio,
+        "max_blast_tier": max_blast_tier,
+        "stable_touched_count": stable_touched_count,
+        "blast_tier_counts": blast_tier_counts,
         "stable_files_touched": stable_touched,
         "risk_flags": risk_flags,
         "summary": (

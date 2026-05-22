@@ -356,6 +356,64 @@ def format_search_compact(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def format_modules(modules_data: dict) -> str:
+    """Terminal output for TDA module detection."""
+    lines = []
+    h = lambda t: _color(t, "header")
+    sh = lambda t: _color(t, "subheader")
+    gr = lambda t: _color(t, "green")
+    r = lambda t: _color(t, "red")
+    y = lambda t: _color(t, "yellow")
+    gy = lambda t: _color(t, "gray")
+
+    modules = modules_data.get("modules", [])
+    total = modules_data.get("total_files", 0)
+    grouped = modules_data.get("grouped_files", 0)
+    ungrouped = total - grouped
+
+    lines.append(h(f"{'━' * 60}"))
+    lines.append(f"  {h('MODULES')} — {len(modules)} found ({grouped}/{total} files grouped)")
+    lines.append(h(f"{'━' * 60}"))
+    lines.append("")
+
+    if not modules:
+        lines.append(gy("  No persistent modules found. Try a larger or more cohesive codebase."))
+        lines.append("")
+        lines.append(h(f"{'━' * 60}"))
+        return "\n".join(lines)
+
+    for i, m in enumerate(modules, 1):
+        pr = m.get("persistence_range", [1, 3])
+        bar = _bar((pr[1] - pr[0] + 1) * 10, 10)
+        lines.append(f"  {gr(f'Module {i}:')} {m['size']} files  {bar}  thr {pr[0]}→{pr[1]}")
+        for f in m["files"][:6]:
+            lines.append(f"    {gy(f)}")
+        if len(m["files"]) > 6:
+            lines.append(gy(f"    … +{len(m['files']) - 6} more"))
+        if m.get("exemplar_phrases"):
+            ep = ", ".join(p[:30] for p in m["exemplar_phrases"][:5])
+            lines.append(f"    {y('phrases:')} {gy(ep)}")
+        lines.append("")
+
+    lines.append(gy(f"  {ungrouped} files ungrouped (no persistent module boundary detected)"))
+    lines.append("")
+    lines.append(h(f"{'━' * 60}"))
+    return "\n".join(lines)
+
+
+def format_modules_json(modules_data: dict) -> str:
+    import json
+    return json.dumps({
+        "schema_version": modules_data.get("schema_version", 1),
+        "modules": modules_data.get("modules", []),
+        "summary": {
+            "module_count": len(modules_data.get("modules", [])),
+            "total_files": modules_data.get("total_files", 0),
+            "grouped_files": modules_data.get("grouped_files", 0),
+        },
+    }, indent=2)
+
+
 def format_pr_report_markdown(pr_files: list[str], blast_results: dict | None,
                                orphan_results: list[dict] | None,
                                ref_a: str, ref_b: str) -> str:
