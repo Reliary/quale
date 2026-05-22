@@ -14,11 +14,12 @@ except ImportError:
     print("vocab needs `typer` and `typing-extensions`. Install: pip install typer typing-extensions")
     sys.exit(1)
 
-from vocab.scanner import (scan_codebase, concept_timeline, search_cross_repo,
-                           compute_lifecycles, pr_blast_radius, search_cross_repo_ranked,
-                           compute_stability, compare_repos, phrase_provenance,
-                           explore_repo, repo_fingerprint, compute_modules,
-                           bootstrap_repo, ci_report, inspect_repo)
+from vocab.scanner import (scan_codebase, search_cross_repo,
+                           search_cross_repo_ranked)
+from vocab.bootstrap import (bootstrap_repo, explore_repo, compute_modules)
+from vocab.reports import (ci_report, inspect_repo, repo_fingerprint,
+                           compute_stability, compute_lifecycles, concept_timeline)
+from vocab.compare import (compare_repos, phrase_provenance, pr_blast_radius)
 from vocab.formats.terminal import (format_terminal, format_json, format_html, format_quick,
                                      format_lifecycles, format_blast_radius,
                                      format_lifecycles_json, format_blast_json,
