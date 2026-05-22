@@ -126,6 +126,13 @@ class VocabCliTests(unittest.TestCase):
             self.assertEqual(blast_fail.returncode, 2)
             self.assertIn("FAIL", blast_fail.stdout)
 
+            invalid_ref = self.run_vocab(
+                "ci-report", "NO_SUCH_REF", "HEAD", "--path", str(repo), "--format", "json",
+                check=False,
+            )
+            self.assertEqual(invalid_ref.returncode, 1)
+            self.assertIn("Unknown git ref", invalid_ref.stderr)
+
     def test_restored_commands_have_basic_behavior(self) -> None:
         with self.make_repo() as tmp:
             repo = Path(tmp)
@@ -135,6 +142,114 @@ class VocabCliTests(unittest.TestCase):
             self.assertIn("Fingerprint:", self.run_vocab("fingerprint", str(repo / "src/upload.ts")).stdout)
             self.assertIn("commands", self.run_vocab("help-agent", "fix upload handler").stdout)
             self.assertEqual(self.run_vocab("pr-report", "HEAD~1", "HEAD", "--path", str(repo)).returncode, 0)
+
+    def test_working_tree_scan_does_not_follow_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self.git(repo, "init", "-q")
+            outside = Path(tmp) / "outside.ts"
+            outside.write_text("export const OutsideSecretNeedle = true\n", encoding="utf-8")
+            (repo / "link.ts").symlink_to(outside)
+            self.write(repo, "src/normal.ts", "export const NormalThing = true\n")
+            self.commit(repo, "symlink")
+
+            result = self.run_vocab(
+                "agent-bootstrap", str(repo), "--task", "OutsideSecretNeedle", "--format", "json"
+            )
+            data = json.loads(result.stdout)
+            self.assertEqual(data["related_files_for_task"], [])
+
+    def test_ref_scan_does_not_read_symlink_blobs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self.git(repo, "init", "-q")
+            outside = Path(tmp) / "outside.ts"
+            outside.write_text("export const HistoricalOutsideNeedle = true\n", encoding="utf-8")
+            (repo / "link.ts").symlink_to(outside)
+            self.write(repo, "src/normal.ts", "export const NormalThing = true\n")
+            self.commit(repo, "historical symlink")
+
+            result = self.run_vocab("analyze", str(repo), "--ref", "HEAD", "--format", "json")
+            self.assertNotIn("HistoricalOutsideNeedle", result.stdout)
+            self.assertNotIn(str(outside), result.stdout)
+
+    def test_working_tree_scan_includes_untracked_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self.git(repo, "init", "-q")
+            self.write(repo, "src/a.ts", "export const CleanNeedle = true\n")
+            self.commit(repo, "initial")
+            self.write(repo, "src/dirty.ts", "export const DirtyNeedle = true\n")
+
+            result = self.run_vocab(
+                "agent-bootstrap", str(repo), "--task", "DirtyNeedle", "--format", "json"
+            )
+            data = json.loads(result.stdout)
+            self.assertEqual(data["related_files_for_task"][0]["file"], "src/dirty.ts")
+
+    def test_newline_filenames_survive_git_listing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self.git(repo, "init", "-q")
+            self.write(repo, "src/upload\nnewline.ts", "export const NewlineNeedle = true\n")
+            self.commit(repo, "newline filename")
+
+            result = self.run_vocab(
+                "agent-bootstrap", str(repo), "--task", "NewlineNeedle", "--format", "json"
+            )
+            data = json.loads(result.stdout)
+            self.assertEqual(data["related_files_for_task"][0]["file"], "src/upload\nnewline.ts")
+
+    def test_control_and_leading_space_filenames_survive_git_listing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self.git(repo, "init", "-q")
+            self.write(repo, " leading.ts", "export const LeadingSpaceNeedle = true\n")
+            self.write(repo, "src/upload\rcr.ts", "export const CarriageNeedle = true\n")
+            self.commit(repo, "odd filenames")
+
+            leading = self.run_vocab(
+                "agent-bootstrap", str(repo), "--task", "LeadingSpaceNeedle", "--format", "json"
+            )
+            leading_data = json.loads(leading.stdout)
+            self.assertEqual(leading_data["related_files_for_task"][0]["file"], " leading.ts")
+
+            carriage = self.run_vocab(
+                "agent-bootstrap", str(repo), "--task", "CarriageNeedle", "--format", "json"
+            )
+            carriage_data = json.loads(carriage.stdout)
+            self.assertEqual(carriage_data["related_files_for_task"][0]["file"], "src/upload\rcr.ts")
+
+    def test_invalid_refs_fail_for_read_commands(self) -> None:
+        with self.make_repo() as tmp:
+            repo = Path(tmp)
+            for args in (
+                ("analyze", str(repo), "--ref", "NO_SUCH_REF", "--format", "json"),
+                ("diff", "NO_SUCH_REF", "HEAD", "--path", str(repo), "--format", "json"),
+                ("blast", "NO_SUCH_REF", "HEAD", "--path", str(repo), "--format", "json"),
+                ("pr-report", "NO_SUCH_REF", "HEAD", "--path", str(repo)),
+            ):
+                result = self.run_vocab(*args, check=False)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Unknown git ref", result.stderr)
+
+    def test_bare_repositories_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bare = Path(tmp) / "bare.git"
+            subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True, text=True)
+            for args in (
+                ("agent-bootstrap", str(bare), "--format", "json"),
+                ("analyze", str(bare), "--format", "json"),
+                ("ci-report", "HEAD", "HEAD", "--path", str(bare), "--format", "json"),
+            ):
+                result = self.run_vocab(*args, check=False)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Not a git repository", result.stderr)
 
 
 if __name__ == "__main__":

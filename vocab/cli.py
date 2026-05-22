@@ -85,6 +85,14 @@ def _relevance_label(score: float) -> tuple[str, str, str]:
     return "LOW", "red", "inspect manually or use a more specific task"
 
 
+def _validate_refs(path: str, *refs: str) -> None:
+    if not vgit.has_commits(path):
+        return
+    missing = [ref for ref in refs if not vgit.ref_exists(path, ref)]
+    if missing:
+        raise ValueError(f"Unknown git ref(s): {', '.join(missing)}")
+
+
 @cli.command()
 def analyze(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
@@ -95,6 +103,15 @@ def analyze(
     no_color: Annotated[bool, typer.Option("--no-color", help="Disable colored output")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only output on error")] = False,
 ):
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if ref is not None:
+        try:
+            _validate_refs(path, ref)
+        except ValueError as e:
+            typer.echo(str(e), err=True)
+            raise typer.Exit(1)
     try:
         analysis = scan_codebase(path, git_ref=ref, clones=clones, deep=deep, quiet=quiet)
     except Exception as e:
@@ -120,6 +137,12 @@ def diff(
 ):
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    try:
+        _validate_refs(path, ref_a, ref_b)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
         raise typer.Exit(1)
 
     try:
@@ -260,6 +283,12 @@ def blast(
 ):
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    try:
+        _validate_refs(path, ref_a, ref_b)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
         raise typer.Exit(1)
 
     pr_files = vgit.diff_refs(path, ref_a, ref_b)
@@ -969,6 +998,11 @@ def pr_report(
     """Generate a consolidated PR structural report (markdown)."""
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    try:
+        _validate_refs(path, ref_a, ref_b)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
         raise typer.Exit(1)
     pr_files = vgit.diff_refs(path, ref_a, ref_b)
     if not pr_files:

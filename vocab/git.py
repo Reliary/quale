@@ -27,9 +27,45 @@ def _git(*args: str, cwd: str) -> str:
     return result.stdout.strip()
 
 
+def _git_bytes(*args: str, cwd: str) -> bytes:
+    result = subprocess.run(
+        ["git"] + list(args),
+        capture_output=True, cwd=cwd,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"git {' '.join(args)} failed: {stderr}")
+    return result.stdout
+
+
+def _decode_path(raw: bytes) -> str:
+    return raw.decode("utf-8", errors="surrogateescape")
+
+
+def _split_nul(output: bytes) -> list[bytes]:
+    return [item for item in output.split(b"\0") if item]
+
+
 def is_repo(path: str) -> bool:
     try:
         _git("rev-parse", "--git-dir", cwd=path)
+        return _git("rev-parse", "--is-inside-work-tree", cwd=path) == "true"
+    except (RuntimeError, FileNotFoundError):
+        return False
+
+
+def has_commits(path: str) -> bool:
+    try:
+        _git("rev-parse", "--verify", "--quiet", "HEAD^{commit}", cwd=path)
+        return True
+    except (RuntimeError, FileNotFoundError):
+        return False
+
+
+def ref_exists(path: str, ref: str) -> bool:
+    try:
+        _git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", cwd=path)
         return True
     except (RuntimeError, FileNotFoundError):
         return False
@@ -39,20 +75,38 @@ def list_files(path: str, ref: str | None = None) -> list[str]:
     """List tracked files. If ref is None, list working tree."""
     if ref:
         try:
-            out = _git("ls-tree", "-r", "--name-only", ref, cwd=path)
+            out = _git_bytes("ls-tree", "-rz", ref, cwd=path)
         except RuntimeError:
             return []
+        files = []
+        for entry in _split_nul(out):
+            if b"\t" not in entry:
+                continue
+            meta, f = entry.split(b"\t", 1)
+            mode = meta.split()[0].decode("ascii", errors="ignore") if meta else ""
+            if mode in {"120000", "160000"}:
+                continue
+            if f:
+                files.append(_decode_path(f))
+        return files
     else:
         try:
-            out = _git("ls-files", cwd=path)
+            out = _git_bytes("ls-files", "-z", cwd=path)
         except RuntimeError:
             return []
+        try:
+            untracked = _git_bytes("ls-files", "-z", "--others", "--exclude-standard", cwd=path)
+            if untracked:
+                out = out + b"\0" + untracked
+        except RuntimeError:
+            pass
     files = []
-    for f in out.splitlines():
-        f = f.strip()
+    for f in _split_nul(out):
         if not f:
             continue
-        if ref is None and not os.path.isfile(os.path.join(path, f)):
+        f = _decode_path(f)
+        full = os.path.join(path, f)
+        if ref is None and (os.path.islink(full) or not os.path.isfile(full)):
             continue
         files.append(f)
     return files
@@ -63,6 +117,8 @@ def read_file_at_ref(path: str, filepath: str, ref: str | None = None) -> str | 
     full = os.path.join(path, filepath)
     if ref is None:
         try:
+            if os.path.islink(full):
+                return None
             if not os.path.isfile(full):
                 return None
             with open(full, "r", encoding="utf-8", errors="replace") as f:
@@ -70,6 +126,14 @@ def read_file_at_ref(path: str, filepath: str, ref: str | None = None) -> str | 
         except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
             return None
     try:
+        try:
+            tree_out = _git_bytes("ls-tree", "-z", ref, "--", filepath, cwd=path)
+            first_entry = _split_nul(tree_out)[0] if tree_out else b""
+            mode = first_entry.split()[0].decode("ascii", errors="ignore") if first_entry else ""
+            if mode in {"120000", "160000"}:
+                return None
+        except RuntimeError:
+            return None
         # Use raw binary mode to handle non-UTF8 files
         result = subprocess.run(
             ["git", "show", f"{ref}:{filepath}"],
@@ -96,13 +160,13 @@ def diff_refs(path: str, ref_a: str, ref_b: str) -> list[str]:
     })
     files = []
     try:
-        out = _git("diff", "--name-only", ref_a, ref_b, cwd=path)
+        out = _git_bytes("diff", "--name-only", "-z", ref_a, ref_b, cwd=path)
     except RuntimeError:
         return []
-    for f in out.splitlines():
-        f = f.strip()
+    for f in _split_nul(out):
         if not f:
             continue
+        f = _decode_path(f)
         parts = f.split("/")
         if any(p.endswith(".egg-info") for p in parts):
             continue

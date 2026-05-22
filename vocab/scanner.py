@@ -1693,6 +1693,10 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
     """CI-ready report: blast radius + stable file check + diff summary."""
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
+    if vgit.has_commits(path):
+        missing = [ref for ref in (base_ref, head_ref) if not vgit.ref_exists(path, ref)]
+        if missing:
+            return {"error": f"Unknown git ref(s): {', '.join(missing)}"}
 
     # Changed files between refs
     changed = vgit.diff_refs(path, base_ref, head_ref)
