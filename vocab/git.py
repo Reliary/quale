@@ -112,7 +112,7 @@ def list_files(path: str, ref: str | None = None) -> list[str]:
     return files
 
 
-def read_file_at_ref(path: str, filepath: str, ref: str | None = None) -> str | None:
+def read_file_at_ref(path: str, filepath: str, ref: str | None = None, check_mode: bool = True) -> str | None:
     """Read file content at ref. If ref is None, read from disk."""
     full = os.path.join(path, filepath)
     if ref is None:
@@ -126,14 +126,15 @@ def read_file_at_ref(path: str, filepath: str, ref: str | None = None) -> str | 
         except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
             return None
     try:
-        try:
-            tree_out = _git_bytes("ls-tree", "-z", ref, "--", filepath, cwd=path)
-            first_entry = _split_nul(tree_out)[0] if tree_out else b""
-            mode = first_entry.split()[0].decode("ascii", errors="ignore") if first_entry else ""
-            if mode in {"120000", "160000"}:
+        if check_mode:
+            try:
+                tree_out = _git_bytes("ls-tree", "-z", ref, "--", filepath, cwd=path)
+                first_entry = _split_nul(tree_out)[0] if tree_out else b""
+                mode = first_entry.split()[0].decode("ascii", errors="ignore") if first_entry else ""
+                if mode in {"120000", "160000"}:
+                    return None
+            except RuntimeError:
                 return None
-        except RuntimeError:
-            return None
         # Use raw binary mode to handle non-UTF8 files
         result = subprocess.run(
             ["git", "show", f"{ref}:{filepath}"],

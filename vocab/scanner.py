@@ -153,7 +153,7 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
 
         lang = classify_language(rel_file)
 
-        content = vgit.read_file_at_ref(path, rel_file, ref=git_ref)
+        content = vgit.read_file_at_ref(path, rel_file, ref=git_ref, check_mode=git_ref is None)
         if content is None:
             continue
 
@@ -1111,7 +1111,7 @@ def phrase_provenance(path: str, phrase: str, weeks: int = 24) -> list[dict]:
 
 # ── Explore / onboarding map ──────────────────────────────────────
 
-def explore_repo(path: str, themes: bool = False) -> dict:
+def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | None = None) -> dict:
     """Find code files that best characterize the codebase.
 
     Scores each code file by how many unique qualifying identifiers it
@@ -1122,7 +1122,8 @@ def explore_repo(path: str, themes: bool = False) -> dict:
     When themes=True, also returns latent structural themes via
     identifier co-occurrence clustering (fast — no deep scan needed).
     """
-    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    if analysis is None:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     if not analysis.file_vocabs:
         return {"files": [], "themes": []}
 
@@ -1286,7 +1287,7 @@ def _compute_themes(file_identifiers: list[tuple[str, str, set[str]]]) -> list[d
 
 # ── TDA Module Detection ──────────────────────────────────────────
 
-def compute_modules(path: str) -> dict:
+def compute_modules(path: str, analysis: CodebaseAnalysis | None = None) -> dict:
     """Persistent connected components across rare-identifier thresholds.
 
     Uses TDA (topological data analysis) on the phrase-file graph:
@@ -1295,7 +1296,8 @@ def compute_modules(path: str) -> dict:
     3. Run union-find at increasing thresholds (1 to 10 shared identifiers)
     4. Identify modules that persist across >=3 consecutive thresholds
     """
-    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    if analysis is None:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{4,40}\b')
 
     identifier_df: Counter[str] = Counter()
@@ -1477,8 +1479,9 @@ def _binding_concepts(analysis: CodebaseAnalysis, limit: int = 15) -> list[dict]
     return rows[:limit]
 
 
-def _rank_related_files(path: str, keywords: list[str]) -> list[dict]:
-    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+def _rank_related_files(path: str, keywords: list[str], analysis: CodebaseAnalysis | None = None) -> list[dict]:
+    if analysis is None:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     scores: dict[str, dict] = {}
     lowered = [k.lower() for k in keywords if len(k) >= 4]
     for fv in _code_file_vocabs(analysis):
@@ -1590,8 +1593,9 @@ def _task_plan(task: str | None, related: list[dict], reads: list[dict],
 
 def bootstrap_repo(path: str, task: str | None = None) -> dict:
     """One-shot agent bootstrap: explore + modules + stability + optional task search."""
-    explore_data = explore_repo(path, themes=True)
-    modules_data = compute_modules(path)
+    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    explore_data = explore_repo(path, themes=True, analysis=analysis)
+    modules_data = compute_modules(path, analysis=analysis)
     stability_data = compute_stability(path, weeks=12)
 
     # recommended_next_reads: top explore files excluding generated/tests
@@ -1647,7 +1651,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
 
         if keywords:
             try:
-                related = _rank_related_files(path, keywords[:5])
+                related = _rank_related_files(path, keywords[:5], analysis=analysis)
             except Exception:
                 related = []
 
@@ -1815,8 +1819,8 @@ def inspect_repo(path: str) -> dict:
         return {"error": "Not a git repository.", "schema_version": 1}
 
     analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    explore_data = explore_repo(path, themes=True)
-    modules_data = compute_modules(path)
+    explore_data = explore_repo(path, themes=True, analysis=analysis)
+    modules_data = compute_modules(path, analysis=analysis)
     timeline_data = concept_timeline(path, weeks=4)
     binding = _binding_concepts(analysis)
 
