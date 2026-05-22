@@ -1174,7 +1174,7 @@ def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | N
 
         # Role weighting: source files first, tests/scripts/examples lower
         role = _task_file_role(path)
-        role_penalty = {"source": 1.0, "header": 0.6, "script": 0.6, "example": 0.3, "test": 0.3, "minified": 0.1}.get(role, 0.5)
+        role_penalty = {"source": 1.0, "header": 0.6, "script": 0.6, "example": 0.3, "test": 0.3, "minified": 0.1, "benchmark": 0.3}.get(role, 0.5)
 
         # Unique-concept score: identifiers that appear in few files (rare = more characteristic)
         unique_score = sum(1 / max(identifier_file_count[i], 1) for i in identifiers) * gen_penalty * role_penalty
@@ -1544,6 +1544,8 @@ def _task_file_role(path: str) -> str:
         return "example"
     if "scripts" in parts or "script" in parts:
         return "script"
+    if "benchmarks" in parts or "benchmark" in parts or "asv_bench" in parts:
+        return "benchmark"
     ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
     if ext in ("h", "hpp", "hxx"):
         return "header"
