@@ -1,9 +1,11 @@
-"""Terminal output formatter — concept-driven output."""
+"""Terminal output formatter — grammar-free structural output."""
 
 from __future__ import annotations
 
-from vocab.scanner import CodebaseAnalysis
-from vocab.concepts import ConceptGroup
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vocab.scanner import CodebaseAnalysis
 
 
 def _bar(pct: float, width: int = 20) -> str:
@@ -21,17 +23,7 @@ def _color(text: str, color: str) -> str:
     return f"{codes.get(color, '')}{text}{codes['reset']}"
 
 
-def _icon_for_category(cat: str) -> str:
-    icons = {
-        "exported": "🔷", "identifier": "🔹", "error": "❌", "api": "🔗",
-        "config": "⚙️", "db": "🗄️", "import_path": "📦",
-        "syntax": "　", "other": "📄",
-    }
-    return icons.get(cat, "📄")
-
-
 def format_terminal(analysis: CodebaseAnalysis) -> str:
-    g = analysis.concept_groups
     lines = []
 
     h = lambda t: _color(t, "header")
@@ -44,7 +36,7 @@ def format_terminal(analysis: CodebaseAnalysis) -> str:
     lines.append(h(f"{'━' * 60}"))
     lines.append(f"  {h('vocab analyze — ')}{_color(analysis.path, 'bold')}")
     lines.append(gy(f"  {analysis.total_files} files  {analysis.total_phrases} phrases  {analysis.total_unique_phrases} unique  {len(analysis.languages)} langs"))
-    lines.append(gy(""))
+    lines.append("")
     lines.append(h(f"{'━' * 60}"))
     lines.append("")
 
@@ -63,93 +55,30 @@ def format_terminal(analysis: CodebaseAnalysis) -> str:
         lines.append(f"  {y(f'{analysis.shared_across_languages} phrases shared across languages ({shared_pct:.1f}%)')}")
     lines.append("")
 
-    # ── Key Concepts (grouped, filtered) ──
-    lines.append(sh("KEY CONCEPTS:"))
-    shown_groups = 0
-
-    # Exported types/functions first (most meaningful)
-    if g.exported:
-        sample = ", ".join(p[:30] for p, _ in g.exported[:5])
-        lines.append(f"  {_icon_for_category('exported')} Types/Exports:  {gr(sample)}")
-        shown_groups += 1
-
-    # Identifiers
-    if g.identifier:
-        sample = ", ".join(p[:30] for p, _ in g.identifier[:5])
-        lines.append(f"  {_icon_for_category('identifier')} Idents:         {sample}")
-        shown_groups += 1
-
-    # Errors
-    if g.error:
-        sample = ", ".join(p[:35] for p, _ in g.error[:4])
-        lines.append(f"  {_icon_for_category('error')} Errors:         {r(sample)}")
-        shown_groups += 1
-
-    # API
-    if g.api:
-        sample = ", ".join(p[:35] for p, _ in g.api[:4])
-        lines.append(f"  {_icon_for_category('api')} API:            {sample}")
-        shown_groups += 1
-
-    # Config
-    if g.config:
-        sample = ", ".join(p[:30] for p, _ in g.config[:4])
-        lines.append(f"  {_icon_for_category('config')} Config:         {sample}")
-        shown_groups += 1
-
-    # DB
-    if g.db:
-        sample = ", ".join(p[:30] for p, _ in g.db[:4])
-        lines.append(f"  {_icon_for_category('db')} DB:             {sample}")
-        shown_groups += 1
-
-    # Import paths
-    if g.import_path:
-        sample = ", ".join(p[:35] for p, _ in g.import_path[:3])
-        lines.append(f"  {_icon_for_category('import_path')} Imports:        {sample}")
-        shown_groups += 1
-
-    if not shown_groups:
-        # Fallback: show top frequency
-        sample = ", ".join(p[:40] for p, _ in analysis.top_phrases[:5])
-        lines.append(f"  Top: {sample}")
-    lines.append("")
+    # ── Top phrases (raw frequency, no classification) ──
+    if analysis.top_phrases:
+        import re
+        visible = [(p, f) for p, f in analysis.top_phrases if re.search(r'[A-Za-z]{3,}', p)]
+        lines.append(sh("TOP PHRASES:"))
+        for i, (phrase, freq) in enumerate(visible[:10]):
+            pct = freq / analysis.total_phrases * 100 if analysis.total_phrases else 0
+            bar = _bar(pct, 10)
+            lines.append(f"  {bar} {phrase[:55]:<55} {freq:>6}x")
+        lines.append("")
 
     # ── Co-occurrence Clusters ──
     if analysis.clusters:
-        lines.append(sh("DISCOVERED PATTERNS:"))
+        lines.append(sh("PATTERNS:"))
         for i, (label, cluster) in enumerate(zip(analysis.cluster_labels, analysis.clusters)):
             if i >= 10:
                 lines.append(gy(f"  … +{len(analysis.clusters) - 10} more patterns"))
                 break
-            size = _color(f"[{len(cluster)} phrases]", "cyan")
-            lines.append(f"  {i+1}. {label} {size}")
-        lines.append("")
-
-    # ── Landmarks ──
-    if analysis.landmarks:
-        lines.append(sh("WHAT MAKES THIS CODEBASE UNIQUE:"))
-        for lm in analysis.landmarks[:8]:
-            lines.append(f"  {lm['path']}")
-            # Show what makes it unique
-            top = lm.get("unique_phrases", [])
-            if top:
-                reasons = ", ".join(p[:35] for p in top[:3])
-                lines.append(f"    {gy('only file with:')} {reasons}")
-        lines.append("")
-
-    # ── Cleanup ──
-    if analysis.dead_exports:
-        lines.append(sh("POTENTIAL DEAD CODE:"))
-        for de in analysis.dead_exports[:10]:
-            lines.append(f"  {r('✗')} {gr(de['phrase'][:45])}  {gy(de['file'])}")
-        if len(analysis.dead_exports) > 10:
-            lines.append(gy(f"  … +{len(analysis.dead_exports) - 10} more candidates"))
+            lines.append(f"  {i+1}. {label} {_color(f'[{len(cluster)} phrases]', 'cyan')}")
         lines.append("")
 
     # ── Structure Clusters ──
     if analysis.structure_clusters:
-        lines.append(sh("STRUCTURE CLUSTERS (architectural groups):"))
+        lines.append(sh("STRUCTURE CLUSTERS:"))
         for sc in analysis.structure_clusters[:8]:
             lines.append(f"  {sc['label']:<20} [{sc['file_count']:>3} files] {gy(sc['top_files'][0] if sc['top_files'] else '')}")
             if sc['characteristic_phrases']:
@@ -157,40 +86,46 @@ def format_terminal(analysis: CodebaseAnalysis) -> str:
                 lines.append(f"  {'':>22} phrases: {gy(cp)}")
         if len(analysis.structure_clusters) > 8:
             lines.append(gy(f"  … +{len(analysis.structure_clusters) - 8} more groups"))
-        # Show ungrouped count
         grouped_files = sum(sc["file_count"] for sc in analysis.structure_clusters)
         ungrouped = analysis.total_files - grouped_files
-        lines.append(f"  {'':>22} {gy(f'{ungrouped} files ungrouped (no cluster match)')}")
+        lines.append(f"  {'':>22} {gy(f'{ungrouped} files ungrouped')}")
+        lines.append("")
+
+    # ── Landmarks ──
+    if analysis.landmarks:
+        lines.append(sh("UNIQUE FILES:"))
+        for lm in analysis.landmarks[:8]:
+            lines.append(f"  {lm['path']}")
+            top = lm.get("unique_phrases", [])
+            if top:
+                lines.append(f"    {gy('only file with:')} {', '.join(p[:35] for p in top[:3])}")
+        lines.append("")
+
+    # ── Dead code (heuristic — disclaimer) ──
+    if analysis.dead_exports:
+        lines.append(sh("POTENTIAL DEAD CODE (heuristic — may include false positives):"))
+        for de in analysis.dead_exports[:10]:
+            lines.append(f"  {r('?')} {gr(de['phrase'][:45])}  {gy(de['file'])}")
+        if len(analysis.dead_exports) > 10:
+            lines.append(gy(f"  … +{len(analysis.dead_exports) - 10} more candidates"))
         lines.append("")
 
     return "\n".join(lines)
 
 
 def format_quick(analysis: CodebaseAnalysis) -> str:
-    """One-glance summary — concept driven."""
-    g = analysis.concept_groups
+    """One-glance summary — grammar free."""
     lines = []
 
     langs = sorted(analysis.languages.items(), key=lambda x: -x[1])[:3]
     lang_str = " ".join(f"{l}({n})" for l, n in langs)
 
-    concepts = []
-    # Prefer meaningful categories over errors/syntax
-    for group_name in ["exported", "api", "config", "identifier"]:
-        items = getattr(g, group_name, [])
-        if items:
-            concepts.append(items[0][0][:30])
-        if len(concepts) >= 3:
-            break
-    if not concepts and g.error:
-        concepts.append(g.error[0][0][:30])
-
     unique_explanation = ""
     if analysis.landmarks:
         l = analysis.landmarks[0]
-        top = l.get("unique_phrases", [])
-        if top:
-            unique_explanation = f"({top[0][:30]})"
+        up = l.get("unique_phrases", [])
+        if up:
+            unique_explanation = f"({up[0][:30]})"
         else:
             unique_explanation = l['path'].split("/")[-1]
 
@@ -199,10 +134,9 @@ def format_quick(analysis: CodebaseAnalysis) -> str:
     lines.append(f"  {analysis.total_files} files  {analysis.total_phrases} phrases  {len(analysis.languages)} langs")
     lines.append(_color(f"{'━' * 50}", "cyan"))
     lines.append(f"  Top langs:    {lang_str}")
-    lines.append(f"  Concepts:     {' | '.join(concepts[:3])}")
     lines.append(f"  Patterns:     {len(analysis.clusters)} discovered")
     lines.append(f"  Unique:       {len(analysis.landmarks)} files {unique_explanation}")
-    lines.append(f"  Dead code:    {len(analysis.dead_exports)} candidates")
+    lines.append(f"  Dead code:    {len(analysis.dead_exports)} candidates (heuristic)")
     lines.append(_color(f"{'━' * 50}", "cyan"))
 
     return "\n".join(lines)
@@ -210,7 +144,6 @@ def format_quick(analysis: CodebaseAnalysis) -> str:
 
 def format_json(analysis: CodebaseAnalysis) -> str:
     import json
-    g = analysis.concept_groups
     data = {
         "path": analysis.path,
         "summary": {
@@ -222,24 +155,15 @@ def format_json(analysis: CodebaseAnalysis) -> str:
         "languages": analysis.languages,
         "phrases_by_language": analysis.phrases_by_language,
         "shared_across_languages": analysis.shared_across_languages,
-        "concepts": {
-            "exported": [{"name": p, "frequency": f} for p, f in g.exported[:20]],
-            "error": [{"name": p, "frequency": f} for p, f in g.error[:10]],
-            "api": [{"name": p, "frequency": f} for p, f in g.api[:10]],
-            "config": [{"name": p, "frequency": f} for p, f in g.config[:10]],
-            "identifier": [{"name": p, "frequency": f} for p, f in g.identifier[:20]],
-            "import_path": [{"name": p, "frequency": f} for p, f in g.import_path[:10]],
-        },
+        "top_phrases": [{"phrase": p, "frequency": f} for p, f in analysis.top_phrases[:50]],
         "patterns": [{"label": l, "size": len(c)} for l, c in zip(analysis.cluster_labels, analysis.clusters)],
-        "landmarks": [{"path": lm["path"], "uniqueness": lm["uniqueness"], "unique_phrases": lm.get("unique_phrases", [])} for lm in analysis.landmarks[:20]],
+        "landmarks": [{"path": lm["path"], "uniqueness": lm["uniqueness"]} for lm in analysis.landmarks[:20]],
         "dead_exports": [{"phrase": de["phrase"], "file": de["file"]} for de in analysis.dead_exports[:30]],
     }
     return json.dumps(data, indent=2)
 
 
 def format_html(analysis: CodebaseAnalysis) -> str:
-    g = analysis.concept_groups
-
     lang_rows = "".join(f"""
     <tr>
       <td>{lang}</td>
@@ -249,23 +173,10 @@ def format_html(analysis: CodebaseAnalysis) -> str:
       <td>{analysis.phrases_by_language.get(lang, 0)}</td>
     </tr>""" for lang, count in sorted(analysis.languages.items(), key=lambda x: -x[1]))
 
-    concept_sections = ""
-    for title, items in [("Types/Exports", g.exported[:15]), ("API Routes", g.api[:10]),
-                         ("Error Types", g.error[:10]), ("Config Keys", g.config[:10])]:
-        if not items:
-            continue
-        rows = "".join(f"<tr><td>{p}</td><td>{f}</td></tr>" for p, f in items)
-        concept_sections += f"<h2>{title}</h2><table>{rows}</table>"
+    phrase_rows = "".join(f"<tr><td>{p}</td><td>{f}</td></tr>" for p, f in analysis.top_phrases[:30])
 
     cluster_rows = "".join(f"<tr><td>{i+1}</td><td>{l}</td><td>{len(c)}</td></tr>"
                            for i, (l, c) in enumerate(zip(analysis.cluster_labels, analysis.clusters)))
-
-    unique_rows = "".join(f"""
-    <tr><td>{lm['path'][:60]}</td><td>{lm.get('unique_phrases', [''])[0][:40] if lm.get('unique_phrases') else ''}</td></tr>
-    """ for lm in analysis.landmarks[:15])
-
-    dead_rows = "".join(f"<tr><td>{de['phrase'][:50]}</td><td>{de['file'][:40]}</td></tr>"
-                        for de in analysis.dead_exports[:20])
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -293,22 +204,16 @@ def format_html(analysis: CodebaseAnalysis) -> str:
 <h2>Languages</h2>
 <table><tr><th>Language</th><th>%</th><th>Files</th><th>%</th><th>Phrases</th></tr>{lang_rows}</table>
 
-{concept_sections}
+<h2>Top Phrases</h2>
+<table><tr><th>Phrase</th><th>Frequency</th></tr>{phrase_rows}</table>
 
-<h2>Discovered Patterns</h2>
+<h2>Patterns</h2>
 <table><tr><th>#</th><th>Pattern</th><th>Files</th></tr>{cluster_rows}</table>
-
-<h2>Unique Files</h2>
-<table><tr><th>File</th><th>Characteristic</th></tr>{unique_rows}</table>
-
-<h2>Dead Code Candidates</h2>
-<table><tr><th>Phrase</th><th>Location</th></tr>{dead_rows}</table>
 </body>
 </html>"""
 
 
 def format_lifecycles(lifecycles: list[dict], weeks: int, show_all: bool = False) -> str:
-    """Format lifecycle signals for terminal output."""
     lines = []
     h = lambda t: _color(t, "header")
     sh = lambda t: _color(t, "subheader")
@@ -352,15 +257,12 @@ def format_lifecycles(lifecycles: list[dict], weeks: int, show_all: bool = False
                    "EMERGING": gr("NEW"), "ABANDONED": y("ABAN")}.get(signal, "")
             concept_str = item["concept"][:40]
             detail = gy(f"[age:{item['age_weeks']}w stale:{item['stale_weeks']}w ratio:{item['appearance_ratio']:.0%}]")
-
             notes = ""
             if "renamed_to" in item:
                 notes = gr(f" → {item['renamed_to'][:25]}")
             elif "renamed_from" in item:
                 notes = gy(f" ← {item['renamed_from'][:25]}")
-
             lines.append(f"  {tag} {concept_str:<42} {detail}{notes}")
-
         if len(items) > 15:
             lines.append(gy(f"  … +{len(items) - 15} more"))
 
@@ -370,7 +272,7 @@ def format_lifecycles(lifecycles: list[dict], weeks: int, show_all: bool = False
 
 
 def format_blast_radius(pr_files: list[str], results: dict, ref_a: str, ref_b: str) -> str:
-    """Format PR blast radius for terminal output."""
+    """Flat ranked list — no tiered risk labels."""
     lines = []
     h = lambda t: _color(t, "header")
     sh = lambda t: _color(t, "subheader")
@@ -392,37 +294,53 @@ def format_blast_radius(pr_files: list[str], results: dict, ref_a: str, ref_b: s
 
     impacts = results.get("impacts", [])
     if not impacts:
-        lines.append(gy("  No measurable blast radius"))
+        lines.append(gy("  No measurable blast radius (0 shared identifiers with unchanged files)"))
         lines.append("")
+        lines.append(h(f"{'━' * 60}"))
         return "\n".join(lines)
 
-    lines.append(sh("Blast radius (unchanged files sharing concepts):"))
-    high = [i for i in impacts if i["shared_concepts"] >= 5]
-    med = [i for i in impacts if 3 <= i["shared_concepts"] < 5]
-    low = [i for i in impacts if 1 <= i["shared_concepts"] < 3]
+    lines.append(sh("Files sharing identifiers with changed code:"))
+    for item in impacts[:20]:
+        conc_bar = _bar(min(item["shared_concepts"] * 5, 100), 8)
+        concepts = ", ".join(item["concepts"][:4])
+        shared_text = str(item["shared_concepts"]) + " shared"
+        lines.append(f"  {conc_bar} {item['file'][:55]}  {y(shared_text)} {gy(concepts)}")
 
-    for label, bucket, limit in [("HIGH", high, 8), ("MED", med, 6), ("LOW", low, 4)]:
-        if not bucket:
-            continue
-        color_fn = r if label == "HIGH" else (y if label == "MED" else gy)
-        lines.append(f"  {color_fn(label)} — {len(bucket)} files")
-        for item in bucket[:limit]:
-            conc_bar = _bar(item["concentration"] * 1000, 8)
-            concepts = ", ".join(item["concepts"][:4])
-            lines.append(f"    {conc_bar} {item['file'][:55]}  {gy('shares:')} {concepts}")
-
-    if len(impacts) > 18:
-        lines.append(gy(f"  … +{len(impacts) - 18} more files"))
-
-    rename_warnings = results.get("rename_warnings", [])
-    if rename_warnings:
-        lines.append("")
-        lines.append(y("Suspected renames:"))
-        for rw in rename_warnings[:5]:
-            lines.append(f"  {r('✗')} {rw['old_name'][:30]}  {gr('→')}  {rw['new_name'][:30]}")
-
+    if len(impacts) > 20:
+        lines.append(gy(f"  … +{len(impacts) - 20} more files"))
     lines.append("")
+    lines.append(h(f"{'━' * 60}"))
     return "\n".join(lines)
+
+
+def format_blast_json(pr_files: list[str], results: dict, ref_a: str, ref_b: str) -> str:
+    import json
+    return json.dumps({
+        "ref_a": ref_a,
+        "ref_b": ref_b,
+        "changed_files": pr_files,
+        "impacts": results.get("impacts", []),
+    }, indent=2)
+
+
+def format_lifecycles_json(data: list[dict], weeks: int) -> str:
+    import json
+    return json.dumps({
+        "weeks": weeks,
+        "total_concepts": len(data),
+        "signals": {
+            signal: [d for d in data if d["signal"] == signal]
+            for signal in set(d["signal"] for d in data)
+        },
+    }, indent=2)
+
+
+def format_orphans_json(analysis: CodebaseAnalysis) -> str:
+    import json
+    return json.dumps({
+        "dead_exports": analysis.dead_exports[:50],
+        "note": "Heuristic scan — may include false positives. Review before acting."
+    }, indent=2)
 
 
 def format_search_json(results: list[dict]) -> str:
@@ -438,46 +356,6 @@ def format_search_compact(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def format_lifecycles_json(data: list[dict], weeks: int) -> str:
-    import json
-    return json.dumps({
-        "weeks": weeks,
-        "total_concepts": len(data),
-        "signals": {
-            signal: [d for d in data if d["signal"] == signal]
-            for signal in set(d["signal"] for d in data)
-        },
-    }, indent=2)
-
-
-def format_blast_json(pr_files: list[str], results: dict, ref_a: str, ref_b: str) -> str:
-    import json
-    return json.dumps({
-        "ref_a": ref_a,
-        "ref_b": ref_b,
-        "changed_files": pr_files,
-        "impacts": results.get("impacts", []),
-        "rename_warnings": results.get("rename_warnings", []),
-    }, indent=2)
-
-
-def format_orphans_json(analysis: "CodebaseAnalysis", min_risk: str) -> str:  # noqa: F821
-    import json
-    risk_order = {"RED": 0, "YELLOW": 1, "ORANGE": 2, "GREEN": 3}
-    min_level = risk_order.get(min_risk.upper(), 1)
-    candidates = []
-    for de in analysis.dead_exports:
-        if "_test." in de["file"] or "/tests/" in de["file"]:
-            risk = "GREEN"
-        elif "/internal/" in de["file"]:
-            risk = "ORANGE"
-        else:
-            risk = "RED"
-        if risk_order.get(risk, 99) >= min_level:
-            candidates.append({"phrase": de["phrase"], "file": de["file"], "risk": risk})
-    return json.dumps({"dead_exports": candidates}, indent=2)
-
-
 def format_pr_report_markdown(pr_files: list[str], blast_results: dict | None,
                                orphan_results: list[dict] | None,
                                ref_a: str, ref_b: str) -> str:
@@ -488,25 +366,20 @@ def format_pr_report_markdown(pr_files: list[str], blast_results: dict | None,
     lines.append("")
     if blast_results:
         impacts = blast_results.get("impacts", [])
-        rename_warnings = blast_results.get("rename_warnings", [])
         lines.append("### Blast Radius")
-        high = [i for i in impacts if i.get("shared_concepts", 0) >= 5]
-        med = [i for i in impacts if 3 <= i.get("shared_concepts", 0) < 5]
-        lines.append(f"- **{len(high)} HIGH-risk** unchanged files share concepts with changed code")
-        lines.append(f"- **{len(med)} MEDIUM-risk** unchanged files share concepts")
-        if rename_warnings:
-            lines.append(f"- **{len(rename_warnings)} suspected renames** detected")
-        lines.append("")
+        total = len(impacts)
+        top_share = impacts[0]["shared_concepts"] if impacts else 0
+        lines.append(f"- {total} unchanged files share identifiers with changed code (top: {top_share} shared)")
+        if impacts:
+            lines.append(f"- Most impacted: `{impacts[0]['file']}` ({impacts[0]['shared_concepts']} shared identifiers)")
     if orphan_results:
-        red_orphans = [o for o in orphan_results if o.get("risk") == "RED"]
-        lines.append("### New Orphans")
-        if red_orphans:
-            lines.append(f"- **{len(red_orphans)} new RED-tier orphan exports** — may be dead code")
-            for o in red_orphans[:5]:
-                lines.append(f"  - `{o['phrase']}` in `{o['file']}`")
-        else:
-            lines.append("- No new RED-tier orphans detected")
         lines.append("")
+        lines.append("### Orphans (heuristic)")
+        lines.append(f"- {len(orphan_results)} single-file exported identifiers — may indicate dead code")
+        for o in orphan_results[:5]:
+            lines.append(f"  - `{o['phrase']}` in `{o['file']}`")
+    lines.append("")
     lines.append("---")
     lines.append("_Generated by `vocab` — grammar-free structural analysis_")
     return "\n".join(lines)
+

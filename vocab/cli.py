@@ -19,7 +19,8 @@ from vocab.scanner import (scan_codebase, concept_timeline, search_cross_repo,
 from vocab.formats.terminal import (format_terminal, format_json, format_html, format_quick,
                                     format_lifecycles, format_blast_radius,
                                     format_lifecycles_json, format_blast_json,
-                                    format_orphans_json, format_pr_report_markdown)
+                                    format_orphans_json, format_pr_report_markdown,
+                                    format_search_json, format_search_compact)
 from vocab.index import encode_indices, decode_indices, index_sequence_hash, structural_similarity
 from vocab.vocabulary import build_vocabulary
 from vocab.segmenter import segment
@@ -186,9 +187,7 @@ def lifecycle(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 24,
     signal: Annotated[str | None, typer.Option("--signal", "-s", help="Filter by signal type: DEAD, GROWING, STABLE, etc.")] = None,
-    show_all: Annotated[bool, typer.Option("--show-all", help="Show GROWING, ACTIVE, and STABLE concepts too")] = False,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
-    fail_on_decaying: Annotated[int, typer.Option("--fail-on-decaying", help="Exit code 1 if N+ concepts are DECAYING")] = 0,
 ):
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
@@ -210,13 +209,7 @@ def lifecycle(
     if format == "json":
         typer.echo(format_lifecycles_json(data, weeks))
     else:
-        typer.echo(format_lifecycles(data, weeks, show_all=show_all))
-
-    if fail_on_decaying > 0:
-        decaying = sum(1 for d in data if d["signal"] == "DECAYING")
-        if decaying >= fail_on_decaying:
-            typer.echo(f"FAIL: {decaying} DECAYING concepts (threshold: {fail_on_decaying})", err=True)
-            raise typer.Exit(1)
+        typer.echo(format_lifecycles(data, weeks, show_all=False))
 
 
 @cli.command()
@@ -225,8 +218,6 @@ def blast(
     ref_b: Annotated[str, typer.Argument(help="Target git ref")],
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
-    fail_on_high: Annotated[int, typer.Option("--fail-on-high", help="Exit code 1 if N+ HIGH-risk files")] = 0,
-    fail_on_med: Annotated[int, typer.Option("--fail-on-med", help="Exit code 1 if N+ MEDIUM-risk files")] = 0,
 ):
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
@@ -251,16 +242,6 @@ def blast(
         typer.echo(format_blast_json(pr_files, results, ref_a, ref_b))
     else:
         typer.echo(format_blast_radius(pr_files, results, ref_a, ref_b))
-
-    if fail_on_high > 0 or fail_on_med > 0:
-        high = sum(1 for i in results.get("impacts", []) if i.get("shared_concepts", 0) >= 5)
-        med = sum(1 for i in results.get("impacts", []) if 3 <= i.get("shared_concepts", 0) < 5)
-        if fail_on_high > 0 and high >= fail_on_high:
-            typer.echo(f"FAIL: {high} HIGH-risk files (threshold: {fail_on_high})", err=True)
-            raise typer.Exit(1)
-        if fail_on_med > 0 and med >= fail_on_med:
-            typer.echo(f"FAIL: {med} MEDIUM-risk files (threshold: {fail_on_med})", err=True)
-            raise typer.Exit(1)
 
 
 @cli.command()
@@ -386,10 +367,13 @@ def timeline(
 @cli.command()
 def orphans(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
-    min_risk: Annotated[str, typer.Option("--min-risk", "-r", help="Minimum risk level: RED, YELLOW, ORANGE")] = "YELLOW",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
-    fail_on_red: Annotated[int, typer.Option("--fail-on-red", help="Exit code 1 if N+ RED-tier orphans")] = 0,
 ):
+    """Heuristic: find exported identifiers appearing in exactly 1 file.
+
+    This is a best-effort signal, not authoritative dead code detection.
+    Review before acting.
+    """
     try:
         analysis = scan_codebase(path)
     except Exception as e:
@@ -397,203 +381,25 @@ def orphans(
         raise typer.Exit(1)
 
     if not analysis.dead_exports:
-        typer.echo("No orphan exports found.")
+        typer.echo("No single-file exports found.")
         return
 
-    risk_order = {"RED": 0, "YELLOW": 1, "ORANGE": 2, "GREEN": 3}
-    min_level = risk_order.get(min_risk.upper(), 1)
-
-    candidates = []
-    for de in analysis.dead_exports:
-        if "_test." in de["file"] or "/tests/" in de["file"]:
-            risk = "GREEN"
-        elif "/internal/" in de["file"]:
-            risk = "ORANGE"
-        else:
-            risk = "RED"
-        if risk_order.get(risk, 99) >= min_level:
-            candidates.append({**de, "risk": risk})
-
     if format == "json":
-        typer.echo(format_orphans_json(analysis, min_risk))
-        red_count = sum(1 for c in candidates if c.get("risk") == "RED")
-        if fail_on_red > 0 and red_count >= fail_on_red:
-            raise typer.Exit(1)
+        typer.echo(format_orphans_json(analysis))
         return
 
     c = lambda t, color: _color(t, color)
     typer.echo(c(f"{'━' * 50}", "cyan"))
-    typer.echo(f"  STRUCTURAL ORPHANS — {len(candidates)} candidates")
+    typer.echo(f"  SINGLE-FILE EXPORTS — heuristic scan")
     typer.echo(c(f"{'━' * 50}", "cyan"))
 
-    for de in candidates[:30]:
-        risk = de["risk"]
-        tags = {
-            "RED": c("RED", "red"),
-            "ORANGE": c("ORANGE", "yellow"),
-            "GREEN": c("GREEN", "green"),
-        }
-        typer.echo(f"  {c('✗', 'red')} {tags.get(risk, '')} {c(de['phrase'][:45], 'bold')}  {c(de['file'], 'gray')}")
+    for de in analysis.dead_exports[:30]:
+        typer.echo(f"  {c('?', 'red')} {c(de['phrase'][:45], 'bold')}  {c(de['file'], 'gray')}")
 
-    if len(candidates) > 30:
-        typer.echo(c(f"  … +{len(candidates) - 30} more candidates", "gray"))
+    if len(analysis.dead_exports) > 30:
+        typer.echo(c(f"  … +{len(analysis.dead_exports) - 30} more candidates", "gray"))
 
-    red_count = sum(1 for c in candidates if c.get("risk") == "RED")
-    if fail_on_red > 0 and red_count >= fail_on_red:
-        typer.echo(f"FAIL: {red_count} RED-tier orphans (threshold: {fail_on_red})", err=True)
-        raise typer.Exit(1)
-
-
-# ── Gate commands (CI integration) ──
-
-@cli.command()
-def gate(
-    check: Annotated[str, typer.Argument(help="Check type: blast, orphans, drift")],
-    ref_a: Annotated[str, typer.Argument(help="Base git ref")],
-    ref_b: Annotated[str, typer.Argument(help="Target git ref")],
-    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    fail_on_high: Annotated[int, typer.Option("--fail-on-high", help="Max HIGH-risk files (blast)")] = 5,
-    format: Annotated[str, typer.Option("--format", "-f", help="Output format: json, terminal")] = "json",
-):
-    """CI gate: run a structural check and exit 1 on violation."""
-    if not vgit.is_repo(path):
-        typer.echo("Not a git repository.", err=True)
-        raise typer.Exit(1)
-
-    config = load_config(path)
-    config_blast = config.get("blast", {})
-    config_orphans = config.get("orphans", {})
-
-    if check == "blast":
-        pr_files = vgit.diff_refs(path, ref_a, ref_b)
-        analysis = scan_codebase(path, git_ref=ref_b, quiet=True)
-        results = pr_blast_radius(pr_files, analysis.file_vocabs)
-        impacts = results.get("impacts", [])
-        high = sum(1 for i in impacts if i.get("shared_concepts", 0) >= 5)
-
-        threshold = fail_on_high or config_blast.get("max_high", 5)
-        passed = high <= threshold
-
-        if format == "json":
-            typer.echo(json.dumps({
-                "check": "blast", "passed": passed, "high": high,
-                "threshold": threshold, "total_impacts": len(impacts),
-            }))
-        else:
-            typer.echo(f"[{'PASS' if passed else 'FAIL'}] blast: {high} HIGH files (threshold {threshold})")
-
-        if not passed:
-            raise typer.Exit(1)
-
-    elif check == "orphans":
-        pr_files = vgit.diff_refs(path, ref_a, ref_b)
-        analysis_a = scan_codebase(path, git_ref=ref_a, quiet=True)
-        analysis_b = scan_codebase(path, git_ref=ref_b, quiet=True)
-
-        a_dead = {d["phrase"] for d in analysis_a.dead_exports}
-        b_dead = {d["phrase"] for d in analysis_b.dead_exports}
-        new_orphans = b_dead - a_dead
-
-        # Filter out test files
-        new_orphans = {p for p in new_orphans
-                       if not any(
-                           p.endswith("_test.go") or "/tests/" in p
-                           for p in [next((d["file"] for d in analysis_b.dead_exports if d["phrase"] == p), "")]
-                       )}
-
-        max_new = config_orphans.get("max_new_red", 0)
-        allowed = set(config_orphans.get("allow", []))
-        violating = new_orphans - allowed
-        passed = len(violating) <= max_new
-
-        if format == "json":
-            typer.echo(json.dumps({
-                "check": "orphans", "passed": passed,
-                "new_orphans": list(new_orphans)[:30],
-                "violating": list(violating)[:30],
-                "threshold": max_new,
-            }))
-        else:
-            if violating:
-                typer.echo(f"[{'PASS' if passed else 'FAIL'}] orphans: {len(violating)} new RED (threshold {max_new})")
-                for v in list(violating)[:10]:
-                    typer.echo(f"  ✗ {v}")
-            else:
-                typer.echo("[PASS] orphans: no new orphans detected")
-
-        if not passed:
-            raise typer.Exit(1)
-
-    elif check == "drift":
-        pr_files = vgit.diff_refs(path, ref_a, ref_b)
-        if not pr_files:
-            typer.echo(json.dumps({"check": "drift", "passed": True, "message": "no changed files"}))
-            return
-
-        # Compare each changed file's vocabulary to the full repo
-        analysis = scan_codebase(path, git_ref=ref_b, quiet=True, deep=True)
-        file_vocabs_map = {fv.path: set(fv.vocabulary.keys()) for fv in analysis.file_vocabs}
-
-        changed_vocabs = {}
-        for f in pr_files:
-            if f in file_vocabs_map:
-                changed_vocabs[f] = file_vocabs_map[f]
-
-        if not changed_vocabs:
-            typer.echo(json.dumps({"check": "drift", "passed": True, "message": "no code files changed"}))
-            return
-
-        # Check all-changed overlap ratio — does this PR touch isolated code?
-        all_changed_phrases = set()
-        for v in changed_vocabs.values():
-            all_changed_phrases.update(v)
-
-        if len(changed_vocabs) <= 1:
-            typer.echo(json.dumps({"check": "drift", "passed": True, "message": "single file changed"}))
-            return
-
-        # Pairwise overlap between changed files
-        pairs = list(changed_vocabs.items())
-        low_overlap = []
-        for i in range(len(pairs)):
-            for j in range(i + 1, len(pairs)):
-                name_a, set_a = pairs[i]
-                name_b, set_b = pairs[j]
-                intersection = set_a & set_b
-                union = set_a | set_b
-                if union:
-                    jaccard = len(intersection) / len(union)
-                    if jaccard < 0.05 and len(intersection) < 3 and len(union) > 10:
-                        low_overlap.append({
-                            "file_a": name_a, "file_b": name_b,
-                            "jaccard": round(jaccard, 3),
-                            "shared": len(intersection),
-                        })
-
-        max_outliers = config.get("drift", {}).get("max_outliers", 3)
-        passed = len(low_overlap) <= max_outliers
-
-        if format == "json":
-            typer.echo(json.dumps({
-                "check": "drift", "passed": passed,
-                "low_overlap_pairs": low_overlap[:20],
-                "total_pairs": len(pairs) * (len(pairs) - 1) // 2,
-                "threshold": max_outliers,
-            }))
-        else:
-            if low_overlap:
-                typer.echo(f"[{'PASS' if passed else 'FAIL'}] drift: {len(low_overlap)} outlier pairs (threshold {max_outliers})")
-                for lo in low_overlap[:5]:
-                    typer.echo(f"  ⚠ {lo['file_a']} ↔ {lo['file_b']} (jaccard {lo['jaccard']:.2f})")
-            else:
-                typer.echo("[PASS] drift: all changed files share vocabulary")
-
-        if not passed:
-            raise typer.Exit(1)
-
-    else:
-        typer.echo(f"Unknown check: {check}. Use: blast, orphans, drift", err=True)
-        raise typer.Exit(1)
+    typer.echo(c(f"\n  Note: heuristic — review before treating as dead code.", "gray"))
 
 
 @cli.command()
@@ -616,16 +422,12 @@ def pr_report(
     analysis = scan_codebase(path, git_ref=ref_b, quiet=True)
     blast_results = pr_blast_radius(pr_files, analysis.file_vocabs)
 
-    # New orphans
+    # New orphans (heuristic)
     analysis_a = scan_codebase(path, git_ref=ref_a, quiet=True)
     a_dead = {d["phrase"] for d in analysis_a.dead_exports}
     b_dead = {d["phrase"] for d in analysis.dead_exports}
     new_orphans_set = b_dead - a_dead
-    orphan_details = []
-    for de in analysis.dead_exports:
-        if de["phrase"] in new_orphans_set:
-            risk = "GREEN" if "_test." in de["file"] or "/tests/" in de["file"] else "RED"
-            orphan_details.append({**de, "risk": risk})
+    orphan_details = [d for d in analysis.dead_exports if d["phrase"] in new_orphans_set]
 
     md = format_pr_report_markdown(pr_files, blast_results, orphan_details, ref_a, ref_b)
     typer.echo(md)
@@ -640,34 +442,14 @@ def init(path: Annotated[str, typer.Argument(help="Path to repo")] = "."):
         return
     os.makedirs(os.path.abspath(path), exist_ok=True)
 
-    content = """# vocab CI gate configuration
-# Run `vocab gate` for these checks in CI pipelines.
+    content = """# vocab CI configuration
+# Structural checks for CI pipelines.
 
 blast:
-  # Maximum HIGH-risk unchanged files before blocking
-  max_high: 5
-  # Maximum MEDIUM-risk unchanged files before blocking
-  max_med: 20
-  # Critical paths — these always fail HIGH regardless of share count
+  # Maximum files sharing identifiers with changed code before warning
+  max_impacted: 20
+  # File patterns to track more carefully
   critical_paths: []
-  #   - src/core/**
-  #   - src/auth/**
-
-orphans:
-  # Maximum new RED-tier orphan exports allowed
-  max_new_red: 0
-  # Exported names that are allowed as orphans (e.g., public API types)
-  allow: []
-  #   - PublicError
-  #   - ApiResponse
-
-drift:
-  # Maximum low-overlap file pairs before blocking
-  max_outliers: 3
-  # File patterns allowed to drift
-  allow: []
-  #   - src/stories/**
-  #   - docs/**
 
 lifecycle:
   # Minimum weeks of data needed for signal classification
@@ -702,9 +484,7 @@ def main():
         typer.echo("  vocab init                         generate .vocab.yml")
         typer.echo("")
         typer.echo("CI examples:")
-        typer.echo("  vocab gate blast origin/main HEAD --fail-on-high 3")
-        typer.echo("  vocab gate orphans origin/main HEAD")
-        typer.echo("  vocab gate drift origin/main HEAD")
+        typer.echo("  vocab blast origin/main HEAD")
         typer.echo("  vocab pr-report origin/main HEAD  # markdown output")
         return
     cli()

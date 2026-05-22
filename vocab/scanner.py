@@ -14,7 +14,7 @@ from vocab.segmenter import segment
 from vocab.vocabulary import build_vocabulary, Vocabulary
 from vocab.index import structural_similarity
 from vocab.analyze import FileVocab, CoOccurrenceMatrix, classify_language, compute_uniqueness
-from vocab.concepts import extract_concepts, cluster_labels, ConceptGroup
+from vocab.concepts import cluster_labels
 from vocab import git as vgit
 
 
@@ -28,7 +28,6 @@ class CodebaseAnalysis:
     phrases_by_language: dict[str, int]
     shared_across_languages: int
     top_phrases: list[tuple[str, int]]
-    concept_groups: ConceptGroup
     file_vocabs: list[FileVocab]
     co_occurrence: CoOccurrenceMatrix
     clusters: list[list[str]]
@@ -173,9 +172,6 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
     total_phrases = sum(fv.total_phrases for fv in all_file_vocabs)
     total_unique = len(all_phrase_counter)
 
-    # Extract categorized concepts — scan deep enough to find real identifiers
-    concept_groups = extract_concepts(all_phrase_counter)
-
     # Shared across languages
     lang_sets: dict[str, set[str]] = defaultdict(set)
     for fv in all_file_vocabs:
@@ -226,7 +222,6 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
         phrases_by_language=dict(lang_phrases),
         shared_across_languages=len(shared),
         top_phrases=top_phrases,
-        concept_groups=concept_groups,
         file_vocabs=all_file_vocabs,
         co_occurrence=co_matrix,
         clusters=clusters,
@@ -314,24 +309,20 @@ def _compute_landmarks(file_vocabs: list[FileVocab]) -> list[dict]:
 
 
 def _find_dead_exports(file_vocabs: list[FileVocab]) -> list[dict]:
-    """Find exported identifiers appearing in exactly 1 file.
-    
-    Extracts identifier tokens from within phrases (since the segmenter
-    produces line-level phrases — not token-level). This catches
-    cross-file references like `SanitizationPolicyRelaxed` embedded in
-    expressions like `case SanitizationPolicyRelaxed:` or
-    `return &SanitizationPolicyRelaxed{}`.
-    
-    Limitation: reflection-based usage cannot be detected.
+    """Heuristic: exported-format identifiers appearing in exactly 1 file.
+
+    This is a best-effort signal, not authoritative dead code detection.
+    The segmenter produces line-level phrases (not token-level), so cross-file
+    references embedded in expressions like `case SanitizationPolicyRelaxed:`
+    are caught by regex extraction. Limitations: reflection, generated code,
+    and indirect usage cannot be detected.
     """
     phrase_files: dict[str, str] = {}
     single_file: dict[str, str] = {}
-    
-    # Find exported-format identifiers within any phrase
-    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
+
+    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{6,40}\b')
 
     for fv in file_vocabs:
-        # Exclude lock files, generated code, non-code files, and test files
         ext = os.path.splitext(fv.path)[1].lower()
         if _is_lock_file(fv.path) or _is_generated(fv.path) or ext not in _DEAD_CODE_EXTS:
             continue
@@ -593,18 +584,17 @@ def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
 
 
 def pr_blast_radius(pr_files: list[str], all_file_vocabs: list[FileVocab],
-                    min_shared: int = 2) -> dict:
-    """Score unchanged files by vocabulary overlap with PR files.
+                    max_results: int = 200) -> dict:
+    """Measure how broadly a PR's vocabulary ripples through unchanged files.
 
-    For each PR file, extract exported-format identifiers. Then for every
-    unchanged file, compute how many identifiers it shares.
-
-    Returns dict with HIGH/MED/LOW buckets and rename warnings.
+    For each changed file, extract all qualifying identifiers. For every
+    unchanged file, count how many identifiers it shares with changed files.
+    Returns a flat sorted list — no tiered risk labels.
     """
-    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
+    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{4,40}\b')
     pr_set = set(pr_files)
 
-    # Extract all exported identifiers from PR files
+    # Extract all identifiers from PR files
     pr_vocab: set[str] = set()
     for fv in all_file_vocabs:
         if fv.path in pr_set:
@@ -626,34 +616,15 @@ def pr_blast_radius(pr_files: list[str], all_file_vocabs: list[FileVocab],
                 token = m.group()
                 if token in pr_vocab:
                     shared.add(token)
-        if len(shared) >= min_shared:
+        if shared:
             impacts.append({
                 "file": fv.path,
                 "shared_concepts": len(shared),
                 "concepts": sorted(shared, key=lambda x: -len(x))[:8],
-                "concentration": round(len(shared) / max(len(pr_vocab), 1), 3),
             })
 
     impacts.sort(key=lambda x: -x["shared_concepts"])
-
-    # Detect renames: concepts removed from PR files replaced by new ones
-    rename_warnings = []
-    # Get old names (present in all non-PR files but not in PR)
-    old_names: set[str] = set()
-    for fv in all_file_vocabs:
-        if fv.path not in pr_set:
-            for phrase in fv.vocabulary:
-                for m in _EXPORT_TOKEN.finditer(phrase):
-                    old_names.add(m.group())
-    old_names -= pr_vocab
-
-    # Check if PR file vocabulary has partial name matches with old names
-    for old in list(old_names)[:10]:
-        for new in list(pr_vocab)[:20]:
-            if old[:3] and old[:3].lower() in new.lower():
-                rename_warnings.append({"old_name": old, "new_name": new})
-
-    return {"impacts": impacts, "rename_warnings": rename_warnings}
+    return {"impacts": impacts[:max_results], "rename_warnings": []}
 
 
 def search_cross_repo_ranked(phrase: str, repo_paths: list[str]) -> list[dict]:
@@ -661,17 +632,26 @@ def search_cross_repo_ranked(phrase: str, repo_paths: list[str]) -> list[dict]:
 
     Each result shows how central the phrase is to its repo
     (file_count_with_phrase / total_files_in_repo).
+    Only counts code files — docs, config, lock files excluded.
     """
+    _SEARCH_CODE_EXTS = frozenset({
+        ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".c", ".cpp",
+        ".h", ".hpp", ".java", ".kt", ".rb", ".php", ".swift",
+    })
+
     results = []
     for repo in repo_paths:
         try:
             analysis = scan_codebase(repo, quiet=True)
         except Exception:
             continue
-        total = len(analysis.file_vocabs)
+        total = 0
         matches = []
         for fv in analysis.file_vocabs:
-            # Case-insensitive substring match
+            ext = os.path.splitext(fv.path)[1].lower()
+            if ext not in _SEARCH_CODE_EXTS:
+                continue
+            total += 1
             if phrase.lower() in " ".join(fv.vocabulary.keys()).lower():
                 matches.append({
                     "file": fv.path,
