@@ -516,13 +516,152 @@ def explore(
         typer.echo("")
 
 
+def _print_agent_checklist(data: dict, task: str | None):
+    c = lambda t, col: _color(t, col)
+
+    reads = data.get("recommended_next_reads", [])
+    related = data.get("related_files_for_task", [])
+    bc = data.get("binding_concepts", [])
+    likely = data.get("task_plan", {}).get("likely_edit_files", [])
+    stability = data.get("avoid_touching_without_context", [])
+    modules = data.get("module_boundaries", [])
+    themes = data.get("themes", [])
+    total_code = data.get("total_code_files", 0)
+
+    source_related = [item for item in related if item.get("role") != "test"]
+    test_related = [item for item in related if item.get("role") == "test"]
+    first_task_read = source_related[0]["file"] if source_related else None
+    first_edit = likely[0] if likely else None
+    first_test = test_related[0]["file"] if test_related else None
+    first_arch = None
+    if first_task_read:
+        for r in reads:
+            if r["file"] != first_task_read:
+                first_arch = r["file"]
+                break
+    elif reads:
+        first_arch = reads[0]["file"]
+
+    # Header
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  AGENT BOOTSTRAP — EXECUTABLE CHECKLIST", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    if task:
+        relevance = data.get("task_relevance_score", 0)
+        rl, rc, rr = _relevance_label(relevance)
+        typer.echo(c(f"  TASK: {task}", "bold"))
+        typer.echo(c(f"  TASK MATCH: {rl} ({relevance:.0%}) — {rr}", rc))
+    typer.echo("")
+
+    # Steps
+    step = 0
+    seen_paths: set[str] = set()
+    typer.echo(c("  STEPS (execute in order):", "subheader"))
+    typer.echo(c(f"  {'─' * 55}", "gray"))
+
+    # Phase 1: READ (task-related source file)
+    if task and first_task_read and first_task_read not in seen_paths:
+        step += 1
+        seen_paths.add(first_task_read)
+        ids = ""
+        for item in source_related:
+            if item.get("file") == first_task_read and item.get("distinctive_ids"):
+                ids = c(f" → {', '.join(item['distinctive_ids'][:3])}", "gray")
+                break
+        typer.echo(f"    [{step}] READ   {c(first_task_read, 'green')}{ids}")
+        typer.echo(c(f"           Understand this file before making changes.", "gray"))
+        seen_paths.add(first_task_read)
+
+    # Phase 2: CONTEXT (architecture reads that differ from task read)
+    arch_entries = []
+    for r in reads:
+        if r["file"] not in seen_paths and len(arch_entries) < 2:
+            arch_entries.append(r)
+    for entry in arch_entries:
+        step += 1
+        seen_paths.add(entry["file"])
+        ids = c(f" → {', '.join(entry['distinctive_ids'][:3])}", "gray") if entry.get("distinctive_ids") else ""
+        typer.echo(f"    [{step}] CONTEXT {c(entry['file'], 'cyan')}{ids}")
+        typer.echo(c(f"           Architecture context for the task.", "gray"))
+
+    # Phase 3: PREREQUISITE (binding concepts)
+    bc_shown = 0
+    for b in bc:
+        if bc_shown >= 2:
+            break
+        if b["file_count"] >= 3:
+            step += 1
+            bc_shown += 1
+            def_file = b.get("files", ["unknown"])[0]
+            typer.echo(f"    [{step}] PREREQ {c(b['concept'], 'yellow')} ({c(str(b['file_count']), 'cyan')} files)")
+            typer.echo(c(f"           Defined in {def_file}. Understand before editing.", "gray"))
+
+    # Phase 4: EDIT (likely edit target)
+    if task and first_edit:
+        step += 1
+        ids = ""
+        if first_edit in seen_paths:
+            ids = c(" (already read above — now edit it)", "gray")
+        else:
+            seen_paths.add(first_edit)
+            for item in source_related:
+                if item.get("file") == first_edit and item.get("distinctive_ids"):
+                    ids = c(f" → defines {', '.join(item['distinctive_ids'][:3])}", "gray")
+                    break
+        typer.echo(f"    [{step}] EDIT   {c(first_edit, 'yellow')}{ids}")
+
+    # Phase 5: VERIFY (test files)
+    if task and first_test and first_test not in seen_paths:
+        step += 1
+        seen_paths.add(first_test)
+        typer.echo(f"    [{step}] VERIFY {c(first_test, 'magenta')}")
+        typer.echo(c(f"           All tests must pass after edit.", "gray"))
+
+    typer.echo("")
+
+    # Guardrails
+    if stability or bc:
+        typer.echo(c("  GUARDRAILS:", "subheader"))
+        typer.echo(c(f"  {'═' * 55}", "gray"))
+
+        for s in stability[:5]:
+            pct = s.get("persistence", 0)
+            if pct <= 0.3:
+                label = "HIGH CHURN"
+            elif pct >= 0.8:
+                label = "STABLE"
+            else:
+                continue
+            typer.echo(f"    ⚠ {c('DO NOT EDIT', 'red')}: {s['file']} ({label} {pct:.0%})")
+            typer.echo(c(f"      {s.get('reason', '')}", "gray"))
+
+        for b in bc[:3]:
+            if b["file_count"] >= 5 and b["concept"] not in [x["concept"] for x in bc[:bc_shown] if bc_shown]:
+                def_file = b.get("files", ["unknown"])[0]
+                typer.echo(f"    ⚠ {c('UNDERSTAND FIRST', 'yellow')}: {b['concept']} ({b['file_count']} files)")
+
+        typer.echo("")
+
+    # Footer
+    mod_str = f"{len(modules)} module boundaries" if modules else ""
+    theme_str = f"{len(themes)} themes" if themes else ""
+    footer = " | ".join(filter(None, [mod_str, theme_str, f"{total_code} code files"]))
+    if footer:
+        typer.echo(c(f"  {footer}", "gray"))
+
+    # Protocol
+    typer.echo("")
+    typer.echo(c(f"  {'─' * 55}", "gray"))
+    typer.echo(c("  Execute steps in order. Stop and report if any step fails.", "subheader"))
+
+
 @cli.command(name="agent-bootstrap")
 def agent_bootstrap(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description to find related files")] = None,
     verify_relevance: Annotated[bool, typer.Option("--verify-relevance", help="Verify surfaced files contain task keywords")] = False,
     summary: Annotated[bool, typer.Option("--summary", help="Only show the decision-oriented startup summary")] = False,
-    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json, checklist")] = "compact",
 ):
     """One-shot agent bootstrap: explore + modules + stability + related files.
 
@@ -543,6 +682,10 @@ def agent_bootstrap(
 
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
+        return
+
+    if format == "checklist":
+        _print_agent_checklist(data, task)
         return
 
     if verify_relevance and "task_relevance_score" in data:

@@ -97,6 +97,35 @@ class VocabCliTests(unittest.TestCase):
             self.assertIn("verified_files", data)
             self.assertIn("unverified_files", data)
 
+    def test_checklist_with_task(self) -> None:
+        with self.make_repo() as tmp:
+            repo = Path(tmp)
+            result = self.run_vocab("agent-bootstrap", str(repo), "--task", "fix upload handler", "--format", "checklist")
+            self.assertIn("EXECUTABLE CHECKLIST", result.stdout)
+            self.assertIn("[1] READ", result.stdout)
+            self.assertIn("[2]", result.stdout)
+            for label in ("READ", "EDIT", "VERIFY", "PREREQ"):
+                if label in ("PREREQ",):
+                    continue
+                self.assertIn(f"[", result.stdout)
+
+    def test_checklist_no_task(self) -> None:
+        with self.make_repo() as tmp:
+            repo = Path(tmp)
+            result = self.run_vocab("agent-bootstrap", str(repo), "--format", "checklist")
+            self.assertIn("EXECUTABLE CHECKLIST", result.stdout)
+            self.assertIn("CONTEXT", result.stdout)
+            self.assertNotIn("CCONTEXT", result.stdout)  # no stray artifact
+
+    def test_checklist_json_structure(self) -> None:
+        with self.make_repo() as tmp:
+            repo = Path(tmp)
+            json_result = self.run_vocab("agent-bootstrap", str(repo), "--task", "fix upload handler", "--format", "json")
+            data = json.loads(json_result.stdout)
+            self.assertIn("binding_concepts", data)
+            self.assertIn("schema_version", data)
+            self.assertIn("task_plan", data)
+
     def test_ci_report_json_schema_and_gate_exit_codes(self) -> None:
         with self.make_repo() as tmp:
             repo = Path(tmp)
