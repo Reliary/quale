@@ -842,6 +842,13 @@ _DEAD_CODE_EXTS = frozenset({
     ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
     ".py", ".rs", ".c", ".cpp", ".h", ".hpp", ".java",
     ".kt", ".kts", ".swift", ".rb", ".php",
+    ".nix", ".ml", ".mli", ".erl", ".hrl",
+    ".ex", ".exs", ".eex", ".heex",
+    ".zig",
+    ".hs", ".lhs",
+    ".clj", ".cljs", ".cljc",
+    ".sml", ".fs", ".fsx",
+    ".r", ".jl", ".scala",
 })
 
 
@@ -1165,7 +1172,7 @@ def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | N
 
         # Role weighting: source files first, tests/scripts/examples lower
         role = _task_file_role(path)
-        role_penalty = {"source": 1.0, "script": 0.6, "example": 0.3, "test": 0.3}.get(role, 0.5)
+        role_penalty = {"source": 1.0, "header": 0.6, "script": 0.6, "example": 0.3, "test": 0.3}.get(role, 0.5)
 
         # Unique-concept score: identifiers that appear in few files (rare = more characteristic)
         unique_score = sum(1 / max(identifier_file_count[i], 1) for i in identifiers) * gen_penalty * role_penalty
@@ -1535,11 +1542,14 @@ def _task_file_role(path: str) -> str:
         return "example"
     if "scripts" in parts or "script" in parts:
         return "script"
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    if ext in ("h", "hpp", "hxx"):
+        return "header"
     return "source"
 
 
 def _task_role_rank(role: str) -> int:
-    return {"source": 0, "script": 1, "example": 2, "test": 3}.get(role, 4)
+    return {"source": 0, "header": 0, "script": 1, "example": 2, "test": 3}.get(role, 4)
 
 
 def _task_plan(task: str | None, related: list[dict], reads: list[dict],

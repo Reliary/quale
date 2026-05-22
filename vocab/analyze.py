@@ -69,6 +69,16 @@ def classify_language(path: str) -> str:
         "dockerfile": "Dockerfile", "sh": "Shell", "bash": "Shell",
         "zsh": "Shell", "fish": "Shell", "proto": "Protobuf",
         "html": "HTML", "css": "CSS", "scss": "SCSS",
+        # Weird / niche languages
+        "nix": "Nix", "ml": "OCaml", "mli": "OCaml",
+        "erl": "Erlang", "hrl": "Erlang",
+        "ex": "Elixir", "exs": "Elixir",
+        "eex": "Elixir", "heex": "Elixir",
+        "zig": "Zig",
+        "hs": "Haskell", "lhs": "Haskell",
+        "clj": "Clojure", "cljs": "Clojure", "cljc": "Clojure",
+        "sml": "SML", "fs": "F#", "fsx": "F#",
+        "r": "R", "jl": "Julia", "scala": "Scala",
     }
     if path.endswith("Dockerfile") or path.endswith("dockerfile"):
         return "Dockerfile"
