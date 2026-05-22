@@ -423,7 +423,16 @@ def stable(
 
     data = compute_stability(path, weeks=weeks)
     if not data:
-        typer.echo("Not enough snapshot data.")
+        if format == "json":
+            typer.echo(json.dumps({
+                "schema_version": 1,
+                "stability_anchors": [],
+                "churn_hotspots": [],
+                "total_files": 0,
+                "weeks": weeks,
+            }))
+        else:
+            typer.echo("Not enough snapshot data.")
         return
 
     c = lambda t, color: _color(t, color)
@@ -551,22 +560,46 @@ def agent_bootstrap(
     reads = data.get("recommended_next_reads", [])
     related = data.get("related_files_for_task", [])
     modules = data.get("module_boundaries", [])
+    bc = data.get("binding_concepts", [])
     likely = data.get("task_plan", {}).get("likely_edit_files", [])
     source_related = [item for item in related if item.get("role") != "test"]
     test_related = [item for item in related if item.get("role") == "test"]
     first_task_read = source_related[0]["file"] if source_related else (related[0]["file"] if task and related else None)
     first_arch_read = reads[0]["file"] if reads else None
+
+    # Build annotation for the main read line
+    read_annotation = ""
+    if task and source_related and source_related[0].get("distinctive_ids"):
+        read_annotation = f" — {', '.join(source_related[0]['distinctive_ids'])}"
+    elif not task and reads and reads[0].get("distinctive_ids"):
+        read_annotation = f" — {', '.join(reads[0]['distinctive_ids'])}"
+
     typer.echo(c("  START HERE:", "subheader"))
-    typer.echo(f"    Read: {c(first_task_read or first_arch_read or 'no files found', 'green')}")
+    typer.echo(f"    Read: {c(first_task_read or first_arch_read or 'no files found', 'green')}{c(read_annotation, 'gray')}")
     if task:
         typer.echo(f"    Task match: {c(relevance_label, relevance_color)} ({relevance:.0%}) - {c(relevance_reason, 'gray')}")
         if likely:
-            typer.echo(f"    Likely edit: {c(likely[0], 'yellow')}")
+            task_annotation = ""
+            for item in related:
+                if item.get("file") == likely[0] and item.get("distinctive_ids"):
+                    task_annotation = f" — defines {', '.join(item['distinctive_ids'][:3])}"
+                    break
+            typer.echo(f"    Likely edit: {c(likely[0], 'yellow')}{c(task_annotation, 'gray')}")
         if test_related:
             typer.echo(f"    Verification hint: {c(test_related[0]['file'], 'cyan')}")
         if first_arch_read and first_arch_read != first_task_read:
-            typer.echo(f"    Architecture context: {c(first_arch_read, 'cyan')}")
+            arch_annotation = ""
+            for r in reads:
+                if r["file"] == first_arch_read and r.get("distinctive_ids"):
+                    arch_annotation = f" — {', '.join(r['distinctive_ids'])}"
+                    break
+            typer.echo(f"    Architecture context: {c(first_arch_read, 'cyan')}{c(arch_annotation, 'gray')}")
     typer.echo(f"    Modules: {c(str(len(modules)), 'cyan')} structural groups detected")
+    if bc:
+        top = bc[0]
+        typer.echo(f"    Binds: {c(top['concept'], 'yellow')} ({top['file_count']} files){c(' — read first to understand the dependency chain', 'gray')}")
+        if len(bc) > 1:
+            typer.echo(f"           {c(bc[1]['concept'], 'yellow')} ({bc[1]['file_count']} files){c(f' — {bc[1]["files"][0]}', 'gray')}")
     typer.echo("")
 
     if summary:
@@ -583,7 +616,10 @@ def agent_bootstrap(
         typer.echo(c(f"  {read_label}", "subheader"))
         for r in reads:
             score_str = f'{r["score"]:6.1f}'
-            typer.echo(f"    {c(r['language'], 'cyan'):<10} {c(score_str, 'green')}  {r['file']:<50}  {c(r['reason'], 'gray')}")
+            annotation = ""
+            if r.get("distinctive_ids"):
+                annotation = c(f" — {', '.join(r['distinctive_ids'][:3])}", "gray")
+            typer.echo(f"    {c(r['language'], 'cyan'):<10} {c(score_str, 'green')}  {r['file']:<50}  {c(r['reason'], 'gray')}{annotation}")
         typer.echo("")
 
     avoid = data.get("avoid_touching_without_context", [])
@@ -599,7 +635,17 @@ def agent_bootstrap(
         for r in related[:5]:
             role = r.get("role", "source")
             role_color = "yellow" if role == "source" else "cyan"
-            typer.echo(f"    {c(role, role_color):<10} {r['file']:<50}  {c(r['phrase'], 'gray')}")
+            annotation = ""
+            if r.get("distinctive_ids"):
+                annotation = c(f" — {', '.join(r['distinctive_ids'][:3])}", "gray")
+            typer.echo(f"    {c(role, role_color):<10} {r['file']:<50}  {c(r['phrase'], 'gray')}{annotation}")
+        typer.echo("")
+
+    if bc:
+        typer.echo(c("  BINDING CONCEPTS:", "subheader"))
+        for b in bc[:6]:
+            files_str = ', '.join(b["files"][:3])
+            typer.echo(f"    {c(b['concept'], 'yellow'):<30} {c(f'{b["file_count"]:>4} files', 'cyan')}  {c(files_str, 'gray')}")
         typer.echo("")
 
     task_plan = data.get("task_plan", {})

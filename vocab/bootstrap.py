@@ -65,6 +65,7 @@ def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | N
         unique_score = sum(1 / max(identifier_file_count[i], 1) for i in identifiers) * gen_penalty * role_penalty
 
         ident_count = len(identifiers)
+        distinctive = sorted(identifiers, key=lambda i: identifier_file_count.get(i, 999))[:3]
 
         scored.append({
             "file": path,
@@ -72,6 +73,7 @@ def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | N
             "identifiers": ident_count,
             "unique_score": round(unique_score, 2),
             "coverage": round(ident_count / max(len(identifier_file_count), 1), 4),
+            "distinctive_ids": distinctive,
         })
 
     scored.sort(key=lambda x: -x["unique_score"])
@@ -82,6 +84,26 @@ def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | N
         result["themes"] = _compute_themes(file_identifiers)
 
     return result
+
+
+def _binding_concepts_from_analysis(analysis, limit=10):
+    """Get binding concepts from a shared scan analysis."""
+    from vocab.scanner import _binding_concepts
+    return _binding_concepts(analysis, limit=limit)
+
+
+def _distinctive_ids(file_identifiers: list[tuple[str, str, set[str]]],
+                     identifier_file_count: Counter[str],
+                     file_path: str) -> list[str]:
+    matched = None
+    for fpath, _, idents in file_identifiers:
+        if fpath == file_path:
+            matched = idents
+            break
+    if not matched:
+        return []
+    sorted_ids = sorted(matched, key=lambda i: identifier_file_count.get(i, 999))
+    return sorted_ids[:3]
 
 
 def _compute_themes(file_identifiers: list[tuple[str, str, set[str]]]) -> list[dict]:
@@ -393,6 +415,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
             "score": f["unique_score"],
             "language": f["language"],
             "reason": reason,
+            "distinctive_ids": f.get("distinctive_ids", []),
         })
         if len(reads) >= 10:
             break
@@ -403,6 +426,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
                 "score": f["unique_score"],
                 "language": f["language"],
                 "reason": "Top coverage file",
+                "distinctive_ids": f.get("distinctive_ids", []),
             })
 
     hotspots = [x for x in stability_data
@@ -455,6 +479,19 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
     themes_out = explore_data.get("themes", [])
     task_plan = _task_plan(task, related, reads, modules_data, stability_data)
 
+    # Binding concepts
+    bc = _binding_concepts_from_analysis(analysis, limit=10)
+
+    # Enrich related items with distinctive_ids from explore data
+    id_file_map: dict[str, list[str]] = {}
+    for f_entry in explore_data.get("files", []):
+        if f_entry.get("distinctive_ids"):
+            id_file_map[f_entry["file"]] = f_entry["distinctive_ids"]
+    for item in related:
+        fp = item.get("file", "")
+        if fp in id_file_map:
+            item["distinctive_ids"] = id_file_map[fp]
+
     return {
         "schema_version": 1,
         "recommended_next_reads": reads,
@@ -465,6 +502,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
         "verified_files": verified_files,
         "unverified_files": unverified_files,
         "module_boundaries": modules_data.get("modules", []),
+        "binding_concepts": bc,
         "themes": themes_out,
         "agent_notes": notes,
         "total_code_files": explore_data.get("total_code_files", 0),
