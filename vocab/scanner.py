@@ -308,27 +308,71 @@ def _compute_landmarks(file_vocabs: list[FileVocab]) -> list[dict]:
 
 
 def _find_dead_exports(file_vocabs: list[FileVocab]) -> list[dict]:
-    """Find phrases appearing in exactly 1 file. Filters to code-level exports."""
+    """Find exported identifiers appearing in exactly 1 file.
+    
+    Extracts identifier tokens from within phrases (since the segmenter
+    produces line-level phrases — not token-level). This catches
+    cross-file references like `SanitizationPolicyRelaxed` embedded in
+    expressions like `case SanitizationPolicyRelaxed:` or
+    `return &SanitizationPolicyRelaxed{}`.
+    
+    Limitation: reflection-based usage cannot be detected.
+    """
     phrase_files: dict[str, str] = {}
     single_file: dict[str, str] = {}
-
-    # Must match an identifier pattern (exported function/type/variable name)
-    _ID_PATTERN = re.compile(r'^[A-Z][A-Za-z0-9_]+$')
+    
+    # Find exported-format identifiers within any phrase
+    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
 
     for fv in file_vocabs:
+        # Exclude lock files, generated code, non-code files, and test files
+        ext = os.path.splitext(fv.path)[1].lower()
+        if _is_lock_file(fv.path) or _is_generated(fv.path) or ext not in _DEAD_CODE_EXTS:
+            continue
+        if "/tests/" in fv.path or "/testdata/" in fv.path or fv.path.endswith("_test.go") or ".test.ts" in fv.path:
+            continue
+        seen_in_file: set[str] = set()
         for phrase in fv.vocabulary:
-            if not _ID_PATTERN.match(phrase):
-                continue
-            if phrase in phrase_files:
-                single_file.pop(phrase, None)
-            else:
-                phrase_files[phrase] = fv.path
-                single_file[phrase] = fv.path
+            for m in _EXPORT_TOKEN.finditer(phrase):
+                token = m.group()
+                if token in seen_in_file:
+                    continue
+                seen_in_file.add(token)
+                if token in phrase_files:
+                    single_file.pop(token, None)
+                else:
+                    phrase_files[token] = fv.path
+                    single_file[token] = fv.path
 
     dead = []
     for phrase, filepath in sorted(single_file.items(), key=lambda x: -len(x[0])):
         dead.append({"phrase": phrase, "file": filepath})
     return dead[:50]
+
+    dead = []
+    for phrase, filepath in sorted(single_file.items(), key=lambda x: -len(x[0])):
+        dead.append({"phrase": phrase, "file": filepath})
+    return dead[:50]
+
+
+def _is_lock_file(path: str) -> bool:
+    base = os.path.basename(path)
+    return base in ("pnpm-lock.yaml", "package-lock.json", "yarn.lock", "Cargo.lock", "go.sum", "poetry.lock")
+
+
+def _is_generated(path: str) -> bool:
+    base = os.path.basename(path)
+    return (base.startswith("zz_") or base == "zz_generated.go"
+            or base.endswith(".pb.go") or base.endswith(".pb.ts")
+            or ".min." in path or ".generated." in path)
+
+
+# Only these file types are scanned for dead export detection
+_DEAD_CODE_EXTS = frozenset({
+    ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".py", ".rs", ".c", ".cpp", ".h", ".hpp", ".java",
+    ".kt", ".kts", ".swift", ".rb", ".php",
+})
 
 
 def concept_timeline(path: str, weeks: int = 12) -> list[dict]:
