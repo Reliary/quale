@@ -13,44 +13,59 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-# Patterns to identify meaningful concepts vs syntax noise
+# ── Patterns ──
 _IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_.]*$')
-_EXPORTED = re.compile(r'^[A-Z][A-Za-z0-9_]*$')  # starts uppercase
+_EXPORTED = re.compile(r'^[A-Z][A-Za-z0-9_]*$')
+_ALLCAPS = re.compile(r'^[A-Z][A-Z0-9_]{2,}$')
 _IMPORT_PATH = re.compile(r'^[a-z][a-z0-9./_-]*/[A-Za-z][A-Za-z0-9_./-]*$')
 _MODULE_PATH = re.compile(r'^[a-z][a-z0-9.-]+\.[a-z]{2,}/[A-Za-z]')
 _ERROR_TYPE = re.compile(r'^(Err|Error|Invalid|NotFound|Unauthorized|Forbidden|BadRequest)[A-Za-z0-9]*$')
-_ERROR_MESSAGE = re.compile(r'^".*error.*"$', re.I)
+_ERR_PREFIX = re.compile(r'^(error|Error|err[^A-Z]|Err[^A-Z]|errors\.)', re.I)  # not all-caps ERRON
 _ROUTE = re.compile(r'^/(api|v1|v2|health|auth|users|admin|settings)/')
-_SQL_TABLE = re.compile(r'^[a-z][a-z0-9_]*$')  # snake_case
+_SQL_TABLE = re.compile(r'^[a-z][a-z0-9_]*$')
 
-# Syntax patterns to exclude from "top concepts"
+# C/C++ macros that look like exports but aren't
+_C_MACROS = frozenset({
+    "NULL", "TRUE", "FALSE", "EOF", "MIN", "MAX", "ABS", "STDIN", "STDOUT",
+    "STDERR", "CHAR_BIT", "INT_MAX", "INT_MIN", "UINT_MAX", "SIZE_MAX",
+    "ERRNO", "EINTR", "EAGAIN", "EWOULDBLOCK", "EACCES", "EEXIST",
+    "EINVAL", "ENOENT", "ENOMEM", "EPERM", "EPIPE", "ERANGE",
+})
+
+# Common short exports that are usually noise (C functions, test helpers, etc.)
+_NOISE_EXPORTS = frozenset({
+    "Hello", "World", "Main", "Test", "Benchmark", "Example",
+    "Handler", "Server", "Client", "Config", "Options",
+    "Request", "Response", "Error", "Result", "Status",
+})
+_DUNDER = re.compile(r'^__[A-Za-z0-9_]+__$')
+
+# Syntax tokens — exact match
 _SYNTAX = frozenset({
-    # Brackets
     "}", ")", "]", "{", "(", "[", "});", "})", "]);", "},",
     "});", "}])", "}));", "}},", "}],",
-    # HTML
     "</div>", "<div>", "</tr>", "<tr>", "</td>", "<td",
     "</a>", "<a", "</span>", "<span>", "</p>", "<p>",
     "</li>", "<li>", "</ul>", "<ul>", "</body>", "</html>",
     "<!DOCTYPE html>", "<head>", "</head>",
-    # Markdown
     "```", "---", "```bash", "```json", "```typescript",
     "```python", "```go", "```yaml", "```sql", "```shell",
-    # Code structure
-    "};", "});", "});", "},", "),", ");", ");",
+    "};", "});", "});", "},", "),", ");",
     "return {", "return;", "return nil", "return err",
     "if err != nil {", "if err != nil", "if err != nil {",
     "err != nil {", "err != nil",
     "t.Parallel()", "defer", "go func() {",
     "import (", "package ", "func ", "type ", "const ",
-    # Common shell
     "#!/bin/bash", "#!/usr/bin/env bash", "echo \"\"", "fi", "done",
-    # Common formatting
     '"dev": true,', '"license": "MIT",',
     '"dependencies": {', '"engines": {', '"scripts": {',
     "optional: true", "optional: false",
+    # C/C++ preprocessor
+    "#include", "#define", "#ifdef", "#ifndef", "#endif", "#else",
+    "#if", "#pragma", "#error", "#warning", "#undef",
+    "endif", "end", "ifdef", "ifndef", "else", "elif",
 })
 
 _SYNTAX_PREFIX = frozenset({
@@ -58,26 +73,23 @@ _SYNTAX_PREFIX = frozenset({
     "```", "#!/",
 })
 
+# Code syntax markers — if a phrase contains any of these, it's code not a concept
+_CODE_MARKERS = frozenset({";", "(", ")", "{", "}", "[", "]", "*", "&", "->", "=>", "==", "+=", "-=", "/=", "!="})
+
 
 @dataclass
 class ConceptGroup:
-    exported: list[tuple[str, int]] = None
-    identifier: list[tuple[str, int]] = None
-    import_path: list[tuple[str, int]] = None
-    error: list[tuple[str, int]] = None
-    api: list[tuple[str, int]] = None
-    config: list[tuple[str, int]] = None
-    db: list[tuple[str, int]] = None
-    syntax: list[tuple[str, int]] = None
-    other: list[tuple[str, int]] = None
-
-    def __post_init__(self):
-        for field in self.__dataclass_fields__:
-            if getattr(self, field) is None:
-                setattr(self, field, [])
+    exported: list[tuple[str, int]] = field(default_factory=list)
+    identifier: list[tuple[str, int]] = field(default_factory=list)
+    import_path: list[tuple[str, int]] = field(default_factory=list)
+    error: list[tuple[str, int]] = field(default_factory=list)
+    api: list[tuple[str, int]] = field(default_factory=list)
+    config: list[tuple[str, int]] = field(default_factory=list)
+    db: list[tuple[str, int]] = field(default_factory=list)
+    syntax: list[tuple[str, int]] = field(default_factory=list)
+    other: list[tuple[str, int]] = field(default_factory=list)
 
 
-# Common programming keywords — not meaningful identifiers
 _KEYWORDS = frozenset({
     "if", "else", "for", "while", "do", "switch", "case", "break",
     "continue", "return", "try", "catch", "finally", "throw",
@@ -92,14 +104,35 @@ _KEYWORDS = frozenset({
     "and", "or", "not", "is", "None", "True", "False",
     "def", "raise", "lambda", "pass", "except", "finally",
     "elif", "self", "cls",
+    "auto", "extern", "register", "static", "volatile",
+    "constexpr", "virtual", "override", "inline", "template",
+    "typename", "namespace", "using", "friend", "mutable",
+    "explicit", "operator", "sizeof", "typedef", "union",
+    "unsigned", "signed", "short", "double", "float", "char",
+    "long", "size_t", "ssize_t", "ptrdiff_t", "wchar_t",
+    "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t",
+    "uint32_t", "uint64_t",
 })
+
+
+def _is_code_line(phrase: str) -> bool:
+    """Detect if a phrase looks like source code rather than a concept name."""
+    stripped = phrase.strip('"').strip("'")
+    if any(m in stripped for m in _CODE_MARKERS) and len(stripped) >= 4:
+        return True
+    if stripped.startswith(("*", "&")):
+        return True
+    # Variable assignment: `x = value` (not config-key style `KEY=value`)
+    if "=" in stripped and " " in stripped and not _ALLCAPS.match(stripped.split("=")[0].strip()):
+        return True
+    return False
 
 
 def classify_phrase(phrase: str) -> str:
     """Classify a single phrase into a concept category."""
     clean = phrase.strip('"').strip("'")
 
-    # Syntax exclusion passes
+    # ── Syntax exclusion passes ──
     if phrase in _SYNTAX:
         return "syntax"
     if any(phrase.startswith(p) for p in _SYNTAX_PREFIX):
@@ -110,14 +143,20 @@ def classify_phrase(phrase: str) -> str:
         return "syntax"
     if clean in _KEYWORDS:
         return "syntax"
+    if _DUNDER.match(phrase):
+        return "syntax"
+    if _ALLCAPS.match(clean) and len(clean) <= 5 and clean in _C_MACROS:
+        return "syntax"
+    if _is_code_line(phrase):
+        return "syntax"
 
-    # Error types
+    # ── Error types (word boundary aware) ──
     if _ERROR_TYPE.match(clean):
         return "error"
-    if "error" in clean[:20].lower() or "err" == clean[:3]:
+    if _ERR_PREFIX.match(clean) and not _ALLCAPS.match(clean):
         return "error"
 
-    # Routes
+    # ── API routes ──
     if _ROUTE.match(clean):
         return "api"
     if clean.startswith("GET ") or clean.startswith("POST ") or clean.startswith("PUT ") or clean.startswith("DELETE "):
@@ -125,29 +164,35 @@ def classify_phrase(phrase: str) -> str:
     if ".HandleFunc(" in clean or ".Handle(" in clean or "router." in clean:
         return "api"
 
-    # Import paths
+    # ── Import paths ──
     if _MODULE_PATH.match(clean) and "/" in clean:
         return "import_path"
     if _IMPORT_PATH.match(clean) and "/" in clean:
         return "import_path"
 
-    # Export
+    # ── Exports (reject all-caps C macros and common noise) ──
     if _EXPORTED.match(clean):
+        if clean in _NOISE_EXPORTS:
+            return "identifier"
+        if _ALLCAPS.match(clean) and (len(clean) <= 6 or clean in _C_MACROS):
+            return "identifier"
         return "exported"
 
-    # Identifier
+    # ── Identifiers ──
     if _IDENTIFIER.match(clean):
         return "identifier"
 
-    # Config / env
+    # ── Config / env (reject code lines with =) ──
     if clean.startswith("--") or clean.startswith("-"):
         return "config"
     if clean.startswith("_") and clean.endswith("_"):
         return "config"
     if "=" in clean and not clean.startswith('"') and not clean.startswith("'"):
+        if _is_code_line(clean):
+            return "syntax"
         return "config"
 
-    # DB
+    # ── DB ──
     if _SQL_TABLE.match(clean) and "sql" in clean[:10]:
         return "db"
     if ".sql.go" in clean:
@@ -159,7 +204,7 @@ def classify_phrase(phrase: str) -> str:
 
 
 def extract_concepts(phrase_counter: Counter) -> ConceptGroup:
-    """Categorize all phrases into concept groups. Takes full Counter, not pre-truncated list."""
+    """Categorize all phrases into concept groups."""
     groups = ConceptGroup()
 
     for phrase, freq in phrase_counter.most_common():
@@ -183,15 +228,14 @@ def extract_concepts(phrase_counter: Counter) -> ConceptGroup:
             groups.syntax.append(entry)
         else:
             groups.other.append(entry)
-        # Limits per category — no need to process all 200K phrases
+
         if (len(groups.exported) >= 50 and len(groups.identifier) >= 50
             and len(groups.error) >= 30 and len(groups.api) >= 20
             and len(groups.config) >= 20 and len(groups.import_path) >= 20):
             break
 
-    # Sort each group by frequency descending
-    for field in groups.__dataclass_fields__:
-        items = getattr(groups, field, [])
+    for field_name in groups.__dataclass_fields__:
+        items = getattr(groups, field_name, [])
         items.sort(key=lambda x: -x[1])
 
     return groups
@@ -199,11 +243,10 @@ def extract_concepts(phrase_counter: Counter) -> ConceptGroup:
 
 def cluster_labels(phrases: list[str], max_label_phrases: int = 3) -> str:
     """Generate a human-readable label for a co-occurrence cluster."""
-    # Try to detect the theme from exported/types/imports
-    exported = [p for p in phrases if _EXPORTED.match(p)]
+    exported = [p for p in phrases if _EXPORTED.match(p) and not _ALLCAPS.match(p)]
     imports = [p for p in phrases if _MODULE_PATH.match(p) or (_IMPORT_PATH.match(p) and "/" in p)]
-    errors = [p for p in phrases if _ERROR_TYPE.match(p) or "error" in p[:20].lower()]
-    configs = [p for p in phrases if "=" in p and not p.startswith('"')]
+    errors = [p for p in phrases if _ERROR_TYPE.match(p) or _ERR_PREFIX.match(p)]
+    configs = [p for p in phrases if "=" in p and not p.startswith('"') and not _is_code_line(p)]
     identifiers = [p for p in phrases if _IDENTIFIER.match(p)]
 
     theme = None
@@ -219,7 +262,6 @@ def cluster_labels(phrases: list[str], max_label_phrases: int = 3) -> str:
         theme = f"Pattern ({', '.join(i[:25] for i in identifiers[:max_label_phrases])})"
 
     if theme is None:
-        # Fallback: take first few unique phrases
         sample = []
         for p in phrases:
             if p not in sample and len(p) >= 3 and len(p) <= 40:

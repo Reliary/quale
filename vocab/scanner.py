@@ -337,6 +337,8 @@ def _find_dead_exports(file_vocabs: list[FileVocab]) -> list[dict]:
             continue
         if "/tests/" in fv.path or "/testdata/" in fv.path or fv.path.endswith("_test.go") or ".test.ts" in fv.path:
             continue
+        if "/vendor/" in fv.path or fv.path.startswith("vendor/") or "/third_party/" in fv.path or "/third-party/" in fv.path:
+            continue
         seen_in_file: set[str] = set()
         for phrase in fv.vocabulary:
             for m in _EXPORT_TOKEN.finditer(phrase):
