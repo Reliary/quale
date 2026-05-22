@@ -14,7 +14,7 @@ except ImportError:
     sys.exit(1)
 
 from vocab.scanner import scan_codebase, concept_timeline, search_cross_repo
-from vocab.formats.terminal import format_terminal, format_json, format_html
+from vocab.formats.terminal import format_terminal, format_json, format_html, format_quick
 from vocab.index import encode_indices, decode_indices, index_sequence_hash, structural_similarity
 from vocab.vocabulary import build_vocabulary
 from vocab.segmenter import segment
@@ -24,12 +24,28 @@ from vocab import git as vgit
 cli = typer.Typer(help="vocab — grammar-free structural codebase analyzer.")
 
 
+def _bar(pct: float, width: int = 20) -> str:
+    filled = int(pct / 100 * width)
+    return "█" * filled + "░" * (width - filled)
+
+
+def _color(text: str, color: str) -> str:
+    codes = {
+        "header": "\033[1;36m", "subheader": "\033[1;33m",
+        "green": "\033[32m", "red": "\033[31m", "yellow": "\033[33m",
+        "cyan": "\033[36m", "gray": "\033[90m", "bold": "\033[1m",
+        "reset": "\033[0m",
+    }
+    return f"{codes.get(color, '')}{text}{codes['reset']}"
+
+
 @cli.command()
 def analyze(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
-    format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json, html")] = "terminal",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json, html, quick")] = "terminal",
     ref: Annotated[str | None, typer.Option("--ref", "-r", help="Git ref to analyze")] = None,
     clones: Annotated[bool, typer.Option("--clones", help="Enable structural clone detection (slower)")] = False,
+    no_color: Annotated[bool, typer.Option("--no-color", help="Disable colored output")] = False,
 ):
     """Analyze a codebase and produce structural report."""
     try:
@@ -42,8 +58,10 @@ def analyze(
         typer.echo(format_json(analysis))
     elif format == "html":
         typer.echo(format_html(analysis))
+    elif format == "quick":
+        typer.echo(format_quick(analysis, use_color=not no_color))
     else:
-        typer.echo(format_terminal(analysis))
+        typer.echo(format_terminal(analysis, use_color=not no_color))
 
 
 @cli.command()
@@ -78,21 +96,30 @@ def diff(
     new_concepts = phrases_b - phrases_a
     retired_concepts = phrases_a - phrases_b
     stable_concepts = phrases_a & phrases_b
+    total = len(phrases_a) | len(phrases_b)
+    new_pct = len(new_concepts) / total * 100 if total else 0
+    retired_pct = len(retired_concepts) / total * 100 if total else 0
 
-    typer.echo(f"CONCEPT DELTA:")
-    typer.echo(f"  New:      {len(new_concepts)}")
-    typer.echo(f"  Retired:  {len(retired_concepts)}")
-    typer.echo(f"  Stable:   {len(stable_concepts)}")
+    c = lambda t, color: _color(t, color)
+    bar_new = _bar(new_pct, 10)
+    bar_retired = _bar(retired_pct, 10)
+
+    typer.echo(c(f"{'━' * 50}", "cyan"))
+    typer.echo(c(f"  CONCEPT DELTA: {ref_a} → {ref_b}", "header"))
+    typer.echo(c(f"{'━' * 50}", "cyan"))
     typer.echo("")
-
+    typer.echo(f"  {c('+ New', 'green')}      {c(bar_new, 'green')} {len(new_concepts):>6} ({new_pct:.1f}%)")
+    typer.echo(f"  {c('- Retired', 'red')}   {c(bar_retired, 'red')} {len(retired_concepts):>6} ({retired_pct:.1f}%)")
+    typer.echo(f"  {c('○ Stable', 'yellow')}   {len(stable_concepts):>6}")
+    typer.echo("")
     if new_concepts:
-        typer.echo("NEW CONCEPTS (top 20):")
-        for phrase in sorted(new_concepts)[:20]:
-            typer.echo(f"  + {phrase[:60]}")
+        typer.echo(c(f"NEW CONCEPTS (first 15):", "subheader"))
+        for phrase in sorted(new_concepts)[:15]:
+            typer.echo(f"  {c('+', 'green')} {phrase[:60]}")
     if retired_concepts:
-        typer.echo("RETIRED CONCEPTS (top 20):")
-        for phrase in sorted(retired_concepts)[:20]:
-            typer.echo(f"  - {phrase[:60]}")
+        typer.echo(c(f"RETIRED CONCEPTS (first 10):", "subheader"))
+        for phrase in sorted(retired_concepts)[:10]:
+            typer.echo(f"  {c('-', 'red')} {phrase[:60]}")
 
 
 @cli.command()
@@ -216,11 +243,26 @@ def timeline(
         typer.echo("No timeline data available.")
         return
 
-    typer.echo(f"CONCEPT TIMELINE (last {weeks} weeks):")
-    typer.echo(f"{'Week':<12} {'Commits':<8} {'New':<8} {'Retired':<8} {'Stable':<8} {'Total':<8}")
-    typer.echo("─" * 52)
+    c = lambda t, color: _color(t, color)
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c(f"  CONCEPT TIMELINE (last {weeks} weeks)", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo("")
+    typer.echo(f"  {'Week':<10} {'Commits':<8} {'New':<8} {'Retired':<8} {'Stable':<8} {'Total':<8} {'Trend'}")
+    typer.echo(f"  {'─' * 58}")
+
     for wk in data:
-        typer.echo(f"{wk['week']:<12} {wk['commits']:<8} {wk['new_concepts']:<8} {wk['retired_concepts']:<8} {wk['stable_concepts']:<8} {wk['total_concepts']:<8}")
+        new = wk['new_concepts']
+        retired = wk['retired_concepts']
+        trend = ""
+        if new > retired:
+            trend = c(f"↑ +{new - retired}", "green")
+        elif new < retired:
+            trend = c(f"↓ -{retired - new}", "red")
+        else:
+            trend = c("→ 0", "yellow")
+        typer.echo(f"  {wk['week']:<10} {wk['commits']:<8} {c(str(new), 'green'):>8} {c(str(retired), 'red'):>8} {wk['stable_concepts']:<8} {wk['total_concepts']:<8} {trend}")
 
 
 def main():
