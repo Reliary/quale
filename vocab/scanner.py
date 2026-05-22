@@ -72,7 +72,7 @@ def _is_binary(path: str) -> bool:
 
 
 def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
-                  clones: bool = False) -> CodebaseAnalysis:
+                  clones: bool = False, deep: bool = False) -> CodebaseAnalysis:
     path = os.path.abspath(path)
     if git_ref is not None:
         # Ref specified: must be a git repo
@@ -90,7 +90,7 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
     lang_counts: dict[str, int] = defaultdict(int)
     lang_phrases: dict[str, int] = defaultdict(int)
     all_file_vocabs: list[FileVocab] = []
-    co_matrix = CoOccurrenceMatrix()
+    co_matrix = CoOccurrenceMatrix() if deep else None
     all_phrase_counter: Counter[str] = Counter()
 
     start = time.time()
@@ -158,7 +158,8 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
             total_phrases=len(phrases),
         )
         all_file_vocabs.append(file_vocab)
-        co_matrix.add_file(set(phrase_freq.keys()))
+        if co_matrix is not None:
+            co_matrix.add_file(set(phrase_freq.keys()))
         lang_counts[lang] += 1
         lang_phrases[lang] += len(phrases)
 
@@ -186,35 +187,35 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
         for lang in all_langs[1:]:
             shared |= first_set & lang_sets[lang]
 
-    if not quiet:
-        print(f"  Co-occurrence matrix ({min(len(all_file_vocabs), 500)} files)...", file=sys.stderr)
-    if len(all_file_vocabs) > 500:
-        # Stratified sample by language
-        lang_groups: dict[str, list[FileVocab]] = defaultdict(list)
-        for fv in all_file_vocabs:
-            lang_groups[fv.language].append(fv)
-        subset = []
-        for fvs in lang_groups.values():
-            subset.extend(fvs[:max(1, 500 // len(lang_groups))])
-        for fv in subset[:500]:
-            co_matrix.add_file(set(fv.vocabulary.keys()))
-    clusters = co_matrix.cluster(min_cooccurrence=max(1, len(all_file_vocabs) // 50))
+    if co_matrix is not None:
+        if not quiet:
+            print(f"  Co-occurrence matrix ({min(len(all_file_vocabs), 500)} files)...", file=sys.stderr)
+        if len(all_file_vocabs) > 500:
+            lang_groups: dict[str, list[FileVocab]] = defaultdict(list)
+            for fv in all_file_vocabs:
+                lang_groups[fv.language].append(fv)
+            subset = []
+            for fvs in lang_groups.values():
+                subset.extend(fvs[:max(1, 500 // len(lang_groups))])
+            for fv in subset[:500]:
+                co_matrix.add_file(set(fv.vocabulary.keys()))
+        clusters = co_matrix.cluster(min_cooccurrence=max(1, len(all_file_vocabs) // 50))
+        cluster_labels_list = [cluster_labels(c) for c in clusters]
+        structure_clusters_list = find_structure_clusters(all_file_vocabs, clusters, quiet=quiet)
+    else:
+        clusters = []
+        cluster_labels_list = []
+        structure_clusters_list = []
 
     # Structural clones — opt-in (O(N²) pairwise). Off by default for speed.
     clone_groups = _find_structural_clones(all_file_vocabs, max_files=min(100, len(all_file_vocabs))) if clones else []
 
     if not quiet:
         print(f"  Computing landmarks...", file=sys.stderr)
-    landmarks = _compute_landmarks(all_file_vocabs)
+    landmarks = _compute_landmarks(all_file_vocabs) if deep else []
 
     # Dead exports — sample-based for large repos
     dead_exports = _find_dead_exports(all_file_vocabs)
-
-    # Label clusters for readability
-    cluster_labels_list = [cluster_labels(c) for c in clusters]
-
-    # Structure clusters — file groups from phrase co-occurrence
-    structure_clusters_list = find_structure_clusters(all_file_vocabs, clusters, quiet=quiet)
 
     return CodebaseAnalysis(
         path=path,

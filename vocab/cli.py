@@ -47,11 +47,12 @@ def analyze(
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json, html, quick")] = "terminal",
     ref: Annotated[str | None, typer.Option("--ref", "-r", help="Git ref to analyze")] = None,
     clones: Annotated[bool, typer.Option("--clones", help="Enable structural clone detection (slower)")] = False,
+    deep: Annotated[bool, typer.Option("--deep", help="Enable deep analysis: co-occurrence matrix, clusters, landmarks (slower on large repos)")] = False,
     no_color: Annotated[bool, typer.Option("--no-color", help="Disable colored output")] = False,
 ):
     """Analyze a codebase and produce structural report."""
     try:
-        analysis = scan_codebase(path, git_ref=ref, clones=clones)
+        analysis = scan_codebase(path, git_ref=ref, clones=clones, deep=deep)
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -280,7 +281,7 @@ def clone(
 ):
     """Find structural clone groups across the codebase."""
     try:
-        analysis = scan_codebase(path)
+        analysis = scan_codebase(path, deep=True, clones=True)
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -307,7 +308,7 @@ def landmarks(
 ):
     """Find the most characteristic (highest-uniqueness) files."""
     try:
-        analysis = scan_codebase(path)
+        analysis = scan_codebase(path, deep=True)
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
