@@ -97,6 +97,8 @@ def _skip_path(path: str) -> bool:
         return True
     if any(p.endswith(".egg-info") for p in parts):
         return True
+    if path.lower().endswith((".min.js", ".min.css")):
+        return True
     return False
 
 
@@ -1172,7 +1174,7 @@ def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | N
 
         # Role weighting: source files first, tests/scripts/examples lower
         role = _task_file_role(path)
-        role_penalty = {"source": 1.0, "header": 0.6, "script": 0.6, "example": 0.3, "test": 0.3}.get(role, 0.5)
+        role_penalty = {"source": 1.0, "header": 0.6, "script": 0.6, "example": 0.3, "test": 0.3, "minified": 0.1}.get(role, 0.5)
 
         # Unique-concept score: identifiers that appear in few files (rare = more characteristic)
         unique_score = sum(1 / max(identifier_file_count[i], 1) for i in identifiers) * gen_penalty * role_penalty
@@ -1545,6 +1547,8 @@ def _task_file_role(path: str) -> str:
     ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
     if ext in ("h", "hpp", "hxx"):
         return "header"
+    if path.lower().endswith((".min.js", ".min.css")):
+        return "minified"
     return "source"
 
 
@@ -1611,7 +1615,19 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
     analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     explore_data = explore_repo(path, themes=True, analysis=analysis)
     modules_data = compute_modules(path, analysis=analysis)
-    stability_data = compute_stability(path, weeks=12)
+
+    # Stability is expensive (scans 12 weekly snapshots). Skip for giants.
+    stable_data = []
+    stable_skipped = False
+    try:
+        file_count = len(vgit.list_files(path, ref=None))
+    except Exception:
+        file_count = 0
+    if file_count > 2000:
+        stable_skipped = True
+    else:
+        stable_data = compute_stability(path, weeks=12)
+    stability_data = stable_data
 
     # recommended_next_reads: top explore files excluding generated/tests
     reads = []
@@ -1672,7 +1688,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
 
     verified_files = []
     unverified_files = []
-    task_relevance_score = 1.0
+    task_relevance_score = 0.0
     if related and keywords:
         for item in related:
             filepath = item["file"]
