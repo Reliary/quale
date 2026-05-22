@@ -53,11 +53,32 @@ _BINARY_EXTS = frozenset({
 _SKIP_DIRS = frozenset({
     ".git", "node_modules", "vendor", ".venv", "venv",
     "__pycache__", ".tox", ".eggs", "eggs",
-    "target", "build", "dist", "out", ".next",
+    "target", "build", "dist", "out", ".next", ".nuxt",
     ".terraform", ".serverless",
-    ".nyc_output", "coverage",
+    ".nyc_output", "coverage", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache", ".parcel-cache", ".turbo", ".cache",
     ".gitlab", ".github",
 })
+
+_SKIP_PATH_PARTS = frozenset({
+    "node_modules", "vendor", "dist", "build", "target", "out",
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ".parcel-cache", ".turbo", ".cache", "coverage", "playwright-transform-cache-1000",
+})
+
+
+_SECRET_SHAPED = re.compile(r'^(?:[A-Za-z0-9+/]{24,}|[A-Fa-f0-9]{24,}|AIza[A-Za-z0-9_-]+|MII[A-Za-z0-9+/]+)$')
+
+
+def _is_actionable_identifier(identifier: str) -> bool:
+    """Mechanical identifier guardrail, not semantic filtering."""
+    if not identifier:
+        return False
+    if len(identifier) < 5 or len(identifier) > 40:
+        return False
+    if _SECRET_SHAPED.match(identifier):
+        return False
+    return True
 
 
 def _is_binary(path: str) -> bool:
@@ -70,8 +91,19 @@ def _is_binary(path: str) -> bool:
     return False
 
 
+def _skip_path(path: str) -> bool:
+    parts = set(path.split("/"))
+    if parts & _SKIP_PATH_PARTS:
+        return True
+    if any(p.endswith(".egg-info") for p in parts):
+        return True
+    return False
+
+
 def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
-                  clones: bool = False, deep: bool = False) -> CodebaseAnalysis:
+                  clones: bool = False, deep: bool = False,
+                  max_files: int | None = None,
+                  max_seconds: float | None = None) -> CodebaseAnalysis:
     path = os.path.abspath(path)
     if git_ref is not None:
         # Ref specified: must be a git repo
@@ -93,11 +125,20 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
     all_phrase_counter: Counter[str] = Counter()
 
     start = time.time()
+    if max_files is not None and len(files) > max_files:
+        files = files[:max_files]
+
     total = len(files)
     skipped_binary = 0
     skipped_empty = 0
 
     for idx, rel_file in enumerate(files):
+        if max_seconds is not None and time.time() - start > max_seconds:
+            if not quiet:
+                print(f"  Scan budget hit after {time.time() - start:.1f}s; returning partial analysis", file=sys.stderr)
+            break
+        if _skip_path(rel_file):
+            continue
         if _is_binary(rel_file):
             skipped_binary += 1
             continue
@@ -463,7 +504,7 @@ def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
         if not shas:
             continue
         try:
-            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True)
+            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=1500, max_seconds=20)
         except Exception:
             continue
 
@@ -584,23 +625,25 @@ def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
 
 
 def pr_blast_radius(pr_files: list[str], all_file_vocabs: list[FileVocab],
-                    max_results: int = 200) -> dict:
+                    max_results: int = 200, code_only: bool = True) -> dict:
     """Measure how broadly a PR's vocabulary ripples through unchanged files.
 
     For each changed file, extract all qualifying identifiers. For every
     unchanged file, count how many identifiers it shares with changed files.
     Returns a flat sorted list — no tiered risk labels.
     """
-    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{4,40}\b')
     pr_set = set(pr_files)
+
+    # When code_only, filter to code extensions only
+    if code_only:
+        all_file_vocabs = [fv for fv in all_file_vocabs
+                          if os.path.splitext(fv.path)[1].lower() in _DEAD_CODE_EXTS]
 
     # Extract all identifiers from PR files
     pr_vocab: set[str] = set()
     for fv in all_file_vocabs:
         if fv.path in pr_set:
-            for phrase in fv.vocabulary:
-                for m in _EXPORT_TOKEN.finditer(phrase):
-                    pr_vocab.add(m.group())
+            pr_vocab.update(_extract_identifiers(fv))
 
     if not pr_vocab:
         return {"impacts": [], "rename_warnings": []}
@@ -610,12 +653,7 @@ def pr_blast_radius(pr_files: list[str], all_file_vocabs: list[FileVocab],
     for fv in all_file_vocabs:
         if fv.path in pr_set:
             continue
-        shared: set[str] = set()
-        for phrase in fv.vocabulary:
-            for m in _EXPORT_TOKEN.finditer(phrase):
-                token = m.group()
-                if token in pr_vocab:
-                    shared.add(token)
+        shared = _extract_identifiers(fv) & pr_vocab
         if shared:
             impacts.append({
                 "file": fv.path,
@@ -625,6 +663,117 @@ def pr_blast_radius(pr_files: list[str], all_file_vocabs: list[FileVocab],
 
     impacts.sort(key=lambda x: -x["shared_concepts"])
     return {"impacts": impacts[:max_results], "rename_warnings": []}
+
+
+def _is_test_path(path: str) -> bool:
+    base = os.path.basename(path).lower()
+    parts = {p.lower() for p in path.split("/")}
+    return ("test" in parts or "tests" in parts or "testdata" in parts
+            or base.endswith("_test.go") or base.endswith(".test.ts")
+            or base.endswith(".test.tsx") or base.endswith(".spec.ts")
+            or base.endswith(".spec.tsx"))
+
+
+def _extract_identifiers(fv: FileVocab, min_len: int = 4) -> set[str]:
+    token = re.compile(rf'\b[A-Z][A-Za-z0-9_]{{{min_len - 1},40}}\b')
+    identifiers: set[str] = set()
+    for phrase in fv.vocabulary:
+        for match in token.finditer(phrase):
+            ident = match.group()
+            if _is_actionable_identifier(ident):
+                identifiers.add(ident)
+    return identifiers
+
+
+def _identifier_file_map(analysis: CodebaseAnalysis, include_tests: bool = False) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    concept_files: dict[str, set[str]] = defaultdict(set)
+    concept_langs: dict[str, set[str]] = defaultdict(set)
+    for fv in _code_file_vocabs(analysis):
+        if not include_tests and _is_test_path(fv.path):
+            continue
+        for ident in _extract_identifiers(fv):
+            concept_files[ident].add(fv.path)
+            concept_langs[ident].add(fv.language)
+    return concept_files, concept_langs
+
+
+def _structural_information_score(file_count: int, total_files: int, lang_count: int = 1) -> float:
+    """Score concepts by structural information, not semantic allow/deny lists.
+
+    Very common concepts are less informative; very rare concepts are local.
+    The useful band is concepts repeated enough to bind files, but not so common
+    that they describe the whole programming substrate.
+    """
+    if total_files <= 0 or file_count <= 0:
+        return 0.0
+    prevalence = file_count / total_files
+    if prevalence > 0.45:
+        return 0.0
+    repeat = min(file_count / 8, 1.5)
+    rarity = 1.0 - prevalence
+    lang_bonus = 1.0 + min(lang_count - 1, 2) * 0.15
+    return round(file_count * rarity * repeat * lang_bonus, 3)
+
+
+def _code_file_vocabs(analysis: CodebaseAnalysis) -> list[FileVocab]:
+    files = []
+    for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in _DEAD_CODE_EXTS:
+            continue
+        if _is_lock_file(fv.path) or _is_generated(fv.path):
+            continue
+        files.append(fv)
+    return files
+
+
+def _mirror_signals(changed: list[str], all_file_vocabs: list[FileVocab]) -> dict:
+    """Source/test vocabulary mirror warnings for CI.
+
+    This is intentionally a proxy, not coverage truth. It asks whether changed
+    source identifiers have any test-side vocabulary mirror.
+    """
+    changed_set = set(changed)
+    source_concepts: Counter[str] = Counter()
+    test_concepts: Counter[str] = Counter()
+    related_tests: list[str] = []
+
+    for fv in all_file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in _DEAD_CODE_EXTS or _is_lock_file(fv.path) or _is_generated(fv.path):
+            continue
+        ids = _extract_identifiers(fv)
+        if _is_test_path(fv.path):
+            for ident in ids:
+                test_concepts[ident] += 1
+            if ids:
+                related_tests.append(fv.path)
+        elif fv.path in changed_set:
+            for ident in ids:
+                source_concepts[ident] += 1
+
+    unmirrored = sorted(
+        (ident for ident in source_concepts if ident not in test_concepts),
+        key=lambda x: (-source_concepts[x], -len(x), x),
+    )[:30]
+
+    mirrored = sum(1 for ident in source_concepts if ident in test_concepts)
+    total = len(source_concepts)
+    if total == 0 or not test_concepts:
+        return {
+            "source_concepts_changed": total,
+            "mirrored_source_concepts": 0,
+            "mirror_ratio": 0.0,
+            "unmirrored_source_concepts": [],
+            "note": "No source/test mirror signal available for this change set.",
+        }
+    return {
+        "source_concepts_changed": total,
+        "mirrored_source_concepts": mirrored,
+        "mirror_ratio": round(mirrored / max(total, 1), 3),
+        "unmirrored_source_concepts": unmirrored,
+        "note": "Vocabulary mirror is a structural proxy, not test coverage proof.",
+    }
 
 
 def search_cross_repo_ranked(phrase: str, repo_paths: list[str]) -> list[dict]:
@@ -642,7 +791,7 @@ def search_cross_repo_ranked(phrase: str, repo_paths: list[str]) -> list[dict]:
     results = []
     for repo in repo_paths:
         try:
-            analysis = scan_codebase(repo, quiet=True)
+            analysis = scan_codebase(repo, quiet=True, max_files=2500, max_seconds=30)
         except Exception:
             continue
         total = 0
@@ -678,9 +827,14 @@ def _is_lock_file(path: str) -> bool:
 
 def _is_generated(path: str) -> bool:
     base = os.path.basename(path)
-    return (base.startswith("zz_") or base == "zz_generated.go"
+    parts = set(path.split("/"))
+    return (_skip_path(path)
+            or base.startswith("zz_") or base == "zz_generated.go"
             or base.endswith(".pb.go") or base.endswith(".pb.ts")
-            or ".min." in path or ".generated." in path)
+            or ".min." in path or ".generated." in path
+            or base.startswith("mock_") or base.startswith("_mock")
+            or base in ("querier.go", "models.go") or "/sqlc/" in path
+            or "mocks" in parts)
 
 
 # Only these file types are scanned for dead export detection
@@ -702,7 +856,7 @@ def concept_timeline(path: str, weeks: int = 12) -> list[dict]:
         if not shas:
             continue
         try:
-            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True)
+            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=1500, max_seconds=20)
         except Exception:
             continue
         current = {phrase for fv in analysis.file_vocabs for phrase in fv.vocabulary}
@@ -725,7 +879,7 @@ def search_cross_repo(phrase: str, repo_paths: list[str]) -> list[dict]:
     results = []
     for repo in repo_paths:
         try:
-            analysis = scan_codebase(repo, quiet=True)
+            analysis = scan_codebase(repo, quiet=True, max_files=2500, max_seconds=30)
         except Exception:
             continue
         for fv in analysis.file_vocabs:
@@ -763,7 +917,7 @@ def compute_stability(path: str, weeks: int = 12, min_appearances: int = 4) -> l
         if not shas:
             continue
         try:
-            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True)
+            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=2000, max_seconds=25)
         except Exception:
             continue
         for fv in analysis.file_vocabs:
@@ -813,7 +967,6 @@ def compute_stability(path: str, weeks: int = 12, min_appearances: int = 4) -> l
 
 def _snapshot_phrases(analysis: CodebaseAnalysis) -> set[str]:
     """Extract all qualifying identifiers from a codebase snapshot."""
-    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
     phrases: set[str] = set()
     for fv in analysis.file_vocabs:
         ext = os.path.splitext(fv.path)[1].lower()
@@ -821,9 +974,7 @@ def _snapshot_phrases(analysis: CodebaseAnalysis) -> set[str]:
             continue
         if _is_lock_file(fv.path) or _is_generated(fv.path):
             continue
-        for phrase in fv.vocabulary:
-            for m in _EXPORT_TOKEN.finditer(phrase):
-                phrases.add(m.group())
+        phrases.update(_extract_identifiers(fv))
     return phrases
 
 
@@ -835,11 +986,13 @@ def compare_repos(repo_a: str, repo_b: str) -> dict:
     Returns A-only, B-only, and shared phrase sets, plus drift analysis:
     phrases in A's code files that don't appear in B.
     """
-    analysis_a = scan_codebase(repo_a, quiet=True)
-    analysis_b = scan_codebase(repo_b, quiet=True)
+    analysis_a = scan_codebase(repo_a, quiet=True, max_files=2500, max_seconds=30)
+    analysis_b = scan_codebase(repo_b, quiet=True, max_files=2500, max_seconds=30)
 
     phrases_a = _snapshot_phrases(analysis_a)
     phrases_b = _snapshot_phrases(analysis_b)
+    files_a, langs_a = _identifier_file_map(analysis_a, include_tests=False)
+    files_b, langs_b = _identifier_file_map(analysis_b, include_tests=False)
 
     shared = phrases_a & phrases_b
     only_a = phrases_a - phrases_b
@@ -849,14 +1002,43 @@ def compare_repos(repo_a: str, repo_b: str) -> dict:
     a_name = os.path.basename(os.path.normpath(repo_a))
     b_name = os.path.basename(os.path.normpath(repo_b))
 
-    # Drift: what's in A that isn't in B's code files (potential integration gaps)
-    drift = sorted(only_a, key=lambda x: -len(x))[:30]
+    total_a = max(len([fv for fv in _code_file_vocabs(analysis_a) if not _is_test_path(fv.path)]), 1)
+    total_b = max(len([fv for fv in _code_file_vocabs(analysis_b) if not _is_test_path(fv.path)]), 1)
+
+    def ranked_drift(phrases: set[str], file_map: dict[str, set[str]], lang_map: dict[str, set[str]], total: int) -> list[dict]:
+        rows = []
+        for phrase in phrases:
+            support = len(file_map.get(phrase, set()))
+            if support == 0:
+                continue
+            rows.append({
+                "concept": phrase,
+                "score": _structural_information_score(support, total, len(lang_map.get(phrase, set()))),
+                "file_count": support,
+                "languages": sorted(lang_map.get(phrase, set())),
+            })
+        rows.sort(key=lambda x: (-x["score"], -x["file_count"], x["concept"]))
+        return rows[:30]
+
+    drift_a_to_b = ranked_drift(only_a, files_a, langs_a, total_a)
+    drift_b_to_a = ranked_drift(only_b, files_b, langs_b, total_b)
 
     # Alignment score
     union = len(phrases_a | phrases_b) or 1
     alignment = len(shared) / union
 
+    a_unique_ratio = len(only_a) / max(len(phrases_a), 1)
+    b_unique_ratio = len(only_b) / max(len(phrases_b), 1)
+    asymmetry_score = round(abs(a_unique_ratio - b_unique_ratio), 3)
+    if asymmetry_score < 0.05:
+        dominant = "balanced"
+    elif a_unique_ratio > b_unique_ratio:
+        dominant = f"{a_name}_specific"
+    else:
+        dominant = f"{b_name}_specific"
+
     return {
+        "schema_version": 1,
         "repo_a": a_name,
         "repo_b": b_name,
         "a_total_phrases": len(phrases_a),
@@ -865,7 +1047,17 @@ def compare_repos(repo_a: str, repo_b: str) -> dict:
         "only_in_a": len(only_a),
         "only_in_b": len(only_b),
         "alignment": round(alignment, 3),
-        "drift_candidates": drift,
+        "drift_candidates": [d["concept"] for d in drift_a_to_b],
+        "directional_drift": {
+            "a_to_b": drift_a_to_b,
+            "b_to_a": drift_b_to_a,
+        },
+        "asymmetry": {
+            "score": asymmetry_score,
+            "dominant_direction": dominant,
+            "a_unique_ratio": round(a_unique_ratio, 3),
+            "b_unique_ratio": round(b_unique_ratio, 3),
+        },
         "a_languages": dict(sorted(analysis_a.languages.items(), key=lambda x: -x[1])),
         "b_languages": dict(sorted(analysis_b.languages.items(), key=lambda x: -x[1])),
     }
@@ -891,7 +1083,7 @@ def phrase_provenance(path: str, phrase: str, weeks: int = 24) -> list[dict]:
         if not shas:
             continue
         try:
-            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True)
+            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=1500, max_seconds=20)
         except Exception:
             continue
 
@@ -919,17 +1111,20 @@ def phrase_provenance(path: str, phrase: str, weeks: int = 24) -> list[dict]:
 
 # ── Explore / onboarding map ──────────────────────────────────────
 
-def explore_repo(path: str) -> list[dict]:
+def explore_repo(path: str, themes: bool = False) -> dict:
     """Find code files that best characterize the codebase.
 
     Scores each code file by how many unique qualifying identifiers it
     contains (exported-format tokens like `SpoolManager`, `IngestRequest`).
     Excludes docs, config, lock files, and generated files.
     Best first picks for onboarding: high-concept-density source files.
+
+    When themes=True, also returns latent structural themes via
+    identifier co-occurrence clustering (fast — no deep scan needed).
     """
-    analysis = scan_codebase(path, quiet=True)
+    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     if not analysis.file_vocabs:
-        return []
+        return {"files": [], "themes": []}
 
     _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
 
@@ -962,8 +1157,13 @@ def explore_repo(path: str) -> list[dict]:
 
     scored = []
     for path, lang, identifiers in file_identifiers:
+        # Deprioritize generated files — they have dense identifiers but aren't
+        # useful onboarding targets. Penalize sqlc models, querier, mocks, etc.
+        is_generated = _is_generated(path)
+        gen_penalty = 0.3 if is_generated else 1.0
+
         # Unique-concept score: identifiers that appear in few files (rare = more characteristic)
-        unique_score = sum(1 / max(identifier_file_count[i], 1) for i in identifiers)
+        unique_score = sum(1 / max(identifier_file_count[i], 1) for i in identifiers) * gen_penalty
 
         # Total identifiers
         ident_count = len(identifiers)
@@ -979,10 +1179,584 @@ def explore_repo(path: str) -> list[dict]:
     # Sort by unique_score descending (files with most rare/specialized identifiers first)
     scored.sort(key=lambda x: -x["unique_score"])
 
-    return scored[:20]
+    result: dict = {"files": scored[:20], "themes": [], "total_code_files": total_files, "schema_version": 1}
+
+    if themes and len(file_identifiers) >= 10:
+        result["themes"] = _compute_themes(file_identifiers)
+
+    return result
+
+
+def _compute_themes(file_identifiers: list[tuple[str, str, set[str]]]) -> list[dict]:
+    """Compute latent structural themes from identifier co-occurrence.
+
+    Clusters identifiers by their file co-occurrence patterns.
+    Each resulting theme = a group of identifiers that tend to appear
+    in the same files, revealing domain-level concepts.
+    """
+    df: Counter[str] = Counter()
+    for _, _, idents in file_identifiers:
+        for ident in idents:
+            df[ident] += 1
+
+    total_files = len(file_identifiers) or 1
+
+    # Mid-frequency identifiers: appear in 5-60% of files (min 2)
+    mid_freq = {ident for ident, count in df.items()
+                if 2 <= count <= total_files * 0.6 and count >= 2}
+
+    if len(mid_freq) < 10:
+        return []
+
+    ident_files: dict[str, set[int]] = {}
+    for idx, (_, _, idents) in enumerate(file_identifiers):
+        for ident in idents & mid_freq:
+            ident_files.setdefault(ident, set()).add(idx)
+
+    # Build adjacency via per-file pair counting (O(F·I²) not O(N²))
+    co_occurrence: dict[tuple[str, str], int] = Counter()
+    for idx, (_, _, idents) in enumerate(file_identifiers):
+        file_mid = sorted(idents & mid_freq)
+        # Cap per-file identifiers to prevent O(N²) blowup
+        if len(file_mid) > 200:
+            file_mid = file_mid[:200]
+        for i in range(len(file_mid)):
+            a = file_mid[i]
+            for j in range(i + 1, len(file_mid)):
+                b = file_mid[j]
+                key = (a, b) if a < b else (b, a)
+                co_occurrence[key] += 1
+
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    for (a, b), count in co_occurrence.items():
+        files_a = len(ident_files.get(a, set()))
+        files_b = len(ident_files.get(b, set()))
+        smaller = min(files_a, files_b)
+        if count >= 2 and count / max(smaller, 1) >= 0.20:
+            adjacency[a].add(b)
+            adjacency[b].add(a)
+
+    # Connected components in identifier graph = themes
+    visited: set[str] = set()
+    themes = []
+    for ident in sorted(adjacency.keys()):
+        if ident in visited or ident not in adjacency:
+            continue
+        component: set[str] = set()
+        stack = [ident]
+        while stack:
+            node = stack.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            component.add(node)
+            for neighbor in adjacency.get(node, set()):
+                if neighbor not in visited:
+                    stack.append(neighbor)
+        if len(component) < 3:
+            continue
+
+        theme_file_set: set[int] = set()
+        for idx, (_, _, idents) in enumerate(file_identifiers):
+            if len(idents & component) >= 2:
+                theme_file_set.add(idx)
+        if len(theme_file_set) < 3:
+            continue
+
+        scores = {}
+        for c in component:
+            in_files = ident_files.get(c, set())
+            in_theme = len(in_files & theme_file_set)
+            not_theme = len(in_files - theme_file_set)
+            scores[c] = in_theme / max(in_theme + not_theme, 1)
+
+        top_labels = sorted(scores, key=lambda x: -scores[x])[:3]
+        themes.append({
+            "label": "/".join(top_labels),
+            "files": len(theme_file_set),
+            "exemplar_phrases": sorted(scores, key=lambda x: -scores[x])[:8],
+            "variance_explained": round(len(theme_file_set) / total_files, 3),
+        })
+
+    themes.sort(key=lambda x: -x["files"])
+    return themes[:5]
 
 
 # ── Repo-level structural fingerprint ─────────────────────────────
+
+# ── TDA Module Detection ──────────────────────────────────────────
+
+def compute_modules(path: str) -> dict:
+    """Persistent connected components across rare-identifier thresholds.
+
+    Uses TDA (topological data analysis) on the phrase-file graph:
+    1. Extract rare identifiers (appearing in <=10% of files)
+    2. Build edges between files sharing rare identifiers
+    3. Run union-find at increasing thresholds (1 to 10 shared identifiers)
+    4. Identify modules that persist across >=3 consecutive thresholds
+    """
+    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{4,40}\b')
+
+    identifier_df: Counter[str] = Counter()
+    file_identifiers: dict[str, set[str]] = {}
+
+    for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in _DEAD_CODE_EXTS:
+            continue
+        if _is_lock_file(fv.path) or _is_generated(fv.path):
+            continue
+
+        ids: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in _EXPORT_TOKEN.finditer(phrase):
+                ids.add(m.group())
+        if ids:
+            file_identifiers[fv.path] = ids
+            for ident in ids:
+                identifier_df[ident] += 1
+
+    total_files = len(file_identifiers)
+    if total_files < 2:
+        return {"modules": [], "total_files": total_files, "grouped_files": 0}
+
+    rare_threshold = max(2, total_files // 10)
+    rare_ids = {ident for ident, df in identifier_df.items() if df <= rare_threshold}
+
+    files = [f for f in file_identifiers if rare_ids & file_identifiers[f]]
+    n = len(files)
+    if n < 2:
+        return {"modules": [], "total_files": total_files, "grouped_files": 0}
+
+    rare_file_sets: dict[str, set[int]] = {}
+    for idx, f in enumerate(files):
+        for ident in file_identifiers[f] & rare_ids:
+            rare_file_sets.setdefault(ident, set()).add(idx)
+
+    shared_count: dict[tuple[int, int], int] = Counter()
+    for ident, idxs in rare_file_sets.items():
+        idx_list = list(idxs)
+        for i in range(len(idx_list)):
+            for j in range(i + 1, len(idx_list)):
+                a = idx_list[i] if idx_list[i] < idx_list[j] else idx_list[j]
+                b = idx_list[j] if idx_list[i] < idx_list[j] else idx_list[i]
+                shared_count[(a, b)] += 1
+
+    def _run_uf(threshold: int) -> list[list[str]]:
+        parent = list(range(n))
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        def union(x, y):
+            px, py = find(x), find(y)
+            if px != py:
+                parent[px] = py
+        for (i, j), count in shared_count.items():
+            if count >= threshold:
+                union(i, j)
+        comps: dict[int, list[str]] = {}
+        for i in range(n):
+            root = find(i)
+            comps.setdefault(root, []).append(files[i])
+        return [c for c in comps.values() if len(c) >= 2]
+
+    threshold_modules = {t: _run_uf(t) for t in range(1, 11)}
+
+    module_groups = []
+    seen_modules: set[frozenset[str]] = set()
+
+    for t in range(1, 9):
+        for comp in threshold_modules.get(t, []):
+            comp_set = frozenset(comp)
+            if comp_set in seen_modules:
+                continue
+
+            persists = True
+            for dt in range(1, 3):
+                if t + dt > 10:
+                    persists = False
+                    break
+                found = False
+                for nc in threshold_modules.get(t + dt, []):
+                    if comp_set.issubset(frozenset(nc)):
+                        found = True
+                        break
+                if not found:
+                    persists = False
+                    break
+
+            if persists:
+                seen_modules.add(comp_set)
+                exemplars: Counter[str] = Counter()
+                for f in comp:
+                    for ident in file_identifiers.get(f, set()):
+                        exemplars[ident] += 1
+                module_groups.append({
+                    "files": sorted(comp),
+                    "persistence_range": [t, min(t + 2, 10)],
+                    "exemplar_phrases": [p for p, _ in exemplars.most_common(8)],
+                    "size": len(comp),
+                })
+
+    deduped = []
+    for m in module_groups:
+        m_set = frozenset(m["files"])
+        is_subset = any(
+            m_set.issubset(frozenset(n["files"])) and m["size"] < n["size"]
+            for n in module_groups if m is not n
+        )
+        if not is_subset:
+            deduped.append(m)
+
+    deduped.sort(key=lambda x: -x["size"])
+    grouped = len({f for m in deduped for f in m["files"]})
+
+    return {
+        "modules": deduped[:30],
+        "total_files": total_files,
+        "grouped_files": grouped,
+        "schema_version": 1,
+    }
+
+
+# ── Combined bootstrap / inspect ──────────────────────────────────
+
+def _compute_agent_notes(path: str, explore_data: dict, modules_data: dict,
+                          stability_data: list[dict]) -> list[str]:
+    """Generate programmatic guidance notes from available data."""
+    notes = []
+    total_code = explore_data.get("total_code_files", 0)
+    if total_code > 0:
+        notes.append(f"Repository has {total_code} code files.")
+
+    themes = explore_data.get("themes", [])
+    if themes:
+        theme_labels = ", ".join(t["label"][:25] for t in themes[:2])
+        notes.append(f"Conceptual themes: {theme_labels}.")
+
+    mod_count = len(modules_data.get("modules", []))
+    if mod_count > 0:
+        grouped = modules_data.get("grouped_files", 0)
+        notes.append(f"{mod_count} module boundaries detected ({grouped} files grouped).")
+    else:
+        notes.append("No persistent module boundaries — loosely coupled codebase.")
+
+    anchors = [x for x in stability_data if x["persistence"] >= 0.8]
+    hotspots = [x for x in stability_data if x["persistence"] <= 0.3 and x["total_phrases"] >= 5]
+    if anchors:
+        top_anchor = max(anchors, key=lambda x: x["persistence"])
+        notes.append(f"Most stable file: {top_anchor['file']} (persistence {top_anchor['persistence']:.0%}).")
+    if hotspots:
+        notes.append(f"Churn hotspots: {len(hotspots)} files change frequently.")
+    return notes
+
+
+def _binding_concepts(analysis: CodebaseAnalysis, limit: int = 15) -> list[dict]:
+    """Concept-first architecture map: identifiers binding many source files."""
+    total_files = max(len([fv for fv in _code_file_vocabs(analysis) if not _is_test_path(fv.path)]), 1)
+    concept_files, concept_langs = _identifier_file_map(analysis, include_tests=False)
+    rows = []
+    for ident, files in concept_files.items():
+        if len(files) < 3:
+            continue
+        score = _structural_information_score(len(files), total_files, len(concept_langs[ident]))
+        if score <= 0:
+            continue
+        rows.append({
+            "concept": ident,
+            "score": score,
+            "file_count": len(files),
+            "languages": sorted(concept_langs[ident]),
+            "files": sorted(files)[:8],
+            "why": "Binds multiple source files; useful for architecture orientation.",
+        })
+    rows.sort(key=lambda x: (-x["score"], -x["file_count"], x["concept"]))
+    return rows[:limit]
+
+
+def _rank_related_files(path: str, keywords: list[str]) -> list[dict]:
+    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    scores: dict[str, dict] = {}
+    lowered = [k.lower() for k in keywords if len(k) >= 4]
+    for fv in _code_file_vocabs(analysis):
+        haystack = f"{fv.path} " + " ".join(fv.vocabulary.keys())
+        hay = haystack.lower()
+        path_lower = fv.path.lower()
+        matched = []
+        score = 0
+        for kw in lowered:
+            if kw in path_lower:
+                score += 6
+                matched.append(kw)
+            elif kw in hay:
+                score += 2
+                matched.append(kw)
+        if not score:
+            continue
+        if _is_test_path(fv.path):
+            score += 1
+        if _is_generated(fv.path):
+            score -= 5
+        if score <= 0:
+            continue
+        scores[fv.path] = {
+            "file": fv.path,
+            "phrase": ",".join(dict.fromkeys(matched)),
+            "matches": score,
+        }
+    return sorted(scores.values(), key=lambda x: (-x["matches"], x["file"]))[:15]
+
+
+def _task_plan(task: str | None, related: list[dict], reads: list[dict],
+               modules_data: dict, stability_data: list[dict]) -> dict:
+    """Build a compact task plan from structural signals."""
+    if not task:
+        return {}
+    likely_edit = []
+    seen: set[str] = set()
+    for item in related:
+        path = item["file"]
+        if path not in seen:
+            seen.add(path)
+            likely_edit.append(path)
+        if len(likely_edit) >= 8:
+            break
+
+    stable_by_file = {x["file"]: x for x in stability_data if x["persistence"] >= 0.8}
+    anchors = []
+    for read in reads:
+        f = read["file"]
+        if f in stable_by_file:
+            anchors.append({
+                "file": f,
+                "persistence": stable_by_file[f]["persistence"],
+                "reason": "Stable anchor related to task context.",
+            })
+
+    module_context = []
+    for module in modules_data.get("modules", []):
+        module_files = set(module.get("files", []))
+        overlap = [f for f in likely_edit if f in module_files]
+        if overlap:
+            module_context.append({
+                "size": module.get("size", 0),
+                "files": module.get("files", [])[:8],
+                "matched_files": overlap,
+                "reason": "Likely task file sits inside this structural module.",
+            })
+
+    return {
+        "task": task,
+        "likely_edit_files": likely_edit,
+        "stable_anchors_to_read_first": anchors[:5],
+        "module_context": module_context[:3],
+        "sequence": [
+            "Read recommended_next_reads before editing.",
+            "Inspect likely_edit_files and their module_context.",
+            "Avoid changing stable_anchors_to_read_first unless the task explicitly requires it.",
+            "Use related tests as mirror hints, not coverage proof.",
+        ],
+    }
+
+
+def bootstrap_repo(path: str, task: str | None = None) -> dict:
+    """One-shot agent bootstrap: explore + modules + stability + optional task search."""
+    explore_data = explore_repo(path, themes=True)
+    modules_data = compute_modules(path)
+    stability_data = compute_stability(path, weeks=12)
+
+    # recommended_next_reads: top explore files excluding generated/tests
+    reads = []
+    for f in explore_data.get("files", []):
+        fp = f["file"]
+        if _is_generated(fp):
+            continue
+        if "/tests/" in fp:
+            continue
+        reason = "Highest identifier coverage" if not reads else "Supplementary coverage"
+        reads.append({
+            "file": fp,
+            "score": f["unique_score"],
+            "language": f["language"],
+            "reason": reason,
+        })
+        if len(reads) >= 10:
+            break
+    if not reads:
+        for f in explore_data.get("files", [])[:5]:
+            reads.append({
+                "file": f["file"],
+                "score": f["unique_score"],
+                "language": f["language"],
+                "reason": "Top coverage file",
+            })
+
+    # avoid_touching_without_context: churn hotspots + low-stability
+    hotspots = [x for x in stability_data
+                if x["persistence"] <= 0.3 and x["total_phrases"] >= 5]
+    avoid = []
+    for h in sorted(hotspots, key=lambda x: x["persistence"])[:10]:
+        avoid.append({
+            "file": h["file"],
+            "persistence": round(h["persistence"], 2),
+            "avg_turnover": round(h["avg_turnover"], 2),
+            "reason": "High churn — investigate before modifying",
+        })
+
+    # related_files_for_task
+    related = []
+    if task:
+        task_lower = task.lower()
+        keywords = [w for w in task_lower.split() if len(w) > 3 and w not in
+                    {"this", "that", "with", "from", "what", "which", "there", "their", "about", "would", "could", "should", "after", "before", "into", "over", "such", "only", "other", "than", "then", "also", "very", "just", "like", "some", "more", "they", "been", "when", "where"}]
+        # Also extract capitalized identifiers (CamelCase)
+        cap_pattern = re.compile(r'[A-Z][a-z]+[A-Z][A-Za-z0-9]*')
+        cap_ids = cap_pattern.findall(task)
+        keywords.extend(w.lower() for w in cap_ids)
+        keywords = list(dict.fromkeys(keywords))[:5]
+
+        if keywords:
+            try:
+                related = _rank_related_files(path, keywords[:5])
+            except Exception:
+                related = []
+
+    notes = _compute_agent_notes(path, explore_data, modules_data, stability_data)
+    themes_out = explore_data.get("themes", [])
+    task_plan = _task_plan(task, related, reads, modules_data, stability_data)
+
+    return {
+        "schema_version": 1,
+        "recommended_next_reads": reads,
+        "task_plan": task_plan,
+        "avoid_touching_without_context": avoid,
+        "related_files_for_task": related[:15] if related else [],
+        "module_boundaries": modules_data.get("modules", []),
+        "themes": themes_out,
+        "agent_notes": notes,
+        "total_code_files": explore_data.get("total_code_files", 0),
+    }
+
+
+def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
+    """CI-ready report: blast radius + stable file check + diff summary."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+
+    # Changed files between refs
+    changed = vgit.diff_refs(path, base_ref, head_ref)
+    if not changed:
+        return {
+            "schema_version": 1,
+            "base_ref": base_ref,
+            "head_ref": head_ref,
+            "changed_files": [],
+            "blast_radius": [],
+            "stable_files_touched": [],
+            "risk_flags": [],
+            "summary": "No changed files.",
+        }
+
+    # Blast radius
+    try:
+        analysis = scan_codebase(path, git_ref=head_ref, quiet=True, max_files=2500, max_seconds=30)
+    except Exception:
+        analysis = None
+
+    blast_results = []
+    mirror = {}
+    if analysis:
+        radius = pr_blast_radius(changed, analysis.file_vocabs)
+        blast_results = radius.get("impacts", [])
+        mirror = _mirror_signals(changed, analysis.file_vocabs)
+
+    # Check if any changed file is a stability anchor or churn hotspot
+    try:
+        stability_data = compute_stability(path, weeks=12)
+    except Exception:
+        stability_data = []
+    stable_touched = []
+    for c in changed:
+        for s in stability_data:
+            if s["file"] == c:
+                if s["persistence"] >= 0.8:
+                    stable_touched.append({
+                        "file": c,
+                        "status": "stable_anchor",
+                        "persistence": round(s["persistence"], 2),
+                    })
+                elif s["persistence"] <= 0.3 and s["total_phrases"] >= 5:
+                    stable_touched.append({
+                        "file": c,
+                        "status": "churn_hotspot",
+                        "persistence": round(s["persistence"], 2),
+                    })
+                break
+
+    # Risk flags
+    risk_flags = []
+    if len(changed) > 20:
+        risk_flags.append(f"Large change set: {len(changed)} files (more than 20)")
+    if stable_touched:
+        anchors = [s for s in stable_touched if s["status"] == "stable_anchor"]
+        if anchors:
+            risk_flags.append(f"Touch {len(anchors)} stable anchors that rarely change")
+    if blast_results and blast_results[0].get("shared_concepts", 0) > 10:
+        risk_flags.append(f"Broad blast radius: top impacted file shares {blast_results[0]['shared_concepts']} concepts")
+    if mirror.get("unmirrored_source_concepts"):
+        risk_flags.append(f"Mirror gap: {len(mirror['unmirrored_source_concepts'])} changed source concepts not seen in tests")
+
+    return {
+        "schema_version": 1,
+        "base_ref": base_ref,
+        "head_ref": head_ref,
+        "changed_files": changed,
+        "blast_radius": blast_results[:30],
+        "mirror_signals": mirror,
+        "stable_files_touched": stable_touched,
+        "risk_flags": risk_flags,
+        "summary": (
+            f"{len(changed)} files changed. "
+            f"{'No blast radius.' if not blast_results else f'{len(blast_results)} impacted files.'} "
+            + (f"{len(stable_touched)} stable files touched." if stable_touched else "")
+        ),
+    }
+
+
+def inspect_repo(path: str) -> dict:
+    """Aggregated overview: stats + explore + modules + stability + timeline."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository.", "schema_version": 1}
+
+    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    explore_data = explore_repo(path, themes=True)
+    modules_data = compute_modules(path)
+    timeline_data = concept_timeline(path, weeks=4)
+    binding = _binding_concepts(analysis)
+
+    # Compute half-life from lifecycle data
+    try:
+        lifecycle_data = compute_lifecycles(path, weeks=24)
+        if lifecycle_data:
+            ages = [l["age_weeks"] for l in lifecycle_data if l["signal"] in ("STABLE", "ACTIVE", "DEAD")]
+            avg_age = round(sum(ages) / max(len(ages), 1), 1) if ages else 0
+        else:
+            avg_age = 0
+    except Exception:
+        avg_age = 0
+
+    return {
+        "schema_version": 1,
+        "explore": explore_data,
+        "modules": modules_data,
+        "binding_concepts": binding,
+        "timeline": timeline_data,
+        "avg_concept_age_weeks": avg_age,
+    }
+
 
 def repo_fingerprint(path: str) -> dict:
     """Produce a single structural hash for an entire repo.
@@ -990,7 +1764,7 @@ def repo_fingerprint(path: str) -> dict:
     Combines all file index sequences into one canonical hash.
     Two structurally identical repos produce the same hash.
     """
-    analysis = scan_codebase(path, quiet=True)
+    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
 
     # Sort files by path for deterministic ordering
     # For each file, encode: path_hash + index_sequence

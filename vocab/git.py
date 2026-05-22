@@ -38,10 +38,24 @@ def is_repo(path: str) -> bool:
 def list_files(path: str, ref: str | None = None) -> list[str]:
     """List tracked files. If ref is None, list working tree."""
     if ref:
-        out = _git("ls-tree", "-r", "--name-only", ref, cwd=path)
+        try:
+            out = _git("ls-tree", "-r", "--name-only", ref, cwd=path)
+        except RuntimeError:
+            return []
     else:
-        out = _git("ls-files", cwd=path)
-    return [f for f in out.splitlines() if f.strip()]
+        try:
+            out = _git("ls-files", cwd=path)
+        except RuntimeError:
+            return []
+    files = []
+    for f in out.splitlines():
+        f = f.strip()
+        if not f:
+            continue
+        if ref is None and not os.path.isfile(os.path.join(path, f)):
+            continue
+        files.append(f)
+    return files
 
 
 def read_file_at_ref(path: str, filepath: str, ref: str | None = None) -> str | None:
@@ -49,9 +63,11 @@ def read_file_at_ref(path: str, filepath: str, ref: str | None = None) -> str | 
     full = os.path.join(path, filepath)
     if ref is None:
         try:
+            if not os.path.isfile(full):
+                return None
             with open(full, "r", encoding="utf-8", errors="replace") as f:
                 return f.read()
-        except FileNotFoundError:
+        except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
             return None
     try:
         # Use raw binary mode to handle non-UTF8 files
@@ -72,10 +88,17 @@ def read_file_at_ref(path: str, filepath: str, ref: str | None = None) -> str | 
 
 def diff_refs(path: str, ref_a: str, ref_b: str) -> list[str]:
     """List files changed between ref_a and ref_b (code files only)."""
-    out = _git("diff", "--name-only", ref_a, ref_b, cwd=path)
     _skip_exts = frozenset({".pyc", ".pyo"})
-    _skip_dirs = frozenset({"__pycache__", ".git", "node_modules"})
+    _skip_parts = frozenset({
+        "__pycache__", ".git", "node_modules", "vendor", "dist", "build",
+        "target", "out", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        ".parcel-cache", ".turbo", ".cache", "coverage",
+    })
     files = []
+    try:
+        out = _git("diff", "--name-only", ref_a, ref_b, cwd=path)
+    except RuntimeError:
+        return []
     for f in out.splitlines():
         f = f.strip()
         if not f:
@@ -83,10 +106,10 @@ def diff_refs(path: str, ref_a: str, ref_b: str) -> list[str]:
         parts = f.split("/")
         if any(p.endswith(".egg-info") for p in parts):
             continue
+        if any(d in parts for d in _skip_parts):
+            continue
         base = parts[-1]
         if any(base.endswith(e) for e in _skip_exts):
-            continue
-        if any(d in parts for d in _skip_dirs):
             continue
         files.append(f)
     return files
@@ -94,8 +117,11 @@ def diff_refs(path: str, ref_a: str, ref_b: str) -> list[str]:
 
 def ref_log(path: str, count: int = 100) -> list[GitRef]:
     """Return recent commit log."""
-    out = _git("log", f"--max-count={count}",
-               "--format=%H|||%s|||%an|||%ai", cwd=path)
+    try:
+        out = _git("log", f"--max-count={count}",
+                   "--format=%H|||%s|||%an|||%ai", cwd=path)
+    except RuntimeError:
+        return []
     refs = []
     for line in out.splitlines():
         parts = line.split("|||", 3)
