@@ -221,25 +221,46 @@ def pr_blast_radius(pr_files: list[str], all_file_vocabs: list[FileVocab],
         all_file_vocabs = [fv for fv in all_file_vocabs
                           if os.path.splitext(fv.path)[1].lower() in _DEAD_CODE_EXTS]
 
-    pr_vocab: set[str] = set()
+    identifier_df: Counter[str] = Counter()
+    file_identifiers: dict[str, set[str]] = {}
     for fv in all_file_vocabs:
-        if fv.path in pr_set:
-            pr_vocab.update(_extract_identifiers(fv))
+        identifiers = _extract_identifiers(fv)
+        if not identifiers:
+            continue
+        file_identifiers[fv.path] = identifiers
+        for ident in identifiers:
+            identifier_df[ident] += 1
+
+    total_files = max(len(file_identifiers), 1)
+    max_common_support = max(3, int(total_files * 0.15))
+    pr_vocab: set[str] = set()
+    for path, identifiers in file_identifiers.items():
+        if path in pr_set:
+            pr_vocab.update(identifiers)
 
     if not pr_vocab:
         return {"impacts": [], "rename_warnings": []}
 
     impacts = []
-    for fv in all_file_vocabs:
-        if fv.path in pr_set:
+    for path, identifiers in file_identifiers.items():
+        if path in pr_set:
             continue
-        shared = _extract_identifiers(fv) & pr_vocab
+        shared = {ident for ident in identifiers & pr_vocab
+                  if 1 < identifier_df.get(ident, 0) <= max_common_support}
         if shared:
+            ranked_shared = sorted(
+                shared,
+                key=lambda ident: (identifier_df.get(ident, 999), ident),
+            )
+            evidence_score = sum(1 / max(identifier_df.get(ident, 1) - 1, 1) for ident in ranked_shared[:8])
+            if len(ranked_shared) < 2 and evidence_score < 0.75:
+                continue
             impacts.append({
-                "file": fv.path,
+                "file": path,
                 "shared_concepts": len(shared),
-                "concepts": sorted(shared, key=lambda x: -len(x))[:8],
+                "evidence_score": round(evidence_score, 3),
+                "concepts": ranked_shared[:8],
             })
 
-    impacts.sort(key=lambda x: -x["shared_concepts"])
+    impacts.sort(key=lambda x: (-x["evidence_score"], -x["shared_concepts"], x["file"]))
     return {"impacts": impacts[:max_results], "rename_warnings": []}
