@@ -31,6 +31,8 @@ from typing import Any
 VOCAB_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = Path("/tmp/vocab-effect-results.json")
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+OPENCODE_BIN = "/home/linuxbrew/.linuxbrew/bin/opencode"
+CHECKPOINT_SUFFIX = ".checkpoint.jsonl"
 SOURCE_EXTS = {
     ".c", ".cc", ".clj", ".cpp", ".cs", ".ex", ".exs", ".go", ".h",
     ".hpp", ".hs", ".java", ".jl", ".js", ".jsx", ".kt", ".ml",
@@ -675,67 +677,6 @@ def run_contract_check(case: Case, proposal: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_trial(case: Case, suite: str, condition: str, trial: int, model: str, temperature: float, dry_run: bool, json_mode: bool, max_tokens: int) -> dict[str, Any]:
-    files = source_files(case.path)
-    if case.edit_file not in files:
-        files = [case.edit_file, *files]
-    messages = discovery_messages(case, condition, files) if suite == "discovery" else preflight_messages(case, condition, files)
-
-    row: dict[str, Any] = {
-        "suite": suite,
-        "bucket": case.bucket,
-        "repo": case.repo,
-        "condition": condition,
-        "trial": trial,
-        "task": case.task,
-        "gt_edit_file": case.edit_file,
-        "prompt_chars": sum(len(message["content"]) for message in messages),
-    }
-    if dry_run:
-        row["dry_run"] = True
-        row["prompt_preview"] = messages[-1]["content"][:1200]
-        return row
-
-    started = time.time()
-    response = deepseek_call(messages, model=model, temperature=temperature, json_mode=json_mode, max_tokens=max_tokens)
-    row["elapsed_seconds"] = round(time.time() - started, 2)
-    if "error" in response:
-        row["error"] = response["error"]
-        return row
-
-    usage = response.get("usage", {})
-    content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
-    parsed = extract_json(content)
-    row.update({
-        "input_tokens": usage.get("prompt_tokens", 0),
-        "output_tokens": usage.get("completion_tokens", 0),
-        "response": content,
-        "parsed": parsed,
-    })
-    if "_parse_error" in parsed:
-        retry_row = retry_trial(case, suite, condition, model, temperature, json_mode, max_tokens)
-        if retry_row is not None:
-            retry_row.update({
-                "suite": row["suite"],
-                "bucket": row["bucket"],
-                "repo": row["repo"],
-                "condition": row["condition"],
-                "trial": row["trial"],
-                "task": row["task"],
-                "gt_edit_file": row["gt_edit_file"],
-                "retry_after_parse_error": True,
-                "initial_response": content[:500],
-            })
-            return retry_row
-        row["parse_error"] = True
-        return row
-    if suite == "preflight" and condition.startswith("contract_"):
-        row.update(run_contract_check(case, parsed))
-        return row
-    row.update(score_discovery(parsed, case) if suite == "discovery" else score_preflight(parsed, case))
-    return row
-
-
 def retry_trial(case: Case, suite: str, condition: str, model: str, temperature: float, json_mode: bool, max_tokens: int) -> dict[str, Any] | None:
     files = source_files(case.path, limit=60)
     if case.edit_file not in files:
@@ -759,6 +700,282 @@ def retry_trial(case: Case, suite: str, condition: str, model: str, temperature:
         "parsed": parsed,
     }
     row.update(score_discovery(parsed, case) if suite == "discovery" else score_preflight(parsed, case))
+    return row
+
+
+def _checkpoint_path(output_path: Path) -> Path:
+    """Sidecar .checkpoint.jsonl for incremental writes."""
+    return output_path.parent / (output_path.stem + CHECKPOINT_SUFFIX)
+
+
+def _load_completed(output_path: Path) -> set[tuple[str, str, str, str, int]]:
+    """Build (suite, bucket, repo, condition, trial) set from existing output."""
+    if not output_path.exists():
+        return set()
+    try:
+        data = json.loads(output_path.read_text(encoding="utf-8"))
+        results = data.get("results", [])
+        return {
+            (r["suite"], r["bucket"], r["repo"], r["condition"], r["trial"])
+            for r in results if "error" not in r and "_parse_error" not in r
+        }
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return set()
+
+
+def _append_checkpoint(output_path: Path, row: dict) -> None:
+    line = json.dumps(row, default=str)
+    with open(_checkpoint_path(output_path), "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def _reconstruct_checkpoint(output_path: Path) -> list[dict]:
+    cp = _checkpoint_path(output_path)
+    if not cp.exists():
+        return []
+    rows = []
+    with open(cp, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    return rows
+
+
+def _parse_opencode_events(stdout: str) -> list[dict]:
+    events = []
+    for line in stdout.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return events
+
+
+def _extract_text_from_events(events: list[dict]) -> str:
+    for event in reversed(events):
+        part = event.get("part", {})
+        if part.get("type") == "text":
+            text = part.get("text", "")
+            if text:
+                return text
+        choices = event.get("choices", [])
+        for choice in choices:
+            msg = choice.get("message", {})
+            if msg.get("content"):
+                return msg["content"]
+    texts = []
+    for event in events:
+        part = event.get("part", {})
+        content = part.get("text", "") if part.get("type") == "text" else ""
+        if content:
+            texts.append(content)
+    return "\n".join(texts)
+
+
+def _extract_tool_calls_from_events(events: list[dict]) -> dict[str, list[dict]]:
+    reads: list[dict] = []
+    searches: list[dict] = []
+    edits: list[dict] = []
+    for event in events:
+        if event.get("type") != "tool_use":
+            continue
+        part = event.get("part", {})
+        tool_name = part.get("tool", "")
+        state = part.get("state", {})
+        inp = state.get("input", {})
+        if tool_name in ("read", "Read"):
+            reads.append({"filePath": inp.get("filePath", ""), "limit": inp.get("limit")})
+        elif tool_name in ("grep", "Grep", "search", "Search"):
+            searches.append({"pattern": inp.get("pattern", ""), "path": inp.get("path", "")})
+        elif tool_name in ("edit", "Edit", "write", "Write"):
+            edits.append({"filePath": inp.get("filePath", ""), "oldString": (inp.get("oldString", "") or "")[:80]})
+    return {"reads": reads, "searches": searches, "edits": edits}
+
+
+def _score_opencode_tool_calls(tool_data: dict, case: Case) -> dict | None:
+    reads = tool_data.get("reads", [])
+    if not reads:
+        return None
+    repo_path = case.path
+    rel_paths = []
+    for rd in reads:
+        fp = rd.get("filePath", "")
+        if not fp:
+            continue
+        # Skip non-file reads (directory listings, error outputs)
+        if not fp.startswith(repo_path):
+            continue
+        fp_rel = fp[len(repo_path):].lstrip("/")
+        # Skip directories
+        if not fp_rel or "." not in fp_rel:
+            continue
+        rel_paths.append(fp_rel)
+    unique = list(dict.fromkeys(rel_paths))
+    verify_hit_list = [f for f in unique if f in case.verify_files]
+    in_scope = {case.edit_file} | set(case.verify_files)
+    source_reads_beyond_scope = [f for f in unique
+                                  if f not in in_scope
+                                  and "test" not in f.lower()
+                                  and f.endswith((".go", ".ts", ".py", ".rs", ".c", ".h", ".erl", ".ex", ".exs", ".zig", ".jl", ".clj", ".hs", ".nix", ".r"))]
+    return {
+        "verify": verify_hit_list[:5],
+        "verify_hit": bool(verify_hit_list),
+        "verify_hit_count": len(verify_hit_list),
+        "extra_edit_count": len(source_reads_beyond_scope),
+        "extra_edits": source_reads_beyond_scope[:5],
+        "should_edit_candidate": case.edit_file in unique,
+        "semantic_sprawl_score": min(1.0, len(source_reads_beyond_scope) / 10) if source_reads_beyond_scope else 0.0,
+        "exploration_count": len(unique),
+        "tool_reads": unique,
+    }
+
+
+def run_trial_direct(case: Case, suite: str, condition: str, trial: int,
+                     model: str, temperature: float, dry_run: bool,
+                     json_mode: bool, max_tokens: int) -> dict[str, Any]:
+    files = source_files(case.path)
+    if case.edit_file not in files:
+        files = [case.edit_file, *files]
+    messages = discovery_messages(case, condition, files) if suite == "discovery" else preflight_messages(case, condition, files)
+    row: dict[str, Any] = {
+        "suite": suite, "bucket": case.bucket, "repo": case.repo,
+        "condition": condition, "trial": trial, "task": case.task,
+        "backend": "direct",
+        "gt_edit_file": case.edit_file,
+        "prompt_chars": sum(len(m["content"]) for m in messages),
+    }
+    if dry_run:
+        row["dry_run"] = True
+        row["prompt_preview"] = messages[-1]["content"][:1200]
+        return row
+    started = time.time()
+    response = deepseek_call(messages, model=model, temperature=temperature, json_mode=json_mode, max_tokens=max_tokens)
+    row["elapsed_seconds"] = round(time.time() - started, 2)
+    if "error" in response:
+        row["error"] = response["error"]
+        return row
+    usage = response.get("usage", {})
+    content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+    parsed = extract_json(content)
+    row.update({
+        "input_tokens": usage.get("prompt_tokens", 0),
+        "output_tokens": usage.get("completion_tokens", 0),
+        "response": content,
+        "parsed": parsed,
+    })
+    if "_parse_error" in parsed:
+        retry_row = retry_trial(case, suite, condition, model, temperature, json_mode, max_tokens)
+        if retry_row is not None:
+            retry_row.update({
+                "suite": row["suite"], "bucket": row["bucket"], "repo": row["repo"],
+                "condition": row["condition"], "trial": row["trial"],
+                "task": row["task"], "gt_edit_file": row["gt_edit_file"],
+                "retry_after_parse_error": True, "initial_response": content[:500],
+            })
+            return retry_row
+        row["parse_error"] = True
+        return row
+    if suite == "preflight" and condition.startswith("contract_"):
+        row.update(run_contract_check(case, parsed))
+        return row
+    row.update(score_discovery(parsed, case) if suite == "discovery" else score_preflight(parsed, case))
+    return row
+
+
+def run_trial_opencode(case: Case, suite: str, condition: str, trial: int,
+                       model: str, dry_run: bool) -> dict[str, Any]:
+    if suite != "preflight":
+        return {"suite": suite, "bucket": case.bucket, "repo": case.repo, "condition": condition,
+                "trial": trial, "backend": "opencode", "error": "only preflight suite supported"}
+
+    files = source_files(case.path)
+    if case.edit_file not in files:
+        files = [case.edit_file, *files]
+    messages = preflight_messages(case, condition, files)
+    guidance_content = messages[1]["content"] if len(messages) > 1 else ""
+
+    prompt_parts = [
+        f"Repository: {case.repo}",
+        f"Task: {case.task}",
+        f"Candidate edit file: {case.edit_file}",
+    ]
+    if guidance_content:
+        prompt_parts.append(f"\nVocab guidance:\n{guidance_content}")
+    prompt_parts.extend(["", "Return exactly one compact JSON object.", "Use keys: verify (array of relative paths), extra_edits (array of relative paths), should_edit_candidate (boolean)."])
+    prompt = "\n".join(prompt_parts)
+
+    row: dict[str, Any] = {
+        "suite": suite, "bucket": case.bucket, "repo": case.repo,
+        "condition": condition, "trial": trial, "task": case.task,
+        "backend": "opencode",
+        "gt_edit_file": case.edit_file,
+        "prompt_chars": len(prompt),
+    }
+    if dry_run:
+        row["dry_run"] = True
+        row["prompt_preview"] = prompt[:1200]
+        return row
+
+    # opencode expects provider/model format; add default provider if missing
+    oc_model = f"deepseek/{model}" if "/" not in model else model
+    cmd = [OPENCODE_BIN, "run", "--pure", "--format", "json",
+           "--dangerously-skip-permissions",
+           "--dir", case.path, "--model", oc_model, prompt]
+
+    started = time.time()
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        row["elapsed_seconds"] = round(time.time() - started, 2)
+    except subprocess.TimeoutExpired:
+        row["elapsed_seconds"] = round(time.time() - started, 2)
+        row["error"] = "opencode timeout (300s)"
+        return row
+
+    if result.returncode != 0:
+        row["error"] = f"opencode exit {result.returncode}: {result.stderr.strip()[:500]}"
+        row["opencode_stderr"] = result.stderr.strip()[:1000]
+        return row
+
+    if not result.stdout.strip():
+        row["error"] = "opencode returned empty stdout"
+        row["opencode_stderr"] = result.stderr.strip()[:1000]
+        return row
+
+    events = _parse_opencode_events(result.stdout)
+    content = _extract_text_from_events(events)
+    tokens = 0
+    for event in events:
+        part = event.get("part", {})
+        tok = part.get("tokens", {})
+        if tok.get("total"):
+            tokens = tok["total"]
+
+    row["input_tokens"] = tokens
+    row["output_tokens"] = 0
+    row["response"] = content
+    row["opencode_events"] = len(events)
+    parsed = extract_json(content)
+    tool_data = _extract_tool_calls_from_events(events)
+    row["tool_calls"] = tool_data
+
+    # Score from tool calls first (opencode models produce narrative, not JSON)
+    scored = _score_opencode_tool_calls(tool_data, case)
+    if scored:
+        row.update(scored)
+        row["scored_from_tool_calls"] = True
+    elif "_parse_error" not in parsed:
+        row["parsed"] = parsed
+        row.update(score_preflight(parsed, case))
+    else:
+        row["parse_error"] = True
+
     return row
 
 
@@ -861,14 +1078,30 @@ def main() -> None:
     parser.add_argument("--no-json-mode", action="store_true", help="Do not request provider JSON response mode")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--resume", action="store_true", help="Skip trials already present in output file")
+    parser.add_argument("--backend", choices=("direct", "opencode"), default="direct",
+                        help="direct=raw API call, opencode=full tool access via opencode")
     args = parser.parse_args()
 
     suites = ["discovery", "preflight"] if args.suite == "all" else [args.suite]
+    if args.backend != "direct":
+        suites = [s for s in suites if s == "preflight"]
+        if not suites:
+            raise SystemExit("opencode backends only support preflight suite")
+
     cases = select_cases(set(args.bucket), args.max_cases)
     if not cases:
         raise SystemExit("no available cases")
 
-    results: list[dict[str, Any]] = []
+    completed: set[tuple[str, str, str, str, int]] = set()
+    if args.resume:
+        completed = _load_completed(args.output)
+        checkpoint_rows = _reconstruct_checkpoint(args.output)
+        if completed:
+            print(f"resume: {len(completed)} completed trials loaded, {len(checkpoint_rows)} checkpoint rows",
+                  file=sys.stderr, flush=True)
+
+    results = list(_reconstruct_checkpoint(args.output))
     for suite in suites:
         default_conditions = DISCOVERY_CONDITIONS if suite == "discovery" else PREFLIGHT_CONDITIONS
         conditions = tuple(args.condition) if args.condition else default_conditions
@@ -877,8 +1110,18 @@ def main() -> None:
                 if condition not in default_conditions:
                     continue
                 for trial in range(1, args.trials + 1):
+                    key = (suite, case.bucket, case.repo, condition, trial)
+                    if key in completed:
+                        print(f"  skip {case.bucket}/{case.repo} {condition} trial {trial} (resume)", file=sys.stderr, flush=True)
+                        continue
                     print(f"[{suite}] {case.bucket}/{case.repo} {condition} trial {trial}", flush=True)
-                    results.append(run_trial(case, suite, condition, trial, args.model, args.temperature, args.dry_run, not args.no_json_mode, args.max_tokens))
+                    if args.backend == "direct":
+                        row = run_trial_direct(case, suite, condition, trial, args.model, args.temperature,
+                                               args.dry_run, not args.no_json_mode, args.max_tokens)
+                    elif args.backend == "opencode":
+                        row = run_trial_opencode(case, suite, condition, trial, args.model, args.dry_run)
+                    results.append(row)
+                    _append_checkpoint(args.output, row)
 
     payload = {
         "schema_version": 1,
@@ -887,6 +1130,7 @@ def main() -> None:
         "json_mode": not args.no_json_mode,
         "max_tokens": args.max_tokens,
         "dry_run": args.dry_run,
+        "backend": args.backend,
         "summary": summarize(results),
         "results": results,
     }
