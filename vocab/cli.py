@@ -18,7 +18,8 @@ from vocab.scanner import (scan_codebase, search_cross_repo,
                            search_cross_repo_ranked)
 from vocab.bootstrap import (bootstrap_repo, explore_repo, compute_modules)
 from vocab.reports import (ci_report, inspect_repo, repo_fingerprint,
-                           compute_stability, compute_lifecycles, concept_timeline)
+                           compute_stability, compute_lifecycles, concept_timeline,
+                           preflight_report)
 from vocab.compare import (compare_repos, phrase_provenance, pr_blast_radius)
 from vocab.formats.terminal import (format_terminal, format_json, format_html, format_quick,
                                      format_lifecycles, format_blast_radius,
@@ -313,7 +314,302 @@ def blast(
         typer.echo(format_blast_radius(pr_files, results, ref_a, ref_b))
 
 
+@cli.command()
+def preflight(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str] | None, typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
+    diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against the working tree")] = None,
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), json, checklist, compact")] = "tool",
+):
+    """File-scoped pre-edit/review risk card.
 
+    Examples:
+      vocab preflight --files src/spool.ts --task "change upload behavior"
+      vocab preflight --diff HEAD~1 --format json
+      vocab preflight --files src/spool.ts --format tool
+    """
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if diff is not None and vgit.has_commits(path) and not vgit.ref_exists(path, diff):
+        typer.echo(f"Unknown git ref: {diff}", err=True)
+        raise typer.Exit(1)
+
+    data = preflight_report(path=path, files=files, diff_ref=diff, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    if format == "tool":
+        # LLM-tool-accessible format: compact JSON + explicit verification MC
+        verify_candidates = data.get("verification_candidates", data.get("verify_with", []))
+        ver_confidence = data.get("verification_confidence", {})
+        sprawl = data.get("edit_sprawl_guard", {})
+        wa = sprawl.get("warnings", [])
+        qs = [w.get("question_extras", "").strip() for w in wa if w.get("question_extras")]
+        sprawl_instruction = (
+            "Before broadening scope, verify each extra file: " + "; ".join(qs)
+            if qs else
+            "Do not propose extra_edits unless the task explicitly requires them."
+        )
+        tool_data = {
+            "schema_version": 1,
+            "risk": data.get("risk", "unknown"),
+            "reason": "; ".join(data.get("reasons", [])),
+            "confidence": data.get("confidence", "unknown"),
+            "changed_files": data.get("changed_files", []),
+            "read_first": data.get("read_first", []),
+            "verification_mc": {
+                "question": "Which file would verify this change?",
+                "candidates": verify_candidates[:3] if verify_candidates else [],
+                "max_selections": 1,
+            },
+            "verification_confidence": ver_confidence,
+            "expansion_risk": data.get("expansion_risk", data.get("avoid_expanding_into", [])),
+            "edit_sprawl_guard": {**sprawl, "instruction": sprawl_instruction},
+            "desert_warning": _desert_text(ver_confidence, data.get("changed_files", [])),
+            "guardrails": data.get("guardrails", {}),
+        }
+        typer.echo(json.dumps(tool_data, indent=2))
+        return
+    if format == "checklist":
+        _print_preflight_checklist(data)
+        return
+    _print_preflight(data)
+
+
+
+
+
+@cli.command()
+def crystallography(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """One-time structural description of a codebase.
+
+    Designed for LLM use: produces a compact skeleton (~100 tokens)
+    plus structured detail about test conventions, stable core,
+    generated files, and module boundaries. Cache and reuse.
+    """
+    from vocab.reports import crystallography as _crystallography
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = _crystallography(path)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  VOCAB CRYSTALLOGRAPHY", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo("")
+    typer.echo(c("  Skeleton:", "subheader"))
+    typer.echo(f"    {c(data.get('skeleton', ''), 'gray')}")
+    typer.echo("")
+    typer.echo(f"  Files: {c(str(data.get('total_files', 0)), 'cyan')}  "
+               f"Layout: {c(data.get('layout_type', '?'), 'green')}  "
+               f"Test: {c(data.get('test_convention', '?'), 'yellow')}  "
+               f"Generated: {c(str(data.get('generated_pct', 0)) + '%', 'gray')}")
+    typer.echo("")
+
+    stable = data.get("stable_core", [])
+    if stable:
+        typer.echo(c("  Stable Core:", "subheader"))
+        for s in stable[:5]:
+            typer.echo(f"    {c(str(s.get('persistence', 0)), 'green'):>6.0%}  {s['file']}")
+        typer.echo("")
+
+    concepts = data.get("core_concepts", [])
+    if concepts:
+        typer.echo(c("  Core Concepts:", "subheader"))
+        for b in concepts[:5]:
+            typer.echo(f"    {c(b['concept'], 'yellow'):<30} {c(str(b['file_count']), 'cyan'):>4} files")
+        typer.echo("")
+
+    modules = data.get("modules", [])
+    if modules:
+        typer.echo(c("  Modules:", "subheader"))
+        for m in modules[:5]:
+            files_str = ", ".join(m.get("sample_files", []))
+            typer.echo(f"    {c(str(m['size']), 'cyan'):>4} files  {c(files_str, 'gray')}")
+        typer.echo("")
+
+    test_dirs = data.get("test_dirs", [])
+    test_suffixes = data.get("test_suffixes", [])
+    if test_dirs or test_suffixes:
+        typer.echo(c("  Test Conventions:", "subheader"))
+        if test_dirs:
+            typer.echo(f"    Test dirs: {', '.join(test_dirs)}")
+        if test_suffixes:
+            typer.echo(f"    Test patterns: {', '.join(test_suffixes)}")
+        typer.echo("")
+
+    caveat = data.get("guardrails", {}).get("caveat", "")
+    if caveat:
+        typer.echo(c(f"  Caveat: {caveat}", "yellow"))
+
+
+@cli.command()
+def verify(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description for scoring")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: mcq, json")] = "mcq",
+):
+    """Multiple-choice verification selection for LLMs.
+
+    Given changed files, presents up to 3 candidate verification files
+    as a multiple-choice question the LLM can answer by selecting one.
+    """
+    from vocab.reports import preflight_report
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    if not files:
+        typer.echo("provide --files so verify stays file-scoped", err=True)
+        raise typer.Exit(1)
+
+    data = preflight_report(path=path, files=files, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    candidates = data.get("verification_candidates", data.get("verify_with", []))
+    if not candidates:
+        typer.echo("No verification candidates found.", err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "changed_files": data.get("changed_files", []),
+            "verification_candidates": candidates,
+            "task": task,
+            "guardrails": {
+                "mode": "report_only",
+                "caveat": "Candidates are structural hints, not proof of coverage.",
+            },
+        }, indent=2))
+        return
+
+    # MCQ format (default) — designed for LLM consumption
+    typer.echo("# Verification Candidates")
+    typer.echo("Which file would verify this change? Select one.")
+    typer.echo("")
+    labels = ["A", "B", "C"]
+    for i, candidate in enumerate(candidates):
+        label = labels[i] if i < len(labels) else f"({i+1})"
+        typer.echo(f"  {label}. {candidate}")
+    typer.echo("")
+    typer.echo('Return the label of the best candidate (e.g., "A").')
+
+
+@cli.command()
+def deserts(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    top: Annotated[int, typer.Option("--top", "-n", help="Max desert rows")] = 20,
+):
+    """Verification desert map: source files with weak test mirrors.
+
+    This is structural mirror analysis, not coverage proof.
+    """
+    from vocab.reports import verification_deserts
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = verification_deserts(path, max_results=top)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    ratio = data.get("mirror_ratio", 0.0)
+    ratio_color = "green" if ratio >= 0.7 else ("yellow" if ratio >= 0.3 else "red")
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  VERIFICATION DESERTS", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Source files: {data.get('source_files', 0)}  Test files: {data.get('test_files', 0)}")
+    typer.echo(f"  Structural mirror ratio: {c(f'{ratio:.0%}', ratio_color)}")
+    typer.echo(f"  Confidence: {c(data.get('confidence', '?'), 'gray')}")
+    typer.echo("")
+    for item in data.get("deserts", [])[:top]:
+        score = item.get("score", 0.0)
+        color = "red" if score >= 0.75 else "yellow"
+        typer.echo(f"    {c(f'{score:.2f}', color)}  {item['file']}  {c(item.get('reason', ''), 'gray')}")
+    if not data.get("deserts"):
+        typer.echo(c("    No strong verification deserts found.", "green"))
+    typer.echo("")
+
+
+@cli.command()
+def route(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Task description")] = None,
+    files: Annotated[list[str] | None, typer.Option("--files", help="Known target files; repeat or comma-separate")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Route whether vocab should be used for this task.
+
+    Encodes measured policy: use preflight when files are known;
+    avoid task-only bootstrap as default strong-model guidance.
+    """
+    from vocab.reports import route_recommendation
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = route_recommendation(path, task=task, files=files)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    action = data.get("action", "unknown")
+    color = "green" if action == "preflight_tool" else ("yellow" if action != "no_vocab" else "gray")
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  VOCAB ROUTE", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Action: {c(action, color)}")
+    if data.get("command"):
+        typer.echo(f"  Command: {c(' '.join(data['command']), 'green')}")
+    for reason in data.get("reasons", []):
+        typer.echo(f"  Why: {c(reason, 'gray')}")
+    for warning in data.get("warnings", []):
+        typer.echo(f"  Warning: {c(warning, 'yellow')}")
+    typer.echo("")
 
 
 @cli.command()
@@ -655,6 +951,82 @@ def _print_agent_checklist(data: dict, task: str | None):
     typer.echo(c("  Execute steps in order. Stop and report if any step fails.", "subheader"))
 
 
+def _print_preflight(data: dict) -> None:
+    c = lambda t, col: _color(t, col)
+    risk_color = {"low": "green", "moderate": "yellow", "high": "red", "unknown": "gray"}.get(data.get("risk"), "gray")
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  VOCAB PREFLIGHT", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Risk: {c(data.get('risk', 'unknown'), risk_color)}")
+    typer.echo(f"  Confidence: {c(data.get('confidence', 'unknown'), 'cyan')}")
+    typer.echo(f"  Why: {c('; '.join(data.get('reasons', [])), 'gray')}")
+    caveat = data.get("guardrails", {}).get("caveat", "May be wrong; inspect before acting.")
+    typer.echo(c(f"  Caveat: {caveat}", "yellow"))
+    typer.echo("")
+    typer.echo(c("  Changed files:", "subheader"))
+    for file in data.get("changed_files", [])[:8]:
+        typer.echo(f"    {c('+', 'green')} {file}")
+    typer.echo("")
+
+    sections = [
+        ("READ FIRST", data.get("read_first", []), "green"),
+        ("VERIFY CANDIDATES", data.get("verification_candidates", data.get("verify_with", [])), "cyan"),
+        ("EXPANSION RISK", data.get("expansion_risk", data.get("avoid_expanding_into", [])), "yellow"),
+    ]
+    for label, items, color in sections:
+        if not items:
+            continue
+        typer.echo(c(f"  {label}:", "subheader"))
+        for item in items[:5]:
+            typer.echo(f"    {c('→', color)} {item}")
+        typer.echo("")
+
+    blast = data.get("reverse_blast", [])
+    if blast:
+        typer.echo(c("  REVERSE BLAST:", "subheader"))
+        for item in blast[:5]:
+            concepts = ", ".join(item.get("concepts", [])[:3])
+            typer.echo(f"    {c(str(item.get('shared_concepts', 0)), 'yellow')} shared  {item.get('file')}  {c(concepts, 'gray')}")
+        typer.echo("")
+
+    stable = data.get("stable_anchors_touched", [])
+    if stable:
+        typer.echo(c("  STABLE ANCHORS TOUCHED:", "subheader"))
+        for item in stable[:5]:
+            persistence = item.get("persistence", 0)
+            typer.echo(f"    {c(item.get('file', ''), 'red')}  {c(f'{persistence:.0%}', 'gray')}")
+        typer.echo("")
+
+    receipt = data.get("privacy_receipt", {})
+    typer.echo(c(f"  Privacy: local only={receipt.get('local_only', True)}, uploaded={receipt.get('uploaded', False)}, network={receipt.get('network', False)}", "gray"))
+    typer.echo(c("  Mode: report-only; do not treat as semantic truth or coverage proof.", "gray"))
+
+
+def _print_preflight_checklist(data: dict) -> None:
+    c = lambda t, col: _color(t, col)
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  VOCAB PREFLIGHT — CHECKLIST", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Risk: {data.get('risk', 'unknown')} ({data.get('confidence', 'unknown')} confidence)")
+    typer.echo(c(f"  Caveat: {data.get('guardrails', {}).get('caveat', 'May be wrong; inspect before acting.')}", "yellow"))
+    typer.echo("")
+    step = 1
+    for file in data.get("read_first", [])[:3]:
+        typer.echo(f"  [{step}] READ   {file}")
+        step += 1
+    for file in data.get("expansion_risk", data.get("avoid_expanding_into", []))[:5]:
+        typer.echo(f"  [{step}] INSPECT expansion risk {file} before broadening scope")
+        step += 1
+    for file in data.get("changed_files", [])[:5]:
+        typer.echo(f"  [{step}] EDIT   {file} only if required by the task")
+        step += 1
+    for file in data.get("verification_candidates", data.get("verify_with", []))[:3]:
+        typer.echo(f"  [{step}] VERIFY CANDIDATE {file}")
+        step += 1
+    typer.echo("")
+    typer.echo(c("  Report-only. Stop and inspect manually if risk is high or the changed file is unexpected.", "subheader"))
+
+
 @cli.command(name="agent-bootstrap")
 def agent_bootstrap(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
@@ -832,6 +1204,93 @@ def agent_bootstrap(
         typer.echo("")
 
 
+@cli.command()
+def skeleton(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Prompt decompression: emit only the ~100-token skeleton for LLM system prompts.
+
+    Skip directives tell the LLM which files to ignore (generated, vendor) and
+    which test conventions to expect. Meant to REDUCE prompt noise.
+    """
+    from vocab.reports import crystallography as _crystallography
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = _crystallography(path)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps({"schema_version": 1, "skeleton": data.get("skeleton", ""), "skip_directives": [
+            f"Generated files: {data.get('generated_pct', 0)}%",
+            f"Test convention: {data.get('test_convention', 'unknown')}",
+        ]}, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    typer.echo(data.get("skeleton", ""))
+    if data.get("generated_pct", 0) > 5:
+        typer.echo(c(f"\n  Skip: {data['generated_pct']}% generated files — do not edit without confirmation.", "gray"))
+    if data.get("test_convention", "unknown") != "unknown":
+        typer.echo(c(f"  Skip: tests follow {data['test_convention']} convention — already covered.", "gray"))
+
+
+@cli.command()
+def delta(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Dead reckoning: show structural changes since last vocab init scan.
+
+    Requires a cached scan from `vocab init` or `vocab crystallography --save`.
+    """
+    from vocab.reports import repo_delta
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = repo_delta(path)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  VOCAB DELTA", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Files: {c(str(data.get('old_files', 0)), 'gray')} → {c(str(data.get('new_files', 0)), 'cyan')} ({c(f'{data.get('file_delta', 0):+d}', 'green')})")
+    gen_delta = data.get('generated_delta', 0)
+    if gen_delta:
+        typer.echo(f"  Generated: {c(f'{gen_delta:+.1f}%', 'yellow')}")
+    stable_lost = data.get('stable_lost', [])
+    stable_gained = data.get('stable_gained', [])
+    if stable_lost:
+        typer.echo(f"  Stable lost: {c(', '.join(stable_lost[:3]), 'red')}")
+    if stable_gained:
+        typer.echo(f"  Stable gained: {c(', '.join(stable_gained[:3]), 'green')}")
+
+    anomalies = data.get('anomalies', [])
+    if anomalies and anomalies[0].get("note"):
+        typer.echo(c(f"\n  {anomalies[0]['note']}", "yellow"))
+    elif anomalies:
+        typer.echo(c("\n  Anomalies:", "yellow"))
+        for a in anomalies[:3]:
+            severity_color = "red" if a.get("severity") == "high" else "yellow"
+            typer.echo(f"    {c(a['type'], severity_color)}: {c(str(a.get('delta', '')), 'gray')}")
+
+
 @cli.command(name="ci-report")
 def ci_report_cmd(
     ref_a: Annotated[str, typer.Argument(help="Base git ref (e.g. origin/main)")],
@@ -976,11 +1435,12 @@ def ci_report_cmd(
 def inspect(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    anomalies: Annotated[bool, typer.Option("--anomalies", help="Load cached scan and show deltas")] = False,
 ):
-    """Comprehensive codebase overview: explore + modules + timeline.
+    """Comprehensive codebase overview: explore + modules + timeline + health.
 
     Single command that tells you what matters about a codebase:
-    top files, module boundaries, structural themes, stability, and churn.
+    top files, module boundaries, structural themes, stability, churn, health score.
     """
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -996,6 +1456,10 @@ def inspect(
     if "error" in data:
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
+
+    if anomalies:
+        from vocab.reports import detect_anomalies
+        data["anomalies"] = detect_anomalies(path)
 
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
@@ -1018,6 +1482,8 @@ def inspect(
     typer.echo(f"  {c('INSPECT —', 'header')} {c(path, 'bold')} ({total_code} files)")
     if avg_age:
         typer.echo(c(f"  Avg concept age: {avg_age} weeks", "gray"))
+    if data.get("confidence"):
+        typer.echo(c(f"  Confidence: {data['confidence']}", "gray"))
 
     if module_count:
         ungrouped = total_code - grouped
@@ -1070,6 +1536,22 @@ def inspect(
             bar = _bar(d["debt"] * 100, 10)
             typer.echo(f"    {bar} {c(f'{d['debt']:.2f}', 'red')}  {c(d['language'], 'gray'):<8} {d['file']}")
         typer.echo("")
+
+    health = data.get("health_score")
+    if health is not None:
+        health_color = "green" if health >= 0.7 else ("yellow" if health >= 0.4 else "red")
+        typer.echo(f"  Structural health (experimental): {c(str(health), health_color)}")
+    invasive = data.get("invasive_concepts", [])
+    if invasive:
+        inv_concepts = ", ".join(i["concept"] for i in invasive[:3])
+        typer.echo(f"  Broad cross-file concepts: {c(inv_concepts, 'yellow')}")
+
+    anomalies = data.get("anomalies", [])
+    if anomalies and not anomalies[0].get("note"):
+        typer.echo(c("\n  Anomalies:", "red"))
+        for a in anomalies[:3]:
+            typer.echo(f"    {c(a['type'], 'red' if a.get('severity') == 'high' else 'yellow')}")
+    typer.echo("")
 
     typer.echo(c(f"{'━' * 60}", "cyan"))
 
@@ -1237,38 +1719,43 @@ def pr_report(
         return
     analysis = scan_codebase(path, git_ref=ref_b, quiet=True)
     blast_results = pr_blast_radius(pr_files, analysis.file_vocabs)
-    typer.echo(format_pr_report_markdown(pr_files, blast_results, [], ref_a, ref_b))
+    from vocab.reports import refactoring_patterns
+    pattern_data = refactoring_patterns(path, base_ref=ref_a, head_ref=ref_b)
+    typer.echo(format_pr_report_markdown(pr_files, blast_results, [], ref_a, ref_b, pattern_data=pattern_data))
 
 
 @cli.command()
 def init(path: Annotated[str, typer.Argument(help="Path to repo")] = "."):
-    """Generate a .vocab.yml config file with defaults."""
+    """Generate a .vocab.yml config file and cache crystallography scan."""
     target = os.path.join(os.path.abspath(path), ".vocab.yml")
-    if os.path.exists(target):
-        typer.echo(f".vocab.yml already exists at {target}")
-        return
-    os.makedirs(os.path.abspath(path), exist_ok=True)
-
-    content = """# vocab CI configuration
+    if not os.path.exists(target):
+        os.makedirs(os.path.abspath(path), exist_ok=True)
+        content = """# vocab CI configuration
 # Structural checks for CI pipelines.
 
 blast:
-  # Maximum files sharing identifiers with changed code before warning
   max_impacted: 20
-  # File patterns to track more carefully
   critical_paths: []
 
 lifecycle:
-  # Minimum weeks of data needed for signal classification
   min_signal_weeks: 4
 
 search:
-  # File coverage threshold above which a match is considered "too common"
   common_threshold: 0.8
 """
-    with open(target, "w") as f:
-        f.write(content)
-    typer.echo(f"Created {target}")
+        with open(target, "w") as f:
+            f.write(content)
+        typer.echo(f"Created {target}")
+
+    from vocab.reports import crystallography, _save_cached
+    path_abs = os.path.abspath(path)
+    if vgit.is_repo(path_abs):
+        data = crystallography(path_abs)
+        if "error" not in data:
+            _save_cached(path_abs, data)
+            typer.echo(f"Cached crystallography scan for delta tracking.")
+    else:
+        typer.echo("Not a git repository; skipping cache.")
 
 
 def main():
@@ -1287,6 +1774,10 @@ def main():
         typer.echo("  vocab pr-report origin/main HEAD")
         typer.echo("")
         typer.echo("History / structure:")
+        typer.echo("  vocab crystallography .               one-time repo summary (LLM)")
+        typer.echo("  vocab entropy --path .                entropy velocity over history")
+        typer.echo("  vocab patterns --path .               refactoring pattern hints")
+        typer.echo("  vocab lattice --path .                structural defect summary")
         typer.echo("  vocab stable .")
         typer.echo("  vocab timeline . --format json")
         typer.echo("  vocab provenance SpoolManager . --format json")
@@ -1297,10 +1788,402 @@ def main():
         typer.echo("  vocab search SpoolManager ../repo-a ../repo-b")
         typer.echo("  vocab compare ../repo-a ../repo-b --format json")
         typer.echo("")
-        typer.echo("Other commands: analyze, diff, lifecycle, explore, clone, landmarks, orphans, init")
+        typer.echo("Other commands: analyze, diff, lifecycle, explore, clone, landmarks, orphans, init, bond, genesis, stop")
         typer.echo("Tip: most agent-facing commands support --format json.")
         return
     cli()
+
+
+@cli.command()
+def lattice(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    base_ref: Annotated[str | None, typer.Option("--base", help="Base git ref (default: HEAD~1)")] = None,
+    head_ref: Annotated[str | None, typer.Option("--head", help="Head git ref (default: HEAD)")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show example concepts instead of summary only")] = False,
+):
+    """Crystallographic defect detection on vocabulary lattice.
+
+    Compares vocabulary changes against the repo's co-occurrence
+    structure, finding vacancies, interstitials, and substitutions.
+    """
+    from vocab.reports import lattice_defects
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = lattice_defects(path, base_ref=base_ref, head_ref=head_ref)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    summary = data.get("summary", {})
+    defects = data.get("defects", {})
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c(f"  VOCAB LATTICE — {data.get('base_ref', '?')} → {data.get('head_ref', '?')}", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Changed: {len(data.get('changed_files', []))} files")
+    typer.echo(f"  Missing expected concepts: {c(str(summary.get('vacancies', 0)), 'red')}  "
+               f"Unexpected concepts: {c(str(summary.get('interstitials', 0)), 'yellow')}  "
+               f"Substitutions: {c(str(summary.get('substitutions', 0)), 'cyan')}")
+    typer.echo(f"  Confidence: {c(data.get('confidence', '?'), 'gray')}")
+    typer.echo("")
+
+    if not verbose:
+        typer.echo(c("  Summary only. Use --verbose for example concepts.", "gray"))
+        typer.echo("")
+        return
+
+    vac = defects.get("vacancies", [])
+    if vac:
+        typer.echo(c("  MISSING EXPECTED CONCEPTS:", "red"))
+        for v in vac[:5]:
+            present = ", ".join(v.get("present_in", [])[:2])
+            typer.echo(f"    {c(v['concept'], 'yellow'):<30} in {c(v['file'], 'green')} — still in {c(present, 'gray')}")
+        typer.echo("")
+
+    inter = defects.get("interstitials", [])
+    if inter:
+        typer.echo(c("  UNEXPECTED CONCEPTS:", "yellow"))
+        for i in inter[:5]:
+            typer.echo(f"    {c(i['concept'], 'yellow'):<30} in {c(i['file'], 'green')}")
+        typer.echo("")
+
+    sub = defects.get("substitutions", [])
+    if sub:
+        typer.echo(c("  SUBSTITUTIONS (concept replaced):", "cyan"))
+        for s in sub[:5]:
+            typer.echo(f"    {c(s['old_concept'], 'red')} → {c(s['new_concept'], 'green')}  in {s['file']}  ({s.get('similarity', 0):.0%})")
+        typer.echo("")
+
+
+@cli.command()
+def patterns(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    base_ref: Annotated[str | None, typer.Option("--base", help="Base git ref (default: HEAD~1)")] = None,
+    head_ref: Annotated[str | None, typer.Option("--head", help="Head git ref (default: HEAD)")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show more examples per pattern type")] = False,
+):
+    """Refactoring pattern detection: rename, extract, inline, move.
+
+    Detects structural patterns in vocabulary changes without ASTs:
+    rename (concept A → B), extract (lost vocabulary), inline (gained),
+    and move (vocabulary migrated between files).
+    """
+    from vocab.reports import refactoring_patterns
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = refactoring_patterns(path, base_ref=base_ref, head_ref=head_ref)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    patterns = data.get("patterns", [])
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c(f"  REFACTORING PATTERNS — {data.get('base_ref', '?')} → {data.get('head_ref', '?')}", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Changed: {len(data.get('changed_files', []))} files  Detected: {c(str(len(patterns)), 'green')} patterns")
+    typer.echo(f"  Confidence: {c(data.get('confidence', '?'), 'gray')}")
+    typer.echo("")
+
+    by_type: dict[str, list[dict]] = {}
+    for p in patterns:
+        by_type.setdefault(p["type"], []).append(p)
+
+    if not by_type:
+        return
+
+    typer.echo(c("  Summary:", "subheader"))
+    typer.echo("    " + ", ".join(f"{ptype}: {len(items)}" for ptype, items in sorted(by_type.items())))
+    typer.echo("")
+
+    for ptype, items in by_type.items():
+        color = {"rename": "green", "move": "cyan", "new_file": "yellow", "deleted_file": "red"}.get(ptype, "gray")
+        typer.echo(c(f"  {ptype.upper()} ({len(items)}):", color))
+        limit = 3 if verbose else 1
+        for item in items[:limit]:
+            if ptype == "rename":
+                typer.echo(f"    {c(item['old_concept'], 'red')} → {c(item['new_concept'], 'green')}  in {item['file']}  ({item['similarity']:.0%})")
+            elif ptype == "move":
+                typer.echo(f"    {c(', '.join(item['concepts'][:3]), 'yellow')}  {c(item['from_file'], 'red')} → {c(item['to_file'], 'green')}")
+            elif "extract" in ptype:
+                typer.echo(f"    {item['file']} lost {c(', '.join(item.get('lost_concepts', [])[:3]), 'yellow')}")
+            elif "inline" in ptype:
+                typer.echo(f"    {item['file']} gained {c(', '.join(item.get('gained_concepts', [])[:3]), 'yellow')}")
+            else:
+                typer.echo(f"    {item['file']} {c(', '.join(item.get('concepts', [])[:3]), 'gray')}")
+        if len(items) > limit:
+            suffix = " more" if verbose else " more; use --verbose"
+            typer.echo(f"    … +{len(items) - limit}{suffix}")
+        typer.echo("")
+
+
+@cli.command()
+def stop(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    read: Annotated[list[str] | None, typer.Option("--read", help="Files already read; repeat")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Agent exploration entropy: should you keep reading?
+
+    Tracks concept coverage as you read files and signals
+    when further exploration has diminishing returns.
+    """
+    from vocab.reports import exploration_entropy
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    read_files = read or []
+    data = exploration_entropy(path, read_files)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    signal = data.get("stop_signal", "continue")
+    sig_color = "green" if signal == "stop" else ("yellow" if signal == "slow" else "cyan")
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  EXPLORATION ENTROPY", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Read: {c(str(data.get('files_read', 0)), 'cyan')}/{data.get('total_files', 0)} files")
+    typer.echo(f"  Coverage: {c(str(data.get('coverage_pct', 0)) + '%', 'green')} of unique concepts")
+    typer.echo(f"  Next file adds: {c(str(data.get('marginal_gain_next_file', 0)), 'yellow')} new concepts")
+    typer.echo(f"  Signal: {c(signal.upper(), sig_color)}")
+    typer.echo(f"  Confidence: {c(data.get('confidence', '?'), 'gray')}")
+    typer.echo("")
+
+    if signal == "stop":
+        typer.echo(c("  No more exploration needed. What you've read covers the concepts.", "green"))
+    elif signal == "slow":
+        typer.echo(c("  Diminishing returns. Consider acting on what you know.", "yellow"))
+        next_files = data.get("next_best_files", [])[:3]
+        if next_files:
+            typer.echo(c(f"  If continuing, read: {', '.join(next_files)}", "gray"))
+    else:
+        next_files = data.get("next_best_files", [])[:3]
+        if next_files:
+            typer.echo(c(f"  Next best: {', '.join(next_files)}", "green"))
+
+    typer.echo("")
+
+
+@cli.command()
+def entropy(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks to analyze")] = 12,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Entropy velocity: is vocabulary diversity accelerating or decelerating?
+
+    Shannon entropy of phrase distribution measured at 4-week
+    intervals. Acceleration > 0 = heating up (diversifying fast).
+    Acceleration < 0 = cooling down (stabilizing).
+    """
+    from vocab.reports import entropy_velocity
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = entropy_velocity(path, weeks=weeks)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    sig_color = "red" if data.get("signal") == "warning" else ("green" if data.get("signal") == "stable" else "cyan")
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  ENTROPY VELOCITY", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Velocity: {c(str(data.get('velocity')), 'cyan')}  "
+               f"Accel: {c(str(data.get('acceleration')), 'yellow')}")
+    typer.echo(f"  Trend: {c(data.get('trend', '?'), sig_color)}")
+    typer.echo(f"  Confidence: {c(data.get('confidence', '?'), 'gray')}")
+    typer.echo("")
+
+    for snap in data.get("intervals", []):
+        bar_len = min(int(snap["entropy"] * 10), 40)
+        bar = "\u2588" * bar_len + "\u2591" * max(0, 40 - bar_len)
+        typer.echo(f"  {c(str(snap['age_weeks']), 'gray'):>4}w ago  {bar}  {snap['entropy']:.4f}  ({snap['unique_phrases']} unique)")
+        typer.echo("")
+
+
+@cli.command()
+def genesis(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    top: Annotated[int, typer.Option("--top", "-n", help="Max results per category")] = 20,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show more example concepts")] = False,
+):
+    """Concept origin tracing: which concepts are native vs imported?
+
+    Endogenous: exists only in one file.
+    Imported: appears in 2-5 files — may be a shared dependency.
+    Ambiguous: widespread (6+ files) — framework or utility concept.
+    """
+    from vocab.reports import concept_genesis
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = concept_genesis(path, top_n=top)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    summary = data.get("summary", {})
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  CONCEPT GENESIS", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Endogenous: {c(str(summary.get('endogenous_count', 0)), 'green')}  "
+               f"Imported: {c(str(summary.get('imported_count', 0)), 'cyan')}  "
+               f"Ambiguous: {c(str(summary.get('ambiguous_count', 0)), 'gray')}")
+    typer.echo(f"  Confidence: {c(data.get('confidence', '?'), 'gray')}")
+    typer.echo("")
+
+    limit = 8 if verbose else 3
+
+    endo = data.get("endogenous", [])
+    if endo:
+        typer.echo(c("  LOCAL-ONLY CONCEPTS:", "green"))
+        for e in endo[:limit]:
+            typer.echo(f"    {c(e['concept'], 'yellow'):<30} {c(e['file'], 'green')}  ({e['count']}x)")
+        typer.echo("")
+
+    imp = data.get("imported", [])
+    if imp:
+        typer.echo(c("  SHARED 2-5 FILE CONCEPTS:", "cyan"))
+        for i in imp[:limit]:
+            typer.echo(f"    {c(i['concept'], 'yellow'):<30} primary: {i['primary_file']}  ({i['file_count']} files)")
+        typer.echo("")
+
+    amb = data.get("ambiguous", [])
+    if amb:
+        typer.echo(c("  WIDESPREAD CONCEPTS:", "gray"))
+        for a in amb[:limit]:
+            typer.echo(f"    {a['concept']}  ({a['file_count']} files across repo)")
+        typer.echo("")
+
+
+@cli.command()
+def bond(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    top: Annotated[int, typer.Option("--top", "-n", help="Max results per bond type")] = 30,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    verbose: Annotated[bool, typer.Option("--verbose", help="Show more bond examples")] = False,
+):
+    """Concept bond classification: covalent, ionic, metallic.
+
+    Covalent: concepts that always appear together (Jaccard >= 0.9).
+    Ionic: concepts that bridge exactly 2 files.
+    Metallic: concepts shared across 6+ files (framework pool).
+    """
+    from vocab.reports import concept_bonds
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = concept_bonds(path, top_n=top)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    summary = data.get("summary", {})
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  CONCEPT BONDS", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Always-together pairs: {c(str(summary.get('covalent_pairs', 0)), 'green')}  "
+               f"2-file bridges: {c(str(summary.get('ionic_pairs', 0)), 'cyan')}  "
+               f"Shared utility pool: {c(str(summary.get('metallic_concepts', 0)), 'gray')}")
+    typer.echo(f"  Confidence: {c(data.get('confidence', '?'), 'gray')}")
+    typer.echo("")
+
+    limit = 8 if verbose else 3
+
+    cov = data.get("covalent", [])
+    if cov:
+        typer.echo(c("  ALWAYS-TOGETHER PAIRS:", "green"))
+        for pair in cov[:limit]:
+            concepts = " + ".join(pair["pair"])
+            typer.echo(f"    {c(concepts, 'yellow'):<60} {pair['shared_files']} files  J={pair['jaccard']}")
+        typer.echo("")
+
+    ion = data.get("ionic", [])
+    if ion:
+        typer.echo(c("  2-FILE BRIDGES:", "cyan"))
+        for i in ion[:limit]:
+            typer.echo(f"    {c(i['concept'], 'yellow'):<30} {c(i['from_file'], 'red')} → {c(i['to_file'], 'green')}")
+        typer.echo("")
+
+    met = data.get("metallic", [])
+    if met:
+        typer.echo(c("  SHARED UTILITY POOL:", "gray"))
+        for m in met[:limit]:
+            samples = ", ".join(m["sample_files"][:2])
+            typer.echo(f"    {c(m['concept'], 'yellow'):<30} {m['file_count']} files  ({samples})")
+        typer.echo("")
+
+
+def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
+    """Return a desert-warning string for the tool format, or empty if confidence is high."""
+    level = ver_confidence.get("level", "high") if isinstance(ver_confidence, dict) else "high"
+    if level == "high":
+        return ""
+    reasons = ver_confidence.get("reasons", []) if isinstance(ver_confidence, dict) else []
+    if not changed_files and level in ("low", "unknown"):
+        return "No files provided; verification suggestions may be unreliable."
+    if level == "low" and reasons:
+        return f"Verification confidence is low: {'; '.join(reasons)}"
+    return f"Verification confidence is {level}; structurally conservative."
 
 
 if __name__ == "__main__":
