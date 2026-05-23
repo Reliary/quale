@@ -242,6 +242,63 @@ class TestCommandCoverage(unittest.TestCase):
         self.assertEqual(data["edit_sprawl_guard"]["mode"], "report_only")
         self.assertIn("src/core.ts", data["edit_sprawl_guard"]["allow_changed_files"])
 
+    def test_contract_emits_id_coded_scope(self):
+        tmp, repo = self._make_repo()
+        self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
+        result = self.run_vocab("contract", "--path", str(repo), "--files", "src/core.ts", "--task", "change core")
+        data = json.loads(result.stdout)
+        self.assertEqual(data["schema_version"], 1)
+        self.assertEqual(data["mode"], "scoped_edit")
+        self.assertIn("contract_id", data)
+        self.assertTrue(data["allowed_edit"])
+        first_edit = data["allowed_edit"][0]
+        self.assertRegex(first_edit, r"^F\d+[0-9a-f]$")
+        self.assertEqual(data["files"][first_edit], "src/core.ts")
+        self.assertIn("edit_ids", data["must_return"])
+
+    def test_check_plan_validates_ids_and_rejects_raw_paths(self):
+        tmp, repo = self._make_repo()
+        self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
+        contract_result = self.run_vocab("contract", "--path", str(repo), "--files", "src/core.ts", "--task", "change core", "--format", "json")
+        contract_data = json.loads(contract_result.stdout)
+        contract_path = repo / "contract.json"
+        contract_path.write_text(json.dumps(contract_data), encoding="utf-8")
+
+        edit_id = contract_data["allowed_edit"][0]
+        verify_id = contract_data.get("verify_options", [])[0]
+        proposal_path = repo / "proposal.json"
+        proposal_path.write_text(json.dumps({"edit_ids": [edit_id], "verify_ids": [verify_id], "expand_scope": []}), encoding="utf-8")
+        ok = self.run_vocab("check-plan", "--contract", str(contract_path), "--proposal", str(proposal_path), "--format", "json")
+        ok_data = json.loads(ok.stdout)
+        self.assertTrue(ok_data["valid"])
+        self.assertEqual(ok_data["edit_paths"], ["src/core.ts"])
+
+        proposal_path.write_text(json.dumps({"edit_ids": ["src/core.ts"], "verify_ids": [], "expand_scope": []}), encoding="utf-8")
+        bad = self.run_vocab("check-plan", "--contract", str(contract_path), "--proposal", str(proposal_path), "--format", "json")
+        bad_data = json.loads(bad.stdout)
+        self.assertFalse(bad_data["valid"])
+        codes = {v["code"] for v in bad_data["violations"]}
+        self.assertIn("raw_path_not_allowed", codes)
+
+    def test_check_plan_marks_boundary_expansion_for_reflight(self):
+        tmp, repo = self._make_repo()
+        self._write(repo, "src/consumer.ts", "import { CoreHandler } from './core';\nexport const UseCore = CoreHandler;\n")
+        self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
+        contract_result = self.run_vocab("contract", "--path", str(repo), "--files", "src/core.ts", "--task", "change core", "--format", "json")
+        contract_data = json.loads(contract_result.stdout)
+        self.assertTrue(contract_data["boundary"])
+        contract_path = repo / "contract.json"
+        contract_path.write_text(json.dumps(contract_data), encoding="utf-8")
+        edit_id = contract_data["allowed_edit"][0]
+        boundary_id = contract_data["boundary"][0]
+        proposal_path = repo / "proposal.json"
+        proposal_path.write_text(json.dumps({"edit_ids": [edit_id], "verify_ids": [], "expand_scope": [{"id": boundary_id, "reason": "shared usage"}]}), encoding="utf-8")
+        result = self.run_vocab("check-plan", "--contract", str(contract_path), "--proposal", str(proposal_path), "--format", "json")
+        data = json.loads(result.stdout)
+        self.assertFalse(data["valid"])
+        self.assertTrue(data["needs_reflight"])
+        self.assertTrue(data["scope_expansion_requested"])
+
     def test_deserts_json_reports_schema_and_guardrails(self):
         tmp, repo = self._make_repo()
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
