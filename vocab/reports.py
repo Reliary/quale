@@ -578,11 +578,13 @@ def _preflight_read_first(changed: list[str], bootstrap: dict | None, blast: lis
 
 def _preflight_verify_files(changed: list[str], bootstrap: dict | None, file_vocabs) -> list[str]:
     verify = []
+    bootstrap_added: set[str] = set()
     if bootstrap:
         for item in bootstrap.get("related_files_for_task", []):
             file = item.get("file")
             if file and item.get("role") == "test" and file not in verify:
                 verify.append(file)
+                bootstrap_added.add(file)
     changed_bases = {os.path.splitext(os.path.basename(f))[0].replace(".", "").lower() for f in changed}
     for fv in file_vocabs:
         norm = fv.path.lower()
@@ -596,7 +598,13 @@ def _preflight_verify_files(changed: list[str], bootstrap: dict | None, file_voc
         d = os.path.dirname(f)
         if d:
             changed_dirs.add(d)
-    verify.sort(key=lambda f: (0 if os.path.dirname(f) in changed_dirs else 1, f))
+    verify.sort(key=lambda f: (
+        0 if f in bootstrap_added and os.path.splitext(os.path.basename(f))[0].replace(".test", "").replace("_test", "").lower() in changed_bases else
+        1 if f in bootstrap_added else
+        2 if os.path.dirname(f) in changed_dirs else
+        3,
+        f
+    ))
     return verify[:3]
 
 
