@@ -159,7 +159,7 @@ class TestCommandCoverage(unittest.TestCase):
         self._write(repo, "src/consumer.ts", "import { ActiveThing } from './active';\nexport const ActiveConsumer = ActiveThing;\n")
         self._write(repo, "tests/active.test.ts", "import { ActiveThing } from '../src/active';\ntest('active', () => ActiveThing());\n")
         result = self.run_vocab("preflight", "--path", str(repo), "--files", "src/active.ts", "--task", "change active thing", "--format", "compact")
-        self.assertIn("VERIFY CANDIDATES", result.stdout)
+        self.assertIn("VERIFY", result.stdout)
         self.assertNotIn("VERIFY WITH", result.stdout)
         self.assertNotIn("AVOID EXPANDING INTO", result.stdout)
 

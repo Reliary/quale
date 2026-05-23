@@ -34,7 +34,21 @@ from vocab import git as vgit
 from vocab.config import load_config
 
 
-cli = typer.Typer(help="vocab — grammar-free structural codebase analyzer.")
+cli = typer.Typer(
+    help="""
+    vocab — grammar-free structural codebase analyzer.
+
+    Orients you, catches hidden dependencies, and reveals architecture without parsers.
+
+    Workflow groups (common uses):
+      ORIENTATION    agent-bootstrap, explore, modules, crystallography, inspect
+      PREFLIGHT      preflight, verify-scope, diff-structural, route
+      HISTORY        timeline, lifecycle, stable, provenance, genesis
+      CROSS-REPO     compare, search, bond, lattice
+      CI/GATES       ci-report, pr-report, gate
+      UTILITIES      analyze, diff, fingerprints, entropy, patterns, stop, help-agent, ask, calibration
+    """
+)
 
 
 def _bar(pct: float, width: int = 20) -> str:
@@ -321,6 +335,7 @@ def preflight(
     diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against the working tree")] = None,
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), json, checklist, compact, llm")] = "tool",
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Show math-heavy signals (SNR, expansion risk details)")] = False,
 ):
     """File-scoped pre-edit/review risk card.
 
@@ -397,6 +412,7 @@ def preflight(
     if format == "checklist":
         _print_preflight_checklist(data)
         return
+    data["verbose"] = verbose
     _print_preflight(data)
 
 
@@ -773,7 +789,9 @@ def stable(
         if item["persistence"] >= 0.8:
             bar_n = int(item["persistence"] * 10)
             bar = "█" * bar_n + "░" * (10 - bar_n)
-            typer.echo(f"  {bar} {c(f'{item["persistence"]:.0%}', 'green'):>6}  {item['file']:<55} {c(f'({item["stable_phrases"]} stable)', 'gray')}")
+            per = item.get("persistence", 0)
+            stable_ph = item.get("stable_phrases", 0)
+            typer.echo("  " + bar + " " + c(f"{per:.0%}", "green") + f"  {item['file']:<55} " + c(f"({stable_ph} stable)", "gray"))
 
     typer.echo("")
     typer.echo(c("  CHURN HOTSPOTS (change every week):", "subheader"))
@@ -781,7 +799,9 @@ def stable(
         if item["persistence"] <= 0.3 and item["total_phrases"] >= 5:
             bar_n = max(1, int((1 - item["persistence"]) * 10))
             bar = "░" * bar_n + "█" * (10 - bar_n)
-            typer.echo(f"  {bar} {c(f'{item["persistence"]:.0%}', 'red'):>6}  {item['file']:<55} {c(f'(turnover {item["avg_turnover"]:.0%}/wk)', 'gray')}")
+            per = item.get("persistence", 0)
+            avg_turn = item.get("avg_turnover", 0)
+            typer.echo("  " + bar + " " + c(f"{per:.0%}", "red") + f"  {item['file']:<55} " + c(f"(turnover {avg_turn:.0%}/wk)", "gray"))
 
     typer.echo(c(f"\n  {len([x for x in data if x['persistence'] >= 0.8])} stable files, {len([x for x in data if x['persistence'] <= 0.3])} churn hotspots", "gray"))
 
@@ -975,87 +995,138 @@ def _print_preflight(data: dict) -> None:
     temp_color = {"HOT": "red", "WARM": "yellow", "COLD": "cyan"}.get(temp, "gray")
     peer = data.get("peer_relative_risk", {})
     peer_text = peer.get("peer_text", "")
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  VOCAB PREFLIGHT", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(f"  Risk: {c(data.get('risk', 'unknown'), risk_color)}  "
-               f"Temp: {c(temp, temp_color)}  "
-               f"Conf: {c(data.get('confidence', 'unknown'), 'cyan')}")
-    if peer_text:
-        typer.echo(f"  Scope: {c(peer_text, 'gray')}")
-    typer.echo(f"  Why: {c('; '.join(data.get('reasons', [])), 'gray')}")
     caveat = data.get("guardrails", {}).get("caveat", "May be wrong; inspect before acting.")
-    typer.echo(c(f"  Caveat: {caveat}", "yellow"))
+    verbose = data.get("verbose", False)
+
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  PREFLIGHT ASSESSMENT", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+
+    # ── Phase 1: Executive Summary ────────────────────────────────
+    typer.echo(f"  {c('RISK', risk_color)}: {c(data.get('risk', 'unknown'), risk_color)}  "
+               f"{c('TEMP', temp_color)}: {c(temp, temp_color)}  "
+               f"{c('CONF', 'cyan')}: {c(data.get('confidence', 'unknown'), 'cyan')}")
+    if peer_text:
+        typer.echo(f"  {c('SCOPE', 'gray')}: {peer_text}")
+    typer.echo(f"  {c('WHY', 'gray')}: {'; '.join(data.get('reasons', ['No structural risk flags']))}")
+    if verbose:
+        env = data.get("safety_envelope", {})
+        in_list = env.get("inside", [])
+        if in_list:
+            typer.echo(f"  {c('SAFETY ENVELOPE', 'gray')}: {len(in_list)} inside, {len(env.get('at_boundary', []))} at boundary")
+    typer.echo(c(f"  ⓘ {caveat}", "gray"))
     typer.echo("")
 
-    # Constraint-first: scope boundary BEFORE suggestions
+    changed = data.get("changed_files", [])
+    if changed:
+        typer.echo(c("  PROPOSED CHANGES:", "subheader"))
+        for file in changed[:8]:
+            ft = data.get("file_temperatures", {}).get(file, "")
+            ft_tag = f" {c(f'[{ft}]', temp_color)}" if ft else ""
+            typer.echo(f"    {c('+', 'green')} {file}{ft_tag}")
+        typer.echo("")
+
+    # ── Phase 2: Action Plan ──────────────────────────────────────
+    reads = data.get("read_first", [])
+    candidates = data.get("verification_candidates", data.get("verify_with", []))
+    avoids = data.get("expansion_risk", data.get("avoid_expanding_into", []))
     envelope = data.get("safety_envelope", {})
-    inside = envelope.get("inside", [])
-    boundary = envelope.get("at_boundary", [])
-    if inside:
-        typer.echo(c("  INSIDE ENVELOPE (safe to edit):", "subheader"))
-        for file in inside[:5]:
-            typer.echo(f"    {c('✓', 'green')} {file}")
-        typer.echo("")
-    if boundary:
-        typer.echo(c("  AT BOUNDARY (verify before touching):", "yellow"))
-        for file in boundary[:5]:
-            typer.echo(f"    {c('→', 'yellow')} {file}")
-        typer.echo("")
 
-    do_not_touch = data.get("expansion_risk", data.get("avoid_expanding_into", []))
-    if do_not_touch:
-        typer.echo(c("  DO NOT TOUCH WITHOUT CONTEXT:", "red"))
-        for item in do_not_touch[:5]:
-            typer.echo(f"    {c('✗', 'red')} {item}")
-        typer.echo("")
-
-    # Followed by actual suggestions
-    typer.echo(c("  Changed files:", "subheader"))
-    for file in data.get("changed_files", [])[:8]:
-        ft = data.get("file_temperatures", {}).get(file, "")
-        ft_tag = f" {c(f'[{ft}]', temp_color)}" if ft else ""
-        typer.echo(f"    {c('+', 'green')} {file}{ft_tag}")
-    typer.echo("")
-
-    sections = [
-        ("READ FIRST", data.get("read_first", []), "green"),
-        ("VERIFY CANDIDATES", data.get("verification_candidates", data.get("verify_with", [])), "cyan"),
-    ]
-    for label, items, color in sections:
-        if not items:
-            continue
-        typer.echo(c(f"  {label}:", "subheader"))
-        for item in items[:5]:
-            typer.echo(f"    {c('→', color)} {item}")
+    reads_only = [f for f in reads if f not in changed]
+    if reads_only or changed or candidates or avoids:
+        typer.echo(c("  RECOMMENDED PATH:", "subheader"))
+        if reads_only:
+            typer.echo(f"    1. {c('READ', 'green')}  {', '.join(reads_only[:2])}  {c('— context for this edit', 'gray')}")
+        typer.echo(f"    {'2.' if reads_only else '1.'} {c('EDIT', 'green')}  {', '.join(changed[:3])}")
+        vi = len(changed) > 3
+        if vi:
+            typer.echo(f"    +{len(changed)-3} more")
+        if candidates:
+            details = data.get("verification_details", [])
+            for c_path in candidates[:3]:
+                d = next((d for d in details if d.get("path") == c_path), None)
+                tag = " " + c("[" + d["reason"] + "]", "gray") if d else ""
+                typer.echo("    3. " + c("VERIFY", "cyan") + "  " + c_path + tag)
+        else:
+            vc = data.get("verification_confidence", {})
+            if vc.get("level") in ("low", "unknown"):
+                typer.echo(f"    3. {c('VERIFY', 'cyan')}  {c('No candidates found — inspect manually', 'yellow')}")
+        boundary = envelope.get("at_boundary", [])
+        if boundary:
+            typer.echo(f"    {c('BOUNDARY', 'yellow')}: {', '.join(boundary[:3])}  {c('— verify before touching', 'yellow')}")
+        if avoids:
+            typer.echo(f"    {c('DNT', 'red')}: {', '.join(avoids[:3])}  {c('— expand scope carefully', 'red')}")
         typer.echo("")
 
+    # ── Phase 3: Gotchas (only if >0) ─────────────────────────────
+    gotcha_sections = []
+
+    # HIDDEN DEPENDENCIES (was: reverse_blast)
     blast = data.get("reverse_blast", [])
     if blast:
-        typer.echo(c("  BLAST RADIUS:", "subheader"))
+        items = []
         for item in blast[:5]:
             concepts = ", ".join(item.get("concepts", [])[:3])
-            typer.echo(f"    {c(str(item.get('shared_concepts', 0)), 'yellow')} shared  {item.get('file')}  {c(concepts, 'gray')}")
-        typer.echo("")
+            items.append(f"    {c(str(item.get('shared_concepts', 0)), 'yellow')} shared  {item.get('file')}  {c(concepts, 'gray')}")
+        if items:
+            gotcha_sections.append((c("  HIDDEN DEPENDENCIES (Blast Radius):", "subheader"), items))
 
+    # HISTORICAL BLIND SPOTS (co-change)
+    co_change = data.get("co_change", [])
+    if co_change:
+        items = []
+        for cc in co_change[:3]:
+            prob = cc.get("probability", "")
+            fname = cc.get("file", "")
+            cocount = cc.get("co_occurrences", 0)
+            tag = "(" + str(cocount) + "\u00d7)"  # times sign
+            items.append("    " + c(prob, "yellow") + "  " + fname + "  " + c(tag, "gray"))
+        gotcha_sections.append((c("  HISTORICAL PATTERNS (Co-change):", "subheader"), items))
+
+    # STABLE ANCHORS TOUCHED (was: stable_anchors_touched)
     stable = data.get("stable_anchors_touched", [])
     if stable:
-        typer.echo(c("  STABLE ANCHORS TOUCHED:", "subheader"))
-        for item in stable[:5]:
+        items = []
+        for item in stable[:3]:
             persistence = item.get("persistence", 0)
-            typer.echo(f"    {c(item.get('file', ''), 'red')}  {c(f'{persistence:.0%}', 'gray')}")
+            items.append(f"    {c(item.get('file', ''), 'red')}  {c(f'{persistence:.0%} stable', 'gray')}")
+        gotcha_sections.append((c("  ARCHITECTURAL STABILITY:", "subheader"), items))
+
+    # ISOLATED CODE (was: structural_orphans)
+    orphans = data.get("structural_orphans", [])
+    if orphans:
+        items = []
+        for o in orphans[:3]:
+            uid = o.get("unique_identifiers", 0)
+            items.append("    " + o.get("file", "") + "  " + c(str(uid) + " unique identifiers", "gray"))
+        gotcha_sections.append((c("  ISOLATED CODE (Structural Orphans):", "subheader"), items))
+
+    if gotcha_sections:
+        typer.echo(c("  GOTCHAS:", "subheader"))
+        for title, items in gotcha_sections:
+            typer.echo(title)
+            for item in items:
+                typer.echo(item)
         typer.echo("")
 
-    # SNR annotations
-    snr = data.get("snr_annotations", {})
-    if snr:
-        typer.echo(c("  SIGNAL ANALYSIS:", "subheader"))
-        for key, val in snr.items():
-            t = val.get("type", "?")
-            tc = "green" if t == "signal" else "gray"
-            typer.echo(f"    {c(f'{key}:{t}', tc)}  {c(val.get('detail', ''), 'gray')}")
-        typer.echo("")
+    # ── Verbose-only signals ──────────────────────────────────────
+    if verbose:
+        snr = data.get("snr_annotations", {})
+        if snr:
+            typer.echo(c("  SIGNAL ANALYSIS:", "subheader"))
+            for key, val in snr.items():
+                t = val.get("type", "?")
+                tc = "green" if t == "signal" else "gray"
+                typer.echo(f"    {c(f'{key}:{t}', tc)}  {c(val.get('detail', ''), 'gray')}")
+            typer.echo("")
+        do_not_touch = data.get("expansion_risk", data.get("avoid_expanding_into", []))
+        if do_not_touch:
+            typer.echo(c("  EXPANSION RISK (verbose):", "subheader"))
+            for item in do_not_touch[:5]:
+                typer.echo(f"    {c('✗', 'red')} {item}")
+            typer.echo("")
 
+    # Footer
     receipt = data.get("privacy_receipt", {})
     typer.echo(c(f"  Privacy: local only={receipt.get('local_only', True)}, uploaded={receipt.get('uploaded', False)}, network={receipt.get('network', False)}", "gray"))
     cap = data.get("capability_boundary", "")
@@ -1607,7 +1678,13 @@ def inspect(
     health = data.get("health_score")
     if health is not None:
         health_color = "green" if health >= 0.7 else ("yellow" if health >= 0.4 else "red")
-        typer.echo(f"  Structural health (experimental): {c(str(health), health_color)}")
+        if health >= 0.7:
+            val = "Well-structured with strong test coverage and low churn."
+        elif health >= 0.4:
+            val = "Moderate health — has some stability but may have churn or test gaps."
+        else:
+            val = "Weak structural health — high churn, sparse tests, or architectural drift."
+        typer.echo(f"  Structural health: {c(f'{health:.2f}/1.0', health_color)}  {c(f'— {val}', 'gray')}")
     invasive = data.get("invasive_concepts", [])
     if invasive:
         inv_concepts = ", ".join(i["concept"] for i in invasive[:3])
@@ -2477,18 +2554,25 @@ def calibration(
     if records == 0:
         typer.echo(f"  {c(data.get('note', 'No records.'), 'yellow')}")
         return
-    typer.echo(f"  Records: {c(str(records), 'cyan')}")
+    typer.echo(f"  Records: {c(str(records), 'cyan')} past verify-scope runs on this repo")
+
     scope = data.get("scope_accuracy", 0)
     sc = "green" if scope >= 0.8 else "yellow"
-    typer.echo(f"  Scope accuracy: {c(f'{scope:.0%}', sc)} ({c(str(records), 'cyan')} records)")
+    scope_val = f"Vocab's scope predictions are {'reliable' if scope >= 0.8 else 'moderately reliable' if scope >= 0.5 else 'unreliable'}. Verify scope manually."
+    typer.echo(f"  {c('SCOPE ACCURACY', sc)}: {c(f'{scope:.0%}', sc)}  {c(f'— {scope_val}', 'gray')}")
+
     verify = data.get("verification_accuracy", 0)
     vc = "green" if verify >= 0.6 else "yellow"
-    typer.echo(f"  Verification accuracy: {c(f'{verify:.0%}', vc)}")
+    verify_val = f"Vocab's test suggestions are {'reliable' if verify >= 0.6 else 'unreliable'}. Trust verification candidates {'cautiously' if verify < 0.6 else 'as strong hints'}."
+    typer.echo(f"  {c('VERIFY ACCURACY', vc)}: {c(f'{verify:.0%}', vc)}  {c(f'— {verify_val}', 'gray')}")
+
     if "risk_high_violation_rate" in data:
         rv = data["risk_high_violation_rate"]
-        typer.echo(f"  Risk HIGH violation rate: {c(f'{rv:.0%}', 'red')}")
+        rv_val = f"High-risk warnings were violated {rv:.0%} of the time. {'Escalate confidence in risk warnings.' if rv < 0.5 else 'Risk warnings are underconfident — treat HIGH risk seriously.'}"
+        typer.echo(f"  {c('RISK CALIBRATION', 'red')}: HIGH violations: {c(f'{rv:.0%}', 'red')}  {c(f'— {rv_val}', 'gray')}")
+
     if "warning" in data:
-        typer.echo(c(f"  {data['warning']}", "yellow"))
+        typer.echo(c(f"  ⚠ {data['warning']}", "yellow"))
     typer.echo("")
 
 
