@@ -12,7 +12,7 @@ CAPABILITY_FOOTER = (
 
 
 def format_preflight_llm(data: dict) -> str:
-    """Compact 1-line-per-signal format for preflight data."""
+    """Compact 1-line-per-signal format for preflight data. Steps ordered as recommendation path (T4)."""
     lines: list[str] = []
 
     risk = data.get("risk", "unknown")
@@ -30,22 +30,50 @@ def format_preflight_llm(data: dict) -> str:
     if peer_text:
         lines.append(f"  SCOPE:{peer_text}")
 
+    # T4: Edit path recommendation — numbered steps
+    reads = data.get("read_first", [])
+    candidates = data.get("verification_candidates", data.get("verify_with", []))
+    details = data.get("verification_details", [])
+    do_not_touch = data.get("expansion_risk", data.get("avoid_expanding_into", []))
+
+    step_reads = [f for f in reads if f not in changed]
+    path_lines = []
+    if step_reads:
+        path_lines.append(f"  1) READ {', '.join(step_reads[:2])}")
+    path_lines.append(f"  2) EDIT {changed_str}")
+    if candidates:
+        cand_strs = []
+        for c in candidates[:3]:
+            detail = next((d for d in details if d.get("path") == c), None)
+            tag = f" ({detail['reason']})" if detail else ""
+            cand_strs.append(f"{c}{tag}")
+        path_lines.append(f"  3) VERIFY {', '.join(cand_strs)}")
+    else:
+        path_lines.append(f"  3) VERIFY none — inspect manually")
+    if do_not_touch:
+        path_lines.append(f"  \u26a0 DNT {', '.join(do_not_touch[:3])}")
+    if len(path_lines) >= 2:
+        lines.append("  PATH:" + "".join(path_lines))
+    else:
+        # fallback to flat format
+        if reads:
+            lines.append(f"  READ:{', '.join(reads[:3])}")
+        if candidates:
+            cand_strs = []
+            for c in candidates[:3]:
+                detail = next((d for d in details if d.get("path") == c), None)
+                tag = f" ({detail['reason']})" if detail else ""
+                cand_strs.append(f"{c}{tag}")
+            lines.append(f"  VERIFY:{', '.join(cand_strs)} conf:{data.get('verification_confidence', {}).get('level', 'unknown')}")
+        else:
+            lines.append(f"  VERIFY:none conf:{data.get('verification_confidence', {}).get('level', 'unknown')}")
+    if do_not_touch and not path_lines:
+        lines.append(f"  DNT:{', '.join(do_not_touch[:3])}")
+
     envelope = data.get("safety_envelope", {})
     boundary = envelope.get("at_boundary", [])
     if boundary:
         lines.append(f"  BOUNDARY:{len(boundary)} files {', '.join(boundary[:3])}")
-
-    reads = data.get("read_first", [])
-    if reads:
-        lines.append(f"  READ:{', '.join(reads[:3])}")
-
-    ver = data.get("verification_confidence", {})
-    ver_level = ver.get("level", "unknown")
-    candidates = data.get("verification_candidates", data.get("verify_with", []))
-    if candidates:
-        lines.append(f"  VERIFY:{', '.join(candidates[:3])} conf:{ver_level}")
-    else:
-        lines.append(f"  VERIFY:none conf:{ver_level}")
 
     stable = data.get("stable_anchors_touched", [])
     if stable:
@@ -60,12 +88,22 @@ def format_preflight_llm(data: dict) -> str:
         noise_items = [f"{k}:{v.get('type','?')}" for k, v in snr.items()]
         lines.append(f"  SNR:{'; '.join(noise_items)}")
 
-    do_not_touch = data.get("expansion_risk", data.get("avoid_expanding_into", []))
-    if do_not_touch:
-        lines.append(f"  DNT:{', '.join(do_not_touch[:3])}")
+    # T5: Structural orphans
+    orphans = data.get("structural_orphans", [])
+    if orphans:
+        lines.append(f"  ORPHANS:{len(orphans)} isolated ({', '.join(o['file'] for o in orphans[:2])})")
+
+    # T1: Co-change
+    co_change = data.get("co_change", [])
+    if co_change:
+        cc = "; ".join(f"{c['file']}({c['probability']})" for c in co_change[:3])
+        lines.append(f"  CO-CHANGE:{cc}")
 
     lines.append(f"  {CAPABILITY_FOOTER}")
     return "\n".join(lines)
+
+
+_SESSION_SKIP_FILE = None
 
 
 def format_bootstrap_llm(data: dict) -> str:
@@ -73,7 +111,20 @@ def format_bootstrap_llm(data: dict) -> str:
     lines: list[str] = []
 
     task = data.get("task", "")
+    total = data.get("total_code_files", 0)
     relevance = data.get("task_relevance_score", "?")
+
+    # T3: Exploration probe — skip gate for large repos without task
+    if not task and total > 100:
+        lines.append(f"VOCAB:{total} files. Reply SKIP to suppress guidance.")
+        lines.append(f"  {CAPABILITY_FOOTER}")
+        return "\n".join(lines)
+
+    # T2: Negative file set
+    low_rel = data.get("low_relevance_files", [])
+    if low_rel:
+        lines.append(f"SKIP:{len(low_rel)} files share 0 concepts — safe to ignore ({', '.join(low_rel[:3])})")
+
     lines.append(f"TASK:{task} RELEVANCE:{relevance}")
 
     task_plan = data.get("task_plan", data.get("task_plan", {}))
@@ -109,7 +160,9 @@ def format_bootstrap_llm(data: dict) -> str:
 
     binding = data.get("binding_concepts", [])
     if binding:
-        lines.append(f"  BIND:{', '.join(b[:2])}")
+        bind_strs = [b.get("concept", str(b))[:20] for b in binding[:2] if isinstance(b, dict)]
+        if bind_strs:
+            lines.append(f"  BIND:{', '.join(bind_strs)}")
 
     lines.append(f"  {CAPABILITY_FOOTER}")
     return "\n".join(lines)
