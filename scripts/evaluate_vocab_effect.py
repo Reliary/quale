@@ -126,6 +126,7 @@ DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", 
 PREFLIGHT_CONDITIONS = (
     "candidate_baseline", "preflight_compact", "preflight_checklist", "verify_mcq",
     "preflight_tool", "preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy",
+    "preflight_tool_llm", "preflight_tool_full",
 )
 
 
@@ -322,6 +323,10 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         guidance = preflight_tool_guidance(case, include_sprawl_guard=True)
     elif condition == "desert_aware_preflight":
         guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+    elif condition == "preflight_tool_llm":
+        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "llm"])
+    elif condition == "preflight_tool_full":
+        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
     elif condition == "route_policy":
         route = run_route(case, files=[case.edit_file])
         if route.get("action") == "preflight_tool":
