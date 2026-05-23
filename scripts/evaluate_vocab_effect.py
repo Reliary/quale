@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -127,7 +128,7 @@ PREFLIGHT_CONDITIONS = (
     "candidate_baseline", "preflight_compact", "preflight_checklist", "verify_mcq",
     "preflight_tool", "preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy",
     "preflight_tool_llm", "preflight_tool_full", "preflight_tool_calibrated", "negotiate",
-    "e2e_negotiate",
+    "e2e_negotiate", "contract_oneline", "contract_prompt", "contract_checkplan",
     "preflight_tool_abl_no_cochange", "preflight_tool_abl_no_orphans",
     "preflight_tool_abl_no_snr", "preflight_tool_abl_no_temp_peer",
     "preflight_tool_abl_only_baseline",
@@ -265,6 +266,8 @@ def score_discovery(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
 
 
 def score_preflight(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
+    if "edit_ids" in parsed or "verify_ids" in parsed or "expand_scope" in parsed:
+        return score_contract_plan(parsed, case)
     verify = normalize_list(parsed.get("verify"))
     extra_edits = [file for file in normalize_list(parsed.get("extra_edits")) if file != case.edit_file]
     semantic_sprawl = _semantic_sprawl_score(extra_edits, case.edit_file, case.task)
@@ -275,6 +278,35 @@ def score_preflight(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
         "extra_edits": extra_edits[:5],
         "verify": verify[:5],
         "semantic_sprawl_score": semantic_sprawl,
+    }
+
+
+def score_contract_plan(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
+    edit_ids = normalize_list(parsed.get("edit_ids"))
+    verify_ids = normalize_list(parsed.get("verify_ids"))
+    expand_scope = parsed.get("expand_scope", [])
+    expand_ids = []
+    if isinstance(expand_scope, list):
+        for item in expand_scope:
+            if isinstance(item, str):
+                expand_ids.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("id"), str):
+                expand_ids.append(item["id"])
+    elif isinstance(expand_scope, str):
+        expand_ids = [expand_scope]
+    used = edit_ids + verify_ids + expand_ids
+    raw_paths = [item for item in used if "/" in item or "." in item]
+    invalid_ids = [item for item in used if not re.match(r"^[FTB]\d+[0-9a-f]$", item)]
+    return {
+        "verify_hit": bool(verify_ids),
+        "verify_hit_count": len(verify_ids),
+        "extra_edit_count": len(expand_ids),
+        "extra_edits": expand_ids[:5],
+        "verify": verify_ids[:5],
+        "semantic_sprawl_score": 0.0 if not expand_ids else 1.0,
+        "invalid_id_count": len(invalid_ids),
+        "raw_path_count": len(raw_paths),
+        "scope_expansion_request_count": len(expand_ids),
     }
 
 
@@ -397,6 +429,9 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             }, indent=2)
         except (json.JSONDecodeError, KeyError):
             guidance = raw
+    elif condition in {"contract_oneline", "contract_prompt", "contract_checkplan"}:
+        fmt = "prompt" if condition in {"contract_prompt", "contract_checkplan"} else "tool"
+        guidance = run_vocab(case.path, ["contract", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", fmt])
     elif condition.startswith("knock_"):
         knock = condition.replace("knock_baseline_", "")
         raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
@@ -497,6 +532,12 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         "Return exactly one compact JSON object and no markdown. "
         "Use keys: verify (array of relative paths), extra_edits (array of relative paths), should_edit_candidate (boolean)."
     )
+    if condition.startswith("contract_"):
+        system = (
+            "You are planning an edit under an ID-coded contract. Return exactly one compact JSON object and no markdown. "
+            "Use keys: edit_ids (array), verify_ids (array), expand_scope (array), manual_verify (array). "
+            "Use only IDs from the contract. Do not return raw file paths."
+        )
     if condition in {"preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy"}:
         system += " Obey report-only sprawl guidance: do not propose extra_edits unless the task explicitly requires them."
     if condition in {"desert_aware_preflight", "route_policy"}:
@@ -560,6 +601,55 @@ def preflight_tool_guidance(case: Case, include_sprawl_guard: bool = False, dese
     return "\n".join(part for part in parts if part)
 
 
+def run_contract_check(case: Case, proposal: dict[str, Any]) -> dict[str, Any]:
+    raw_contract = run_vocab(case.path, ["contract", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+    try:
+        contract = json.loads(raw_contract)
+    except Exception:
+        return {"contract_check_error": "contract_parse_failed"}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        contract_path = Path(tmp) / "contract.json"
+        proposal_path = Path(tmp) / "proposal.json"
+        contract_path.write_text(json.dumps(contract), encoding="utf-8")
+        proposal_path.write_text(json.dumps(proposal), encoding="utf-8")
+        raw = run_vocab(case.path, [
+            "check-plan", "--contract", str(contract_path), "--proposal", str(proposal_path), "--format", "json"
+        ])
+    try:
+        checked = json.loads(raw)
+    except Exception:
+        return {"contract_check_error": "check_parse_failed", "contract_check_raw": raw[:300]}
+
+    violations = checked.get("violations", []) if isinstance(checked.get("violations"), list) else []
+    invalid_id_count = 0
+    raw_path_count = 0
+    for violation in violations:
+        if not isinstance(violation, dict):
+            continue
+        if violation.get("code") == "unknown_id":
+            invalid_id_count += len(violation.get("ids", []) or [])
+        elif violation.get("code") == "raw_path_not_allowed":
+            raw_path_count += len(violation.get("values", []) or [])
+
+    verify_paths = checked.get("verify_paths", []) if isinstance(checked.get("verify_paths"), list) else []
+    expand_paths = checked.get("expand_paths", []) if isinstance(checked.get("expand_paths"), list) else []
+    return {
+        "contract_valid": bool(checked.get("valid")),
+        "contract_needs_reflight": bool(checked.get("needs_reflight")),
+        "invalid_id_count": invalid_id_count,
+        "raw_path_count": raw_path_count,
+        "scope_expansion_request_count": len(expand_paths),
+        "verify_hit": any(path in verify_paths for path in case.verify_files),
+        "verify_hit_count": sum(1 for path in case.verify_files if path in verify_paths),
+        "extra_edit_count": len(expand_paths),
+        "extra_edits": expand_paths[:5],
+        "verify": verify_paths[:5],
+        "semantic_sprawl_score": 0.0 if not expand_paths else 1.0,
+        "contract_check": checked,
+    }
+
+
 def run_trial(case: Case, suite: str, condition: str, trial: int, model: str, temperature: float, dry_run: bool, json_mode: bool, max_tokens: int) -> dict[str, Any]:
     files = source_files(case.path)
     if case.edit_file not in files:
@@ -613,6 +703,9 @@ def run_trial(case: Case, suite: str, condition: str, trial: int, model: str, te
             })
             return retry_row
         row["parse_error"] = True
+        return row
+    if suite == "preflight" and condition.startswith("contract_"):
+        row.update(run_contract_check(case, parsed))
         return row
     row.update(score_discovery(parsed, case) if suite == "discovery" else score_preflight(parsed, case))
     return row
@@ -696,6 +789,11 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
                     "avg_verify_hit_count": avg_num(rows, "verify_hit_count"),
                     "avg_extra_edit_count": avg_sprawl,
                     "avg_semantic_sprawl": avg_num(rows, "semantic_sprawl_score"),
+                    "avg_invalid_id_count": avg_num(rows, "invalid_id_count"),
+                    "avg_raw_path_count": avg_num(rows, "raw_path_count"),
+                    "avg_scope_expansion_request_count": avg_num(rows, "scope_expansion_request_count"),
+                    "contract_valid_rate": avg_bool(rows, "contract_valid"),
+                    "contract_needs_reflight_rate": avg_bool(rows, "contract_needs_reflight"),
                     "avg_input_tokens": avg_tokens,
                     "efficiency_score": efficiency,
                 }
