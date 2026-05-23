@@ -126,7 +126,7 @@ DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", 
 PREFLIGHT_CONDITIONS = (
     "candidate_baseline", "preflight_compact", "preflight_checklist", "verify_mcq",
     "preflight_tool", "preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy",
-    "preflight_tool_llm", "preflight_tool_full",
+    "preflight_tool_llm", "preflight_tool_full", "preflight_tool_calibrated", "negotiate",
     "preflight_tool_abl_no_cochange", "preflight_tool_abl_no_orphans",
     "preflight_tool_abl_no_snr", "preflight_tool_abl_no_temp_peer",
     "preflight_tool_abl_only_baseline",
@@ -330,6 +330,27 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "llm"])
     elif condition == "preflight_tool_full":
         guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+    elif condition == "preflight_tool_calibrated":
+        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool", "--model", "deepseek-v4-flash"])
+    elif condition == "negotiate":
+        raw = run_vocab(case.path, ["negotiate", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        try:
+            d = json.loads(raw)
+            f = d.get("final_files", [case.edit_file])
+            ks = d.get("keystone_files", [])
+            guidance = json.dumps({
+                "schema_version": 1,
+                "format": "negotiate",
+                "total_rounds": d.get("total_rounds", 0),
+                "initial_scope": d.get("initial_files_count", 0),
+                "final_scope": d.get("final_files_count", 0),
+                "reduced_files": d.get("reduced", 0),
+                "keystone_files": ks,
+                "changed_files": f,
+                "risk": d.get("final_risk", "unknown"),
+            }, indent=2)
+        except (json.JSONDecodeError, KeyError):
+            guidance = raw
     elif condition.startswith("preflight_tool_abl_"):
         ablation = condition.replace("preflight_tool_abl_", "")
         raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
