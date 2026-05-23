@@ -357,9 +357,9 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
     elif condition == "preflight_tool_llm":
         guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "llm"])
     elif condition == "preflight_tool_full":
-        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "full"])
     elif condition == "preflight_tool_calibrated":
-        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool", "--model", "deepseek-v4-flash"])
+        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
     elif condition == "negotiate":
         raw = run_vocab(case.path, ["negotiate", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
@@ -423,7 +423,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             guidance = raw
     elif condition.startswith("fmt_"):
         style = condition.replace("fmt_baseline_", "")
-        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool", "--model", "deepseek-v4-flash"])
+        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
         try:
             p = json.loads(raw)
             baseline_keys = {"schema_version", "risk", "confidence", "reason",
