@@ -236,6 +236,7 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
             bootstrap = None
 
     verify_with = _preflight_verify_files(changed, bootstrap, analysis.file_vocabs)
+    verification_details = _explain_verify_candidates(changed, bootstrap, analysis.file_vocabs, verify_with)
     read_first = _preflight_read_first(changed, bootstrap, blast)
     avoid_expanding = _preflight_avoid(changed, stable_touched, blast, bootstrap, verify_with)
     reasons = _preflight_reasons(changed, stable_touched, blast, mirror)
@@ -288,6 +289,12 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
             "detail": f"mirror ratio {mirror_ratio:.0%}" if mirror_ratio < 1.0 else "full mirror",
         }
 
+    # T5: Structural orphans — files sharing zero identifiers with rest of repo
+    orphans = _structural_orphans(analysis)
+
+    # T1: Co-change prediction — historical change probability
+    co_change = _co_change_probs(path, changed)
+
     # Tier 1 capability boundary
     capability = (
         "Vocab sees structure, not semantics. It cannot verify correctness, detect logic errors, "
@@ -305,6 +312,7 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         "read_first": read_first,
         "verification_candidates": verify_with,
         "verify_with": verify_with,
+        "verification_details": verification_details,
         "verification_confidence": verification_confidence,
         "expansion_risk": avoid_expanding,
         "avoid_expanding_into": avoid_expanding,
@@ -317,6 +325,8 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         "peer_relative_risk": peer,
         "safety_envelope": envelope,
         "snr_annotations": snr_annotations,
+        "structural_orphans": orphans,
+        "co_change": co_change,
         "capability_boundary": capability,
         "guardrails": {
             "mode": "report_only",
@@ -390,6 +400,39 @@ def _preflight_verify_files(changed: list[str], bootstrap: dict | None, file_voc
         if base in changed_bases and fv.path not in verify:
             verify.append(fv.path)
     return verify[:3]
+
+
+def _explain_verify_candidates(changed: list[str], bootstrap: dict | None, file_vocabs, verify_with: list[str]) -> list[dict[str, str]]:
+    """Return per-candidate match reason for each verification file."""
+    if not verify_with:
+        return []
+    changed_bases = {os.path.splitext(os.path.basename(f))[0].replace(".", "").lower() for f in changed}
+    changed_dirs = set()
+    for f in changed:
+        parts = f.split("/")
+        if len(parts) > 1:
+            changed_dirs.add("/".join(parts[:-1]))
+    # Collect task-relevant tests
+    task_tests = set()
+    if bootstrap:
+        for item in bootstrap.get("related_files_for_task", []):
+            if item.get("role") == "test" and item.get("file"):
+                task_tests.add(item["file"])
+    details = []
+    for vpath in verify_with:
+        if vpath in task_tests:
+            details.append({"path": vpath, "reason": "task relevance"})
+            continue
+        vbase = os.path.splitext(os.path.basename(vpath))[0].replace(".test", "").replace("_test", "").lower()
+        if vbase in changed_bases:
+            details.append({"path": vpath, "reason": f"stem '{vbase}' matches changed file"})
+            continue
+        vdir = vpath.rsplit("/", 1)[0] if "/" in vpath else ""
+        if vdir in changed_dirs:
+            details.append({"path": vpath, "reason": f"same directory '{vdir}' as changed file"})
+            continue
+        details.append({"path": vpath, "reason": "test discovery convention"})
+    return details[:3]
 
 
 def _preflight_avoid(changed: list[str], stable_touched: list[dict], blast: list[dict], bootstrap: dict | None,
@@ -998,6 +1041,77 @@ def _save_cached(path: str, data: dict) -> None:
     os.makedirs(os.path.dirname(cp), exist_ok=True)
     with open(cp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+
+
+# ── Calibration (T7) ──────────────────────────────────────────────
+
+_CALIBRATION_FILE = "calibration.jsonl"
+
+
+def _calibration_path(path: str) -> str:
+    """Path to calibration log under .vocab-cache."""
+    return os.path.join(path, _CACHE_DIR, _CALIBRATION_FILE)
+
+
+def _record_calibration(path: str, record: dict) -> None:
+    """Append one calibration record to the JSONL file."""
+    cp = _calibration_path(path)
+    os.makedirs(os.path.dirname(cp), exist_ok=True)
+    try:
+        with open(cp, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass  # calibration logging is best-effort
+
+
+def _repo_hash(path: str) -> str:
+    """Stable hash for a repo (based on real path)."""
+    import hashlib
+    return hashlib.sha256(os.path.realpath(path).encode()).hexdigest()[:16]
+
+
+def compute_calibration(path: str, last_n: int = 100) -> dict:
+    """Read calibration log and compute accuracy metrics."""
+    cp = _calibration_path(path)
+    if not os.path.isfile(cp):
+        return {"records": 0, "note": "No calibration data yet. Run verify-scope to start tracking."}
+    repo = _repo_hash(path)
+    records: list[dict] = []
+    try:
+        with open(cp, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    if rec.get("repo_hash") == repo:
+                        records.append(rec)
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        return {"records": 0, "error": "Failed to read calibration log."}
+
+    recent = records[-last_n:]
+    if not recent:
+        return {"records": 0, "note": "No calibration records for this repo."}
+
+    n = len(recent)
+    scope_ok = sum(1 for r in recent if r.get("scope_matched", True))
+    verify_hits = sum(1 for r in recent if r.get("verification_candidate_hit", False))
+    risk_high = [r for r in recent if r.get("risk") == "high"]
+    risk_high_violations = sum(1 for r in risk_high if not r.get("scope_matched", True))
+
+    result: dict = {
+        "records": n,
+        "scope_accuracy": round(scope_ok / n, 3) if n else 0,
+        "verification_accuracy": round(verify_hits / n, 3) if n else 0,
+    }
+    if risk_high:
+        result["risk_high_violation_rate"] = round(risk_high_violations / len(risk_high), 3)
+    if n < 30:
+        result["warning"] = f"Small sample ({n} records); not statistically significant."
+    return result
 
 
 # ── Health Score ──────────────────────────────────────────────────
@@ -2092,6 +2206,19 @@ def verify_scope(path: str, contract_files: list[str] | None = None,
 
     scope_matched = not scope_violations and (not expected or actual.issubset(expected))
 
+    # T7: Record calibration
+    ver_candidates = post.get("verification_candidates", post.get("verify_with", []))
+    cal_record = {
+        "repo_hash": _repo_hash(path),
+        "expected": list(expected),
+        "actual": list(actual),
+        "scope_matched": scope_matched,
+        "verification_candidate_hit": any(c in actual for c in ver_candidates),
+        "risk": post.get("risk", "unknown"),
+        "temperature": post.get("temperature", "WARM"),
+    }
+    _record_calibration(path, cal_record)
+
     return {
         "schema_version": 1,
         "diff_ref": diff_ref,
@@ -2117,6 +2244,91 @@ def verify_scope(path: str, contract_files: list[str] | None = None,
             "not_semantic_truth": True,
         },
     }
+
+
+# ── Structural Orphans (T5) ───────────────────────────────────────
+
+def _structural_orphans(analysis) -> list[dict]:
+    """Find files sharing zero identifiers with any other file."""
+    from vocab.scanner import _is_generated, _is_lock_file, _code_file_vocabs
+    from vocab.compare import _extract_identifiers
+
+    identifiers_by_file: dict[str, set[str]] = {}
+    global_df: dict[str, int] = {}
+    for fv in _code_file_vocabs(analysis):
+        ids = _extract_identifiers(fv)
+        if ids:
+            identifiers_by_file[fv.path] = ids
+            for ident in ids:
+                global_df[ident] = global_df.get(ident, 0) + 1
+
+    orphans = []
+    for path, ids in identifiers_by_file.items():
+        if _is_generated(path) or _is_lock_file(path):
+            continue
+        shared_with = set()
+        for ident in ids:
+            if global_df.get(ident, 0) > 1:
+                shared_with.add(ident)
+        if len(shared_with) < 2:
+            orphans.append({
+                "file": path,
+                "unique_identifiers": len(ids),
+                "shared_identifiers": len(shared_with),
+            })
+
+    orphans.sort(key=lambda x: -x["unique_identifiers"])
+    return orphans[:5]
+
+
+# ── Co-change Prediction (T1) ──────────────────────────────────────
+
+def _co_change_probs(path: str, target_files: list[str], max_commits: int = 500, max_results: int = 5) -> list[dict]:
+    """Compute historical co-change probability for each target file.
+
+    For each target file, scans the last N commits and measures:
+        P(Y changed | X changed) = co-occurrences(X, Y) / total_changes(X)
+    """
+    if not vgit.is_repo(path) or not target_files:
+        return []
+    refs = vgit.ref_log(path, count=100)
+    if not refs:
+        return []
+
+    change_sets: dict[str, set[str]] = {}
+    per_file_changes: dict[str, int] = {}
+    for ref in refs:
+        sha = ref.sha
+        try:
+            out = vgit._git("diff-tree", "--no-commit-id", "-r", "--name-only", "-z", sha, cwd=path)
+            files_in_commit = [f for f in out.split("\0") if f and not f.startswith(".")]
+        except Exception:
+            continue
+        if not files_in_commit:
+            continue
+        for file in files_in_commit:
+            per_file_changes[file] = per_file_changes.get(file, 0) + 1
+        for file in files_in_commit:
+            change_sets.setdefault(file, set()).update(f for f in files_in_commit if f != file)
+
+    results = []
+    for target in target_files[:3]:
+        target_changes = per_file_changes.get(target, 0)
+        if target_changes < 2:
+            continue
+        related = change_sets.get(target, {})
+        scored = []
+        for other, co_count in Counter(related).most_common(max_results + 5):
+            prob = round(co_count / max(target_changes, 1), 2)
+            if prob >= 0.1 and co_count >= 2:
+                scored.append({
+                    "file": other,
+                    "probability": f"{prob:.0%}",
+                    "co_occurrences": co_count,
+                    "total_changes": target_changes,
+                })
+        results.extend(scored[:max_results])
+    return results
 
 
 # ── Repo fingerprint ──────────────────────────────────────────────

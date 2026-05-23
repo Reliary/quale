@@ -475,6 +475,25 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
                 unverified_files.append(filepath)
         task_relevance_score = len(verified_files) / max(len(related), 1)
 
+    # T2: Negative file set — files sharing ZERO concepts with task
+    low_relevance = []
+    if keywords and analysis:
+        lowered = [k.lower() for k in keywords if len(k) >= 4]
+        from vocab.scanner import _code_file_vocabs, _is_generated, _is_lock_file
+        related_paths = {r["file"] for r in related}
+        for fv in _code_file_vocabs(analysis):
+            if fv.path in related_paths:
+                continue
+            if _is_generated(fv.path) or _is_lock_file(fv.path):
+                continue
+            haystack = f"{fv.path} " + " ".join(fv.vocabulary.keys())
+            hay = haystack.lower()
+            if not any(kw in hay for kw in lowered):
+                low_relevance.append(fv.path)
+        low_relevance = low_relevance[:5] if len(low_relevance) <= 5 else (low_relevance[:5] if analysis.total_files < 500 else [])
+        if not low_relevance or analysis.total_files < 30:
+            low_relevance = []
+
     notes = _compute_agent_notes(path, explore_data, modules_data, stability_data)
     themes_out = explore_data.get("themes", [])
     task_plan = _task_plan(task, related, reads, modules_data, stability_data)
@@ -506,6 +525,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
         "themes": themes_out,
         "agent_notes": notes,
         "total_code_files": explore_data.get("total_code_files", 0),
+        "low_relevance_files": low_relevance,
     }
 
 
