@@ -367,6 +367,7 @@ def preflight(
         if qs else
         "Do not propose extra_edits unless the task explicitly requires them."
     )
+    vtypes = _classify_verify_types(verify_candidates[:3] if verify_candidates else [], data.get("changed_files", []))
 
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
@@ -387,6 +388,7 @@ def preflight(
                 "question": "Which file would verify this change?",
                 "candidates": verify_candidates[:3] if verify_candidates else [],
                 "max_selections": 1,
+                "types": vtypes,
             },
             "verification_confidence": ver_confidence,
             "expansion_risk": data.get("expansion_risk", data.get("avoid_expanding_into", [])),
@@ -420,6 +422,7 @@ def preflight(
                 "question": "Which file would verify this change?",
                 "candidates": verify_candidates[:3] if verify_candidates else [],
                 "max_selections": 1,
+                "types": vtypes,
             },
             "verification_details": data.get("verification_details", []),
             "verification_confidence": ver_confidence,
@@ -470,7 +473,7 @@ def contract(
         typer.echo(json.dumps(data, indent=2))
         return
     if format == "prompt":
-        typer.echo("Return exactly one JSON object using IDs only: {\"edit_ids\":[],\"verify_ids\":[],\"expand_scope\":[],\"manual_verify\":[]}")
+        typer.echo("Return exactly one JSON object using IDs only: {\"edit_ids\":[],\"verify_ids\":[],\"expand_scope\":[{\"id\":\"B1\",\"reason\":\"why\"}],\"manual_verify\":[]}")
         typer.echo(json.dumps(data, separators=(",", ":")))
         return
     typer.echo(json.dumps(data, separators=(",", ":")))
@@ -2667,6 +2670,25 @@ def calibration(
     if "warning" in data:
         typer.echo(c(f"  ⚠ {data['warning']}", "yellow"))
     typer.echo("")
+
+
+def _classify_verify_types(candidates: list[str], changed_files: list[str]) -> dict[str, str]:
+    """Label each verification candidate with its test type."""
+    changed_dirs = set()
+    for f in changed_files:
+        d = os.path.dirname(f)
+        if d:
+            changed_dirs.add(d)
+    types = {}
+    for c in candidates:
+        cdir = os.path.dirname(c)
+        if cdir in changed_dirs:
+            types[c] = "unit"
+        elif "tests/" in c or "test/" in c or cdir in ("tests", "test"):
+            types[c] = "integration"
+        else:
+            types[c] = "cross_package"
+    return types
 
 
 def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
