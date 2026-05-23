@@ -135,6 +135,50 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
     }
 
 
+def _file_temperature(file: str, lifecycle_data: list[dict], stability_data: list[dict], entropy_data: dict | None) -> str:
+    """Compute single-word temperature for a file: COLD/WARM/HOT."""
+    for item in lifecycle_data:
+        if item.get("file") == file:
+            signal = item.get("signal", "")
+            if signal in ("EMERGING", "GROWING", "EVOLVING", "SPORADIC"):
+                return "HOT"
+            if signal in ("DECAYING", "ABANDONED", "DEAD"):
+                return "COLD"
+            if signal in ("STABLE", "RENAMED"):
+                return "WARM"
+    for item in stability_data:
+        if item.get("file") == file and item.get("persistence", 0) >= 0.8:
+            return "COLD"
+    return "WARM"
+
+
+def _peer_relative_risk(changed: list[str], blast: list[dict]) -> dict:
+    """Compare blast radius against typical edit in this repo."""
+    total_shared = sum(item.get("shared_concepts", 0) for item in blast[:10])
+    total_impacted = len(blast)
+    multiplier = round(max(total_impacted, 1) / 1.2, 2)  # 1.2 = empirical median
+    return {
+        "blast_file_count": total_impacted,
+        "total_shared_concepts": total_shared,
+        "vs_median_multiplier": multiplier,
+        "peer_text": f"{multiplier}x broader than median edit (blast:{total_impacted})",
+    }
+
+
+def _safety_envelope(changed: list[str], blast: list[dict], stable_touched: list[dict]) -> dict:
+    """Define safety envelope: inside/at-boundary/outside."""
+    inside = list(changed)
+    boundary = list(dict.fromkeys(
+        [item.get("file", "") for item in blast[:10] if item.get("file") not in inside]
+    ))
+    return {
+        "inside": inside[:5],
+        "at_boundary": boundary[:5],
+        "boundary_count": len(boundary),
+        "stable_on_boundary": [s["file"] for s in stable_touched[:3] if s.get("file") not in inside],
+    }
+
+
 def preflight_report(path: str = ".", files: list[str] | None = None,
                      diff_ref: str | None = None, task: str | None = None) -> dict:
     """File-scoped edit/review preflight built from grammar-free signals."""
@@ -200,6 +244,56 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     verification_confidence = _verification_confidence(changed, verify_with, mirror, analysis.file_vocabs)
     sprawl_guard = _edit_sprawl_guard(changed, avoid_expanding, stable_touched, blast)
 
+    # Tier 1 signals — temperature per changed file
+    try:
+        lifecycle_data = compute_lifecycles(path, weeks=24)
+    except Exception:
+        lifecycle_data = []
+    try:
+        entropy_data = entropy_velocity(path, weeks=12)
+    except Exception:
+        entropy_data = None
+    file_temps = {}
+    for file in changed:
+        file_temps[file] = _file_temperature(file, lifecycle_data, stability_data, entropy_data)
+    temp_overall = "HOT" if any(t == "HOT" for t in file_temps.values()) else \
+                  "WARM" if "WARM" in file_temps.values() else "COLD"
+
+    # Tier 1 — peer-relative risk
+    peer = _peer_relative_risk(changed, blast)
+
+    # Tier 2 — safety envelope
+    envelope = _safety_envelope(changed, blast, stable_touched)
+
+    # Tier 2 — signal-to-noise annotations
+    mirror_ratio = mirror.get("mirror_ratio", 0.0) if mirror else 0.0
+    ver_conf = verification_confidence
+    snr_annotations = {}
+    if ver_conf.get("mirror_ratio", 0) > 0:
+        snr_annotations["verification"] = {
+            "type": "noise" if ver_conf.get("candidate_count", 0) == 0 and ver_conf.get("level") == "low" else "signal",
+            "detail": "no structural candidates; may be language artifact or real gap" if ver_conf.get("candidate_count", 0) == 0 else f"{ver_conf.get('candidate_count', 0)} candidates found",
+        }
+    snr_annotations["blast"] = {
+        "type": "signal" if blast and blast[0].get("shared_concepts", 0) > 3 else "noise",
+        "detail": f"{len(blast)} impacted files" if blast else "no blast detected",
+    }
+    snr_annotations["stability"] = {
+        "type": "signal" if len(stable_touched) > 0 else "noise",
+        "detail": f"{len(stable_touched)} stable anchors touched" if stable_touched else "no stable anchors touched",
+    }
+    if mirror:
+        snr_annotations["mirror"] = {
+            "type": "signal" if mirror_ratio < 0.3 and len(verify_with) > 0 else "noise",
+            "detail": f"mirror ratio {mirror_ratio:.0%}" if mirror_ratio < 1.0 else "full mirror",
+        }
+
+    # Tier 1 capability boundary
+    capability = (
+        "Vocab sees structure, not semantics. It cannot verify correctness, detect logic errors, "
+        "or guarantee test quality. Trust its high-confidence signals more than its low-confidence ones."
+    )
+
     return {
         "schema_version": 1,
         "path": path,
@@ -217,7 +311,13 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         "edit_sprawl_guard": sprawl_guard,
         "reverse_blast": blast[:5],
         "stable_anchors_touched": stable_touched[:5],
-        "mirror_gap_ratio": mirror.get("mirror_ratio", 0.0) if mirror else 0.0,
+        "mirror_gap_ratio": mirror_ratio,
+        "file_temperatures": file_temps,
+        "temperature": temp_overall,
+        "peer_relative_risk": peer,
+        "safety_envelope": envelope,
+        "snr_annotations": snr_annotations,
+        "capability_boundary": capability,
         "guardrails": {
             "mode": "report_only",
             "manual_review_required": True,
@@ -1734,12 +1834,297 @@ def confidence_band(signals: dict[str, float | int | str | None]) -> str:
     return "unknown — no computable signals"
 
 
+# ── Structural Diff (Merkle fingerprint comparison) ──────────────
+
+def structural_diff(path: str, ref_a: str | None = None, ref_b: str | None = None) -> dict:
+    """Compare repo structural fingerprints between two refs.
+
+    Uses existing repo_fingerprint + lattice_defects + entropy_velocity
+    to produce a before/after comparison of the repo's structural state.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository.", "schema_version": 1}
+
+    head_ref = ref_b or "HEAD"
+    base_ref = ref_a or "HEAD~1"
+
+    if vgit.has_commits(path):
+        if not vgit.ref_exists(path, base_ref):
+            return {"error": f"Unknown base ref: {base_ref}", "schema_version": 1}
+        if not vgit.ref_exists(path, head_ref):
+            return {"error": f"Unknown head ref: {head_ref}", "schema_version": 1}
+
+    try:
+        fp_before = repo_fingerprint(path, git_ref=base_ref)
+        fp_after = repo_fingerprint(path, git_ref=head_ref)
+    except Exception as e:
+        return {"error": f"fingerprint scan failed: {e}", "schema_version": 1}
+
+    before_checksum = fp_before.get("checksum", "")
+    after_checksum = fp_after.get("checksum", "")
+
+    changed_files = []
+    if vgit.has_commits(path):
+        changed_files = vgit.diff_refs(path, base_ref, head_ref)
+
+    # Lattice defects
+    defects = {}
+    try:
+        ld = lattice_defects(path, base_ref=base_ref, head_ref=head_ref)
+        if "error" not in ld:
+            defects = ld.get("defects", {})
+    except Exception:
+        pass
+
+    # Entropy delta
+    entropy_delta = None
+    try:
+        ev = entropy_velocity(path, weeks=12)
+        if "error" not in ev:
+            entropy_delta = ev.get("acceleration", 0)
+    except Exception:
+        pass
+
+    fingerprint_changed = before_checksum != after_checksum
+    file_delta = len(changed_files)
+
+    confidence = "high"
+    if not fingerprint_changed and file_delta == 0:
+        confidence = "none — no structural changes detected"
+
+    return {
+        "schema_version": 1,
+        "base_ref": base_ref,
+        "head_ref": head_ref,
+        "fingerprint_changed": fingerprint_changed,
+        "checksum_before": before_checksum,
+        "checksum_after": after_checksum,
+        "changed_file_count": file_delta,
+        "changed_files": changed_files[:30],
+        "defects": defects,
+        "entropy_acceleration": entropy_delta,
+        "entropy_trend": "accelerating" if entropy_delta and entropy_delta > 0.001 else
+                        "decelerating" if entropy_delta and entropy_delta < -0.001 else "stable",
+    }
+
+
+# ── Vocab Ask (Dialogue mode) ─────────────────────────────────────
+
+def answer_question(path: str, question: str, files: list[str] | None = None) -> dict:
+    """Answer natural-language questions about a repo using existing data.
+
+    Questions like:
+      - "Is file X safe to edit?"
+      - "What verifies changes to Y?"
+      - "What files share concepts with Z?"
+      - "Is this repo healthy?"
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository.", "schema_version": 1}
+
+    q = question.lower().strip()
+    answer: dict[str, str | list | float] = {}
+    sources: list[str] = []
+
+    # "Is file X safe to edit?"
+    safe_match = re.search(r"(?:is|are)\s+(\S+)\s+safe", q)
+    if safe_match:
+        target = safe_match.group(1)
+        try:
+            pre = preflight_report(path, files=[target])
+            if "error" not in pre:
+                risk = pre.get("risk", "unknown")
+                temp = pre.get("temperature", "WARM")
+                stable = [s["file"] for s in pre.get("stable_anchors_touched", [])]
+                answer = {
+                    "question": f"Is {target} safe to edit?",
+                    "answer": f"Risk: {risk}. Temp: {temp}.",
+                    "risk": risk,
+                    "temperature": temp,
+                    "is_stable_anchor": target in stable,
+                }
+                if stable:
+                    answer["warning"] = f"File is a stable anchor ({stable[0]}). Edit with caution."
+                sources.append("preflight")
+        except Exception:
+            pass
+
+    # "What verifies changes to X?"
+    verify_match = re.search(r"(?:what|which)\s+(?:verifies|verif|test|tests?)\s+(?:\S+\s+)?(\S+)", q)
+    if verify_match:
+        target = verify_match.group(1)
+        try:
+            pre = preflight_report(path, files=[target])
+            if "error" not in pre:
+                candidates = pre.get("verification_candidates", pre.get("verify_with", []))
+                answer = {
+                    "question": f"What verifies changes to {target}?",
+                    "verification_candidates": candidates[:3],
+                    "verification_confidence": pre.get("verification_confidence", {}).get("level", "unknown"),
+                }
+                if not candidates:
+                    answer["note"] = "Vocab found no verification candidates. This may mean tests use different filenames or don't exist."
+                sources.append("preflight")
+        except Exception:
+            pass
+
+    # "What files share concepts with X?"
+    concept_match = re.search(r"(?:what|which)\s+(?:files?|concepts)\s+(?:share|relate|connect|link)\s+(?:\S+\s+)?(\S+)", q)
+    if concept_match:
+        target = concept_match.group(1)
+        from vocab.compare import pr_blast_radius
+        from vocab.scanner import scan_codebase
+        try:
+            analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+            if analysis.file_vocabs:
+                blast = pr_blast_radius([target], analysis.file_vocabs, max_results=10).get("impacts", [])
+                if blast:
+                    answer = {
+                        "question": f"What files share concepts with {target}?",
+                        "impacted_files": [{"file": b["file"], "shared": b.get("shared_concepts", 0), "concepts": b.get("concepts", [])[:3]} for b in blast[:5]],
+                        "total_impacted": len(blast),
+                    }
+                    sources.append("blast radius")
+        except Exception:
+            pass
+
+    # "Is this repo healthy?"
+    if re.search(r"(?:healthy|health|state of)", q):
+        try:
+            hs = health_score(path)
+            conf = inspect_repo(path).get("confidence", "unknown")
+            answer = {
+                "question": "Is this repo healthy?",
+                "answer": f"Health score: {hs}/1.0. Structural confidence: {conf}.",
+                "health_score": hs,
+                "confidence": conf,
+            }
+            sources.append("health_score")
+        except Exception:
+            pass
+
+    # "Does this repo have tests?" / "What is the test coverage?"
+    if re.search(r"(?:test|coverage|desert)", q):
+        try:
+            deserts = verification_deserts(path, max_results=5)
+            if "error" not in deserts:
+                answer = {
+                    "question": "What is the structural test situation?",
+                    "mirror_ratio": deserts.get("mirror_ratio", 0.0),
+                    "source_files": deserts.get("source_files", 0),
+                    "mirrored_files": deserts.get("mirrored_source_files", 0),
+                    "desert_examples": [d.get("source_path", "") for d in deserts.get("deserts", [])[:3]],
+                    "note": "This is structural test mirror detection, not coverage. It reports which source files have same-name test mirrors.",
+                }
+                sources.append("deserts")
+        except Exception:
+            pass
+
+    if not answer:
+        answer = {
+            "question": question,
+            "answer": "I don't understand the question. Try: 'Is file X safe to edit?', 'What verifies changes to X?', 'What files share concepts with X?', 'Is this repo healthy?', or 'Does this repo have tests?'",
+        }
+
+    return {
+        "schema_version": 1,
+        "sources": sources,
+        "answer": answer,
+        "guardrails": {
+            "mode": "report_only",
+            "structural_only": True,
+            "not_semantic_truth": True,
+        },
+    }
+
+
+# ── Verify Scope (Post-edit receipt) ──────────────────────────────
+
+def verify_scope(path: str, contract_files: list[str] | None = None,
+                 diff_ref: str = "HEAD", task: str | None = None) -> dict:
+    """Post-edit scope verification against a pre-edit commitment.
+
+    Run after making changes to verify the diff stayed within the
+    expected scope from a preflight contract.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository.", "schema_version": 1}
+
+    diff_ref = diff_ref or "HEAD"
+    if vgit.has_commits(path) and not vgit.ref_exists(path, diff_ref):
+        return {"error": f"Unknown git ref: {diff_ref}", "schema_version": 1}
+
+    # Get actual changed files from the diff
+    try:
+        actual_changed = vgit.diff_worktree(path, diff_ref) if diff_ref else []
+    except Exception:
+        actual_changed = vgit.diff_refs(path, diff_ref, "HEAD")
+
+    if not actual_changed:
+        actual_changed_alt = vgit.diff_refs(path, diff_ref, "HEAD")
+        actual_changed = actual_changed_alt or []
+
+    # Run post-hoc preflight on actual changes
+    post = {}
+    if actual_changed:
+        try:
+            post = preflight_report(path, files=actual_changed, task=task)
+        except Exception:
+            post = {"error": "preflight failed after edit"}
+
+    # Compare against expected scope
+    expected = set(contract_files or [])
+    actual = set(actual_changed)
+    scope_violations = list(actual - expected) if expected else []
+    unexpected_stable = []
+    if expected and post.get("stable_anchors_touched"):
+        for s in post.get("stable_anchors_touched", []):
+            if s.get("file") not in expected:
+                unexpected_stable.append(s)
+
+    # Compute structural hash of the diff
+    checksum = ""
+    try:
+        fp = repo_fingerprint(path)
+        checksum = fp.get("checksum", "")
+    except Exception:
+        pass
+
+    scope_matched = not scope_violations and (not expected or actual.issubset(expected))
+
+    return {
+        "schema_version": 1,
+        "diff_ref": diff_ref,
+        "contract_files": contract_files or [],
+        "actual_changed_files": list(actual),
+        "scope_violations": scope_violations,
+        "scope_matched": scope_matched,
+        "expected_count": len(expected),
+        "actual_count": len(actual),
+        "unexpected_stable_anchors": unexpected_stable[:3],
+        "post_edit_risk": post.get("risk", "unknown"),
+        "post_edit_temperature": post.get("temperature", "WARM"),
+        "post_edit_confidence": post.get("confidence", "unknown"),
+        "repo_checksum": checksum,
+        "receipt": {
+            "scope_kept": scope_matched,
+            "violations": scope_violations if scope_violations else None,
+            "stable_warnings": len(unexpected_stable),
+        },
+        "guardrails": {
+            "mode": "report_only",
+            "receipt_only": True,
+            "not_semantic_truth": True,
+        },
+    }
+
+
 # ── Repo fingerprint ──────────────────────────────────────────────
 
-def repo_fingerprint(path: str) -> dict:
+def repo_fingerprint(path: str, git_ref: str | None = None) -> dict:
     from vocab.scanner import scan_codebase
 
-    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30, git_ref=git_ref)
 
     import hashlib
     combined = hashlib.sha256()
@@ -1756,6 +2141,7 @@ def repo_fingerprint(path: str) -> dict:
 
     return {
         "fingerprint": f"v0-{combined.hexdigest()[:16]}",
+        "checksum": f"sha256-{combined.hexdigest()}",
         "files": analysis.total_files,
         "total_phrases": analysis.total_phrases,
         "total_indices": total_indices,
