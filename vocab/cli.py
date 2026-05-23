@@ -2443,6 +2443,55 @@ def verify_scope(
     typer.echo(c("  Mode: report-only receipt; identifies scope changes, not correctness.", "gray"))
 
 
+@cli.command()
+def calibration(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Show vocab's accuracy on this repo from past verify-scope runs.
+
+    Tracks verification hit rate and scope accuracy over time.
+    Requires verify-scope to have been run at least 3 times on this repo.
+    """
+    from vocab.reports import compute_calibration
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = compute_calibration(path)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    records = data.get("records", 0)
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  VOCAB CALIBRATION", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    if records == 0:
+        typer.echo(f"  {c(data.get('note', 'No records.'), 'yellow')}")
+        return
+    typer.echo(f"  Records: {c(str(records), 'cyan')}")
+    scope = data.get("scope_accuracy", 0)
+    sc = "green" if scope >= 0.8 else "yellow"
+    typer.echo(f"  Scope accuracy: {c(f'{scope:.0%}', sc)} ({c(str(records), 'cyan')} records)")
+    verify = data.get("verification_accuracy", 0)
+    vc = "green" if verify >= 0.6 else "yellow"
+    typer.echo(f"  Verification accuracy: {c(f'{verify:.0%}', vc)}")
+    if "risk_high_violation_rate" in data:
+        rv = data["risk_high_violation_rate"]
+        typer.echo(f"  Risk HIGH violation rate: {c(f'{rv:.0%}', 'red')}")
+    if "warning" in data:
+        typer.echo(c(f"  {data['warning']}", "yellow"))
+    typer.echo("")
+
+
 def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
     """Return a desert-warning string for the tool format, or empty if confidence is high."""
     level = ver_confidence.get("level", "high") if isinstance(ver_confidence, dict) else "high"
