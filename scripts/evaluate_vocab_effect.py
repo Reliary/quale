@@ -142,6 +142,9 @@ PREFLIGHT_CONDITIONS = (
 
     # Diff-based preflight (simulates PR review)
     "diff_preflight",
+
+    # Unmeasured agent-facing surfaces
+    "verify_scope", "ask", "negotiate_simple",
 )
 
 
@@ -274,10 +277,21 @@ def score_discovery(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
 def score_preflight(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
     if "edit_ids" in parsed or "verify_ids" in parsed or "expand_scope" in parsed:
         return score_contract_plan(parsed, case)
-    verify = normalize_list(parsed.get("verify"))
-    extra_edits = [file for file in normalize_list(parsed.get("extra_edits")) if file != case.edit_file]
+    raw_verify = parsed.get("verify", [])
+    verify = normalize_list(raw_verify)
+    raw_extra = parsed.get("extra_edits", [])
+    extra_edits = []
+    for item in normalize_list(raw_extra):
+        if item != case.edit_file:
+            extra_edits.append(item)
+    if isinstance(raw_extra, list):
+        for item in raw_extra:
+            if isinstance(item, dict) and "file" in item:
+                fp = item.get("file", "")
+                if fp and fp != case.edit_file and fp not in extra_edits:
+                    extra_edits.append(fp)
     semantic_sprawl = _semantic_sprawl_score(extra_edits, case.edit_file, case.task)
-    return {
+    result = {
         "verify_hit": any(file in verify for file in case.verify_files),
         "verify_hit_count": sum(1 for file in case.verify_files if file in verify),
         "extra_edit_count": len(extra_edits),
@@ -285,6 +299,12 @@ def score_preflight(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
         "verify": verify[:5],
         "semantic_sprawl_score": semantic_sprawl,
     }
+    questions = parsed.get("questions")
+    if isinstance(questions, list) and questions:
+        result["asked_questions"] = questions
+        result["asked_question_count"] = len(questions)
+        result["answered_instead"] = bool(verify or extra_edits)
+    return result
 
 
 def score_contract_plan(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
@@ -537,7 +557,6 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         preflight_guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
         guidance = f"Discovery overview:\n{discovery_guidance}\n\nEdit preflight:\n{preflight_guidance}"
     elif condition == "diff_preflight":
-        # Use HEAD~0..HEAD diff to simulate PR review
         raw = run_vocab(case.path, ["preflight", "--path", case.path, "--diff", "HEAD~0", "--task", case.task, "--format", "tool"])
         if "error" in raw.lower() or not raw.strip():
             raw = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
@@ -553,6 +572,18 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 guidance = json.dumps(base, separators=(",", ":"))
             except (json.JSONDecodeError, TypeError):
                 guidance = raw if raw else preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+    elif condition == "verify_scope":
+        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+        try:
+            p = json.loads(raw)
+            ver = {"verification_mc": p.get("verification_mc", {}), "verification_confidence": p.get("verification_confidence", {})}
+            guidance = json.dumps(ver, separators=(",", ":"))
+        except (json.JSONDecodeError, TypeError):
+            guidance = raw
+    elif condition == "ask":
+        guidance = ""
+    elif condition == "negotiate_simple":
+        guidance = preflight_tool_guidance(case, include_sprawl_guard=True)
 
     system = (
         "You are about to edit a candidate file. Decide verification and avoid unnecessary edit sprawl. "
@@ -569,6 +600,23 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         system += " Obey report-only sprawl guidance: do not propose extra_edits unless the task explicitly requires them."
     if condition in {"desert_aware_preflight", "route_policy"}:
         system += " Do not use source files as verification unless they are explicitly test or suite files; empty verify is better than a fake test."
+    if condition == "verify_scope":
+        system = (
+            "You are verifying a candidate edit. Choose which test file(s) to run after editing. "
+            "Return exactly one compact JSON object and no markdown. "
+            "Use keys: verify (array of relative paths), should_edit_candidate (boolean)."
+        )
+    if condition == "ask":
+        system += (
+            " You may ask up to 3 clarifying questions about the codebase before answering. "
+            "Return exactly one compact JSON object and no markdown. "
+            "If you have questions, use key: questions (array of strings). "
+            "If you have an answer, use keys: verify (array of relative paths), extra_edits (array of relative paths), should_edit_candidate (boolean)."
+        )
+    if condition == "negotiate_simple":
+        system += (
+            " If you propose extra_edits beyond the candidate, justify each with a one-sentence reason in the value."
+        )
     user = [
         f"Repository bucket: {case.bucket}",
         f"Repository: {case.repo}",
