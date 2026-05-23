@@ -180,6 +180,32 @@ def diff_refs(path: str, ref_a: str, ref_b: str) -> list[str]:
     return files
 
 
+def diff_worktree(path: str, ref: str) -> list[str]:
+    """List files changed between a ref and the current working tree/HEAD."""
+    _skip_exts = frozenset({".pyc", ".pyo"})
+    _skip_parts = frozenset({
+        "__pycache__", ".git", "node_modules", "vendor", "dist", "build",
+        "target", "out", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        ".parcel-cache", ".turbo", ".cache", "coverage",
+    })
+    out = _git_bytes("diff", "--name-only", "-z", ref, cwd=path)
+    files = []
+    for f in _split_nul(out):
+        if not f:
+            continue
+        f = _decode_path(f)
+        parts = f.split("/")
+        if any(p.endswith(".egg-info") for p in parts):
+            continue
+        if any(d in parts for d in _skip_parts):
+            continue
+        base = parts[-1]
+        if any(base.endswith(e) for e in _skip_exts):
+            continue
+        files.append(f)
+    return files
+
+
 def ref_log(path: str, count: int = 100) -> list[GitRef]:
     """Return recent commit log."""
     try:
