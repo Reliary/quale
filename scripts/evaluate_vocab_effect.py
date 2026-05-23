@@ -926,6 +926,7 @@ def run_trial_opencode(case: Case, suite: str, condition: str, trial: int,
     # opencode expects provider/model format; add default provider if missing
     oc_model = f"deepseek/{model}" if "/" not in model else model
     cmd = [OPENCODE_BIN, "run", "--pure", "--format", "json",
+           "--agent", "main",
            "--dangerously-skip-permissions",
            "--dir", case.path, "--model", oc_model, prompt]
 
@@ -965,16 +966,16 @@ def run_trial_opencode(case: Case, suite: str, condition: str, trial: int,
     tool_data = _extract_tool_calls_from_events(events)
     row["tool_calls"] = tool_data
 
-    # Score from tool calls first (opencode models produce narrative, not JSON)
-    scored = _score_opencode_tool_calls(tool_data, case)
-    if scored:
-        row.update(scored)
-        row["scored_from_tool_calls"] = True
-    elif "_parse_error" not in parsed:
+    if "_parse_error" not in parsed:
         row["parsed"] = parsed
         row.update(score_preflight(parsed, case))
     else:
-        row["parse_error"] = True
+        scored = _score_opencode_tool_calls(tool_data, case)
+        if scored:
+            row.update(scored)
+            row["scored_from_tool_calls"] = True
+        else:
+            row["parse_error"] = True
 
     return row
 
