@@ -126,7 +126,7 @@ CASES: tuple[Case, ...] = (
 
 
 DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", "crystallography", "route_policy")
-    PREFLIGHT_CONDITIONS = (
+PREFLIGHT_CONDITIONS = (
     "candidate_baseline", "preflight_compact", "preflight_checklist", "verify_mcq",
     "preflight_tool", "preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy",
     "fmt_baseline_oneline", "fmt_baseline_json", "fmt_baseline_sentence",
@@ -148,6 +148,15 @@ DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", 
 
     # Gap signature + vaccination
     "verify_classify",
+
+    # Cartridge (compressed context packet)
+    "cartridge",
+
+    # Entanglement-based verification (bridges __init__→test gap)
+    "verify_entangle",
+
+    # Null route (bypass LLM for trivial changes)
+    "null_route",
 )
 
 
@@ -578,6 +587,44 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
     elif condition == "verify_classify":
         raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "verify"])
         guidance = raw
+    elif condition == "cartridge":
+        raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            guidance = json.dumps(p, separators=(",", ":")) if p else "no cartridge output"
+        except (json.JSONDecodeError, TypeError):
+            guidance = raw
+    elif condition == "verify_entangle":
+        raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            ver = {
+                "verification_candidates": p.get("verification_candidates", []),
+                "entangled_candidates": p.get("entangled_candidates", []),
+                "confidence": p.get("confidence", "low"),
+                "desert": p.get("desert", False),
+            }
+            guidance = json.dumps(ver, separators=(",", ":"))
+        except (json.JSONDecodeError, TypeError):
+            guidance = raw
+    elif condition == "null_route":
+        raw = run_vocab(case.path, ["route", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            action = p.get("action", "verify")
+            if action == "none":
+                guidance = "null route: change is structurally trivial. No LLM verification needed. Return empty verify."
+            elif action == "verify":
+                guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+            elif action == "contract":
+                raw2 = run_vocab(case.path, ["contract", "--path", case.path, "--files", case.edit_file, "--format", "tool"])
+                guidance = raw2 if raw2.strip() else preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+            elif action == "human":
+                guidance = "verification desert: change is structurally risky and hard to verify. Human review recommended."
+            else:
+                guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+        except (json.JSONDecodeError, TypeError):
+            guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
     elif condition == "verify_scope":
         raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
         try:
@@ -609,6 +656,20 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
     if condition == "verify_classify":
         system = (
             "You are verifying a candidate edit. You have gap classification and vaccination hints. "
+            "Return exactly one compact JSON object and no markdown. "
+            "Use keys: verify (array of relative paths), should_edit_candidate (boolean)."
+        )
+    if condition == "null_route":
+        system = "You are verifying a candidate edit. Return exactly one compact JSON object. Use keys: verify (array), should_edit_candidate (boolean). Consider route guidance first."
+    if condition == "verify_entangle":
+        system = (
+            "You are verifying a candidate edit. You have structural and entanglement-based candidates. "
+            "Return exactly one compact JSON object and no markdown. "
+            "Use keys: verify (array of relative paths), should_edit_candidate (boolean)."
+        )
+    if condition == "cartridge":
+        system = (
+            "You are verifying a candidate edit. You have a compressed context packet. "
             "Return exactly one compact JSON object and no markdown. "
             "Use keys: verify (array of relative paths), should_edit_candidate (boolean)."
         )
