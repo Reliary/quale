@@ -295,6 +295,9 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     # T1: Co-change prediction — historical change probability
     co_change = _co_change_probs(path, changed)
 
+    # P2: Self/Non-Self + Keystone classification per changed file
+    file_classifications = _classify_files(changed, stable_by_file, blast, co_change, analysis)
+
     # Tier 1 capability boundary
     capability = (
         "Vocab sees structure, not semantics. It cannot verify correctness, detect logic errors, "
@@ -327,6 +330,8 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         "snr_annotations": snr_annotations,
         "structural_orphans": orphans,
         "co_change": co_change,
+        "file_classifications": file_classifications,
+        "keystone_files": [f["file"] for f in file_classifications if f.get("class") == "SELF_KEYSTONE" or f.get("class") == "FRONTIER"],
         "capability_boundary": capability,
         "guardrails": {
             "mode": "report_only",
@@ -747,12 +752,9 @@ def _task_is_vague(task: str) -> bool:
 
 
 def _is_weird_language(path: str) -> bool:
-    """Heuristic: repo is dominated by non-mainstream languages where structural test discovery is weak."""
+    """Heuristic: return True if this repo is dominated by a language with weak structural-test mirroring."""
     try:
-        result = subprocess.run(
-            ["git", "-C", path, "ls-files"],
-            capture_output=True, text=True, timeout=10,
-        )
+        result = vgit.run(path, ["git", "ls-files"], capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
             return False
         exts: dict[str, int] = {}
@@ -768,6 +770,76 @@ def _is_weird_language(path: str) -> bool:
         return (mainstream_count / total) < 0.5 if total > 0 else True
     except Exception:
         return False
+
+
+def _classify_files(
+    changed: list[str],
+    stable_by_file: dict[str, Any],
+    blast: list[dict[str, Any]],
+    co_change: list[dict[str, Any]],
+    analysis: Any,
+) -> list[dict[str, Any]]:
+    """Classify each changed file into a 2×2 structural risk matrix.
+
+    Self = stable core (persistence >= 0.8).
+    Keystone = high blast × binding × co-change probability (above 70th percentile).
+    Matrix: SELF_KEYSTONE | SELF_STANDARD | FRONTIER | NON_SELF
+    """
+    from vocab.compare import _extract_identifiers
+
+    blast_scores: dict[str, int] = {}
+    for imp in blast:
+        blast_scores[imp.get("file", "")] = imp.get("shared_concepts", 0)
+    co_change_probs: dict[str, float] = {}
+    for cc in co_change:
+        co_change_probs[cc.get("file", "")] = cc.get("probability", 0)
+
+    all_binding: dict[str, int] = defaultdict(int)
+    for fv in analysis.file_vocabs:
+        ids = _extract_identifiers(fv)
+        for identifier in ids:
+            all_binding[identifier] += 1
+    # Compute binding strength per file: how many other files share its top identifier
+    binding: dict[str, int] = {}
+    for fv in analysis.file_vocabs:
+        ids = _extract_identifiers(fv)
+        top_id = max(ids, key=lambda x: all_binding.get(x, 0)) if ids else ""
+        binding[fv.path] = all_binding.get(top_id, 0)
+
+    keystone_scores: dict[str, float] = {}
+    for f in changed:
+        b = blast_scores.get(f, 0)
+        c = co_change_probs.get(f, 0)
+        bind = binding.get(f, 1)
+        keystone_scores[f] = b * 0.4 + c * 0.3 + min(bind / 10, 10) * 0.3
+
+    threshold = sorted(keystone_scores.values())[max(len(changed) * 3 // 10 - 1, 0)] if keystone_scores else 0
+    # Actually use 70th percentile properly
+    vals = sorted(keystone_scores.values())
+    threshold = vals[int(len(vals) * 0.7)] if len(vals) >= 5 else (vals[-1] if vals else 0)
+
+    results = []
+    for f in changed:
+        sc = stable_by_file.get(f, {})
+        is_self = sc.get("persistence", 0) >= 0.8
+        ks = keystone_scores.get(f, 0)
+        is_keystone = ks >= threshold and ks > 0
+        if is_self and is_keystone:
+            cls = "SELF_KEYSTONE"
+        elif is_self:
+            cls = "SELF_STANDARD"
+        elif is_keystone:
+            cls = "FRONTIER"
+        else:
+            cls = "NON_SELF"
+        results.append({
+            "file": f,
+            "class": cls,
+            "keystone_score": round(ks, 2),
+            "stability": "self" if is_self else "non_self",
+            "persistence": round(sc.get("persistence", 0), 2) if sc else 0,
+        })
+    return results
 
 
 # ── Stability anchors ─────────────────────────────────────────────
