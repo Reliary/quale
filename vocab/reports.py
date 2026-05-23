@@ -245,6 +245,10 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     verification_confidence = _verification_confidence(changed, verify_with, mirror, analysis.file_vocabs)
     sprawl_guard = _edit_sprawl_guard(changed, avoid_expanding, stable_touched, blast)
 
+    # Verifiability classification per changed file
+    verify_classifications = [_classify_verifiability(f, changed, verify_with, analysis.file_vocabs, analysis) for f in changed]
+    vaccination = _vaccination_notes(verify_classifications)
+
     # Tier 1 signals — temperature per changed file
     try:
         lifecycle_data = compute_lifecycles(path, weeks=24)
@@ -332,6 +336,8 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         "co_change": co_change,
         "file_classifications": file_classifications,
         "keystone_files": [f["file"] for f in file_classifications if f.get("class") == "SELF_KEYSTONE" or f.get("class") == "FRONTIER"],
+        "verify_classifications": verify_classifications,
+        "vaccination_notes": vaccination,
         "capability_boundary": capability,
         "guardrails": {
             "mode": "report_only",
@@ -353,6 +359,242 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
             "note": "vocab preflight scans only local repository files",
         },
     }
+
+
+def reverse_verify_report(path: str = ".", files: list[str] | None = None,
+                           diff_ref: str | None = None) -> dict:
+    """Given changed test files, find source files that likely need verification."""
+    from vocab.scanner import scan_codebase, _is_generated
+
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if files:
+        changed = _normalize_preflight_files(path, files)
+    elif diff_ref:
+        try:
+            changed = vgit.diff_worktree(path, diff_ref)
+        except Exception as e:
+            return {"error": str(e)}
+    else:
+        return {"error": "provide --files or --diff"}
+
+    changed = list(dict.fromkeys(changed))
+    if not changed:
+        return {"error": "no changed files found"}
+
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    test_bases = {}
+    for f in changed:
+        base = os.path.splitext(os.path.basename(f))[0].lower()
+        base = base.replace("test_", "").replace("_test", "").replace(".test", "").replace("spec_", "").replace("_spec", "")
+        if base:
+            test_bases[base] = f
+
+    source_candidates = []
+    for fv in analysis.file_vocabs:
+        if _is_generated(fv.path):
+            continue
+        norm = fv.path.lower()
+        if "/test" in norm or "tests/" in norm or ".test." in norm or "_test." in norm:
+            continue
+        fv_base = os.path.splitext(os.path.basename(fv.path))[0].lower()
+        if fv_base in test_bases:
+            source_candidates.append({"path": fv.path, "reason": f"stem '{fv_base}' matches test '{test_bases[fv_base]}'",
+                                       "test_file": test_bases[fv_base]})
+
+    source_candidates.sort(key=lambda x: (
+        0 if x["test_file"] in test_bases else 1,
+        x["path"]
+    ))
+    result = {
+        "schema_version": 1,
+        "path": path,
+        "test_files": changed,
+        "source_candidates": source_candidates[:8] if source_candidates else [],
+        "confidence": "high" if source_candidates else "low",
+        "candidate_count": len(source_candidates),
+        "guardrails": {
+            "mode": "report_only",
+            "caveat": "Candidates are structural stem matches, not proof of correctness.",
+        },
+    }
+    return result
+
+
+def verify_classify_report(path: str = ".", files: list[str] | None = None,
+                            diff_ref: str | None = None) -> dict:
+    """Gap signature per changed file: verifiability, gap type, vaccination notes."""
+    preflight = preflight_report(path=path, files=files, diff_ref=diff_ref)
+    if "error" in preflight:
+        return {"schema_version": 1, "error": preflight["error"]}
+    return {
+        "schema_version": 1,
+        "changed_files": preflight.get("verify_classifications", []),
+        "vaccination": preflight.get("vaccination_notes", []),
+        "verification_confidence": preflight.get("verification_confidence", {}),
+        "guardrails": {"mode": "report_only", "caveat": "Gap classes are structural heuristics."},
+    }
+
+
+def covalent_verify_bonds(path: str = ".", files: list[str] | None = None) -> dict:
+    """Detect when a change requires running multiple test files together."""
+    from vocab.scanner import scan_codebase
+
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not files:
+        return {"error": "provide --files"}
+    changed = _normalize_preflight_files(path, list(files))
+    if not changed:
+        return {"error": "no changed files found"}
+
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    path_vocabs = {}
+    for fv in analysis.file_vocabs:
+        path_vocabs[fv.path] = {phrase for phrase in fv.vocabulary}
+
+    changed_vocab = set()
+    for f in changed:
+        cv = path_vocabs.get(f, set())
+        changed_vocab.update(cv)
+
+    test_files = []
+    for fv in analysis.file_vocabs:
+        if "/test" in fv.path.lower() or "tests/" in fv.path.lower() or ".test." in fv.path.lower() or "_test." in fv.path.lower():
+            overlap = len(changed_vocab & set(fv.vocabulary.keys()))
+            if overlap > 0:
+                test_files.append({"path": fv.path, "overlap": overlap})
+
+    test_files.sort(key=lambda x: -x["overlap"])
+    top_tests = test_files[:5]
+
+    bonds = []
+    if len(top_tests) >= 2:
+        for i in range(len(top_tests)):
+            for j in range(i + 1, len(top_tests)):
+                ti = top_tests[i]
+                tj = top_tests[j]
+                combined = ti["overlap"] + tj["overlap"]
+                bonds.append({"tests": [ti["path"], tj["path"]],
+                              "combined_vocab_overlap": combined,
+                              "reason": "both tests share vocabulary with changed file"})
+
+    bonds.sort(key=lambda x: -x["combined_vocab_overlap"])
+
+    return {
+        "schema_version": 1,
+        "changed_files": changed,
+        "top_test_candidates": top_tests,
+        "bonds": bonds[:3],
+        "bond_count": len([b for b in bonds[:3] if b["combined_vocab_overlap"] > 3]),
+        "guardrails": {"mode": "report_only", "caveat": "Bonds are vocabulary overlap hints."},
+    }
+
+
+def verification_drift(path: str = ".", commits: int = 10) -> dict:
+    """Track verification confidence across recent commits."""
+    from vocab.scanner import scan_codebase
+
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+
+    try:
+        log = vgit.ref_log(path, count=commits + 1)
+    except Exception as e:
+        return {"error": f"ref_log failed: {e}"}
+
+    if len(log) < 2:
+        return {"schema_version": 1, "error": "not enough history", "commits_available": len(log)}
+
+    series = []
+    alerter = _DriftAlerter()
+
+    for i in range(min(commits, len(log) - 1)):
+        ref = log[i]["ref"]
+        next_ref = log[i + 1]["ref"] if i + 1 < len(log) else "HEAD"
+        try:
+            diff_files = vgit.diff_refs(path, next_ref, ref)
+        except Exception:
+            diff_files = []
+        if not diff_files:
+            continue
+
+        try:
+            analysis = scan_codebase(path, git_ref=ref, quiet=True, max_files=2500, max_seconds=20)
+        except Exception:
+            continue
+
+        verify_with = []
+        changed_bases = {os.path.splitext(os.path.basename(f))[0].replace(".", "").lower() for f in diff_files}
+        for fv in analysis.file_vocabs:
+            norm = fv.path.lower()
+            if "/test" not in norm and "tests/" not in norm and ".test." not in norm and "_test." not in norm:
+                continue
+            base = os.path.splitext(os.path.basename(fv.path))[0].replace(".test", "").replace("_test", "").lower()
+            if base in changed_bases:
+                verify_with.append(fv.path)
+        verify_with = verify_with[:5]
+
+        conf = _verification_confidence(diff_files, verify_with, None, analysis.file_vocabs)
+        level = conf.get("level", "low")
+        point = {
+            "commit": ref[:10],
+            "confidence": level,
+            "candidate_count": conf.get("candidate_count", 0),
+            "mirror_ratio": conf.get("mirror_ratio", 0),
+            "changed_file_count": len(diff_files),
+        }
+        series.append(point)
+        alerter.feed(point)
+
+    return {
+        "schema_version": 1,
+        "series": series,
+        "alerts": alerter.alerts,
+        "has_drift": alerter.has_drift,
+    }
+
+
+class _DriftAlerter:
+    """Detect 3-consecutive confidence drops and sudden gap events."""
+    def __init__(self):
+        self.alerts = []
+        self.has_drift = False
+        self._levels = {"high": 3, "mixed": 2, "low": 1, "unknown": 0}
+        self._prev_level = None
+        self._drop_count = 0
+
+    def feed(self, point: dict) -> None:
+        level = point.get("confidence", "unknown")
+        numeric = self._levels.get(level, 0)
+        if self._prev_level is not None and numeric < self._prev_level:
+            self._drop_count += 1
+            if self._drop_count >= 3:
+                self.alerts.append(f"Confidence declined {self._drop_count} consecutive commits ending at {point.get('commit', '?')}")
+                self.has_drift = True
+        elif self._prev_level is not None and numeric >= self._prev_level:
+            self._drop_count = 0
+
+        if self._prev_level is not None and numeric <= 1 and self._prev_level >= 3:
+            self.alerts.append(f"Sudden gap: confidence fell from high to low at {point.get('commit', '?')}")
+            self.has_drift = True
+
+        if point.get("candidate_count", 1) == 0 and self._prev_level is not None and self._prev_level >= 1:
+            self.alerts.append(f"Test candidate disappeared at {point.get('commit', '?')}")
+            self.has_drift = True
+
+        self._prev_level = numeric
 
 
 def build_contract(path: str = ".", files: list[str] | None = None,
@@ -694,6 +936,82 @@ def _preflight_confidence(changed: list[str], bootstrap: dict | None, file_vocab
     if score >= 0.5:
         return "mixed"
     return "low"
+
+
+def _classify_verifiability(filepath: str, changed: list[str], verify_with: list[str],
+                            file_vocabs, analysis) -> dict:
+    """Classify a single changed file's verifiability class.
+    Returns {file, verifiability, gap_type, reason, confidence}."""
+    from vocab.scanner import _is_generated
+    base = os.path.splitext(os.path.basename(filepath))[0]
+    lower_base = base.lower()
+    lower_path = filepath.lower()
+
+    if _is_generated(filepath):
+        return {"file": filepath, "verifiability": "hard_to_verify", "gap_type": "generated",
+                "reason": "generated file; test mirror follows generator convention, not source structure", "confidence": "low"}
+
+    if lower_base in {"__init__", "index", "mod"} or lower_path.endswith(("/__init__.py", "/index.ts", "/mod.rs")):
+        return {"file": filepath, "verifiability": "hard_to_verify", "gap_type": "init_file",
+                "reason": "init files have no structural test mirror; check upstream module tests", "confidence": "low"}
+
+    if any(filepath.endswith(ext) for ext in (".yml", ".yaml", ".json", ".proto", ".sql", ".env", ".cfg")):
+        return {"file": filepath, "verifiability": "unverifiable", "gap_type": "declarative_only",
+                "reason": "declarative file; verify via integration or schema tests, not unit tests", "confidence": "low"}
+
+    if any(v.path == filepath for v in file_vocabs):
+        this_vocab = None
+        for v in file_vocabs:
+            if v.path == filepath:
+                this_vocab = v
+                break
+        if this_vocab:
+            inline_exports = [p for p in this_vocab.vocabulary if len(p) > 4 and p[0].isupper()]
+            exported_elsewhere = 0
+            for v in file_vocabs:
+                if v.path != filepath:
+                    for phrase in inline_exports:
+                        if phrase in v.vocabulary:
+                            exported_elsewhere += 1
+                            break
+        exported_elsewhere = 0
+        for v in file_vocabs:
+            if v.path != filepath:
+                for phrase in inline_exports:
+                    if phrase in v.vocabulary:
+                        exported_elsewhere += 1
+                        break
+        if exported_elsewhere > 0:
+            return {"file": filepath, "verifiability": "verifiable", "gap_type": "cross_package",
+                    "reason": f"identifiers appear in {exported_elsewhere} other packages; run integration suite", "confidence": "mixed"}
+
+    stem = os.path.splitext(os.path.basename(filepath))[0].replace(".", "").lower()
+    if any(stem in v.path.lower().replace(".test", "").replace("_test", "") for v in file_vocabs
+           if "test" in v.path.lower() or "tests/" in v.path.lower()):
+        return {"file": filepath, "verifiability": "verifiable", "gap_type": "well_mirrored",
+                "reason": "stem-matching test file found", "confidence": "high"}
+
+    return {"file": filepath, "verifiability": "verifiable", "gap_type": None,
+            "reason": "verification candidates found by structural scan", "confidence": "mixed"}
+
+
+def _vaccination_notes(file_classifications: list[dict]) -> list[str]:
+    """Static 'memory cell' patterns injected when gap types are detected."""
+    _GAP_PATTERNS = {
+        "init_file": "Files named __init__*, index*, mod* have weak structural test mirrors. Manually check upstream module tests.",
+        "generated": "Generated files follow generator test conventions, not source structure. Check the generator's test output.",
+        "dead_code": "This file's identifiers appear nowhere else in the codebase. It may be unused or standalone.",
+        "cross_package": "This change's identifiers appear in multiple test packages. Run the full integration suite, not just unit tests.",
+        "declarative_only": "Config/schema files define behavior; verify via integration suite or schema tests.",
+    }
+    seen = set()
+    notes = []
+    for fc in file_classifications:
+        gap = fc.get("gap_type")
+        if gap and gap in _GAP_PATTERNS and gap not in seen:
+            seen.add(gap)
+            notes.append(_GAP_PATTERNS[gap])
+    return notes
 
 
 def _verification_confidence(changed: list[str], verify_with: list[str], mirror: dict | None, file_vocabs) -> dict:

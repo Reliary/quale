@@ -378,6 +378,7 @@ def preflight(
         return
     if format == "verify":
         vtypes = _classify_verify_types(verify_candidates[:5] if verify_candidates else [], data.get("changed_files", []))
+        vac_notes = data.get("vaccination_notes", [])
         verify_data = {
             "schema_version": 1,
             "verification_mc": {
@@ -388,7 +389,10 @@ def preflight(
             },
             "verification_confidence": ver_confidence,
             "desert_warning": _desert_text(ver_confidence, data.get("changed_files", [])),
+            "verifiability": data.get("verify_classifications", []),
         }
+        if vac_notes:
+            verify_data["vaccination"] = vac_notes
         typer.echo(json.dumps(verify_data, separators=(",", ":")))
         return
     if format == "tool":
@@ -665,6 +669,108 @@ def verify(
         typer.echo(f"  {label}. {candidate}")
     typer.echo("")
     typer.echo('Return the label of the best candidate (e.g., "A").')
+
+
+@cli.command(name="reverse-verify")
+def reverse_verify(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str], typer.Option("--files", help="Changed test file(s); repeat or comma-separate")] = [],
+    diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against working tree")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Given changed test files, find source files that need verification.
+
+    Reverse bridge: when tests change, which sources should be rechecked?
+    """
+    from vocab.reports import reverse_verify_report
+
+    data = reverse_verify_report(path=path, files=files or None, diff_ref=diff)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    candidates = data.get("source_candidates", [])
+    if not candidates:
+        typer.echo("No source candidates found.")
+        return
+    typer.echo(f"Test files: {', '.join(data.get('test_files', []))}")
+    typer.echo(f"Confidence: {data['confidence']}")
+    typer.echo("Source candidates:")
+    for c in candidates[:5]:
+        typer.echo(f"  {c['path']}  ({c['reason']})")
+
+
+@cli.command(name="verify-classify")
+def verify_classify(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
+    diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against working tree")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Classify each changed file's verifiability type and structural gaps."""
+    from vocab.reports import verify_classify_report
+    data = verify_classify_report(path=path, files=files or None, diff_ref=diff)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    for fc in data.get("changed_files", []):
+        gap = fc.get("gap_type") or "—"
+        conf = fc.get("confidence", "?")
+        typer.echo(f"  {fc['file']:45s} verifiability={fc['verifiability']:15s} gap={gap:20s} confidence={conf}")
+    for v in data.get("vaccination", []):
+        typer.echo(f"  🧬 {v}")
+
+
+@cli.command(name="verify-bonds")
+def verify_bonds(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Detect when a change requires running multiple test files together."""
+    from vocab.reports import covalent_verify_bonds
+    data = covalent_verify_bonds(path=path, files=files or None)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    for b in data.get("bonds", []):
+        typer.echo(f"  Bond: {b['tests'][0]}  ↔  {b['tests'][1]}  (overlap={b['combined_vocab_overlap']})")
+    if not data.get("bonds"):
+        typer.echo("No bonded test pairs found.")
+
+
+@cli.command(name="verify-drift")
+def verify_drift(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    commits: Annotated[int, typer.Option("--commits", "-n", help="Commits to inspect")] = 10,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Track verification confidence across recent commits."""
+    from vocab.reports import verification_drift
+    data = verification_drift(path=path, commits=commits)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    for pt in data.get("series", []):
+        marker = "⬇" if pt.get("alerts") else " "
+        typer.echo(f"  {pt['commit']:12s} {pt['confidence']:8s} cand={pt['candidate_count']:2d} mirror={pt['mirror_ratio']:.2f} {marker}")
+    for a in data.get("alerts", []):
+        typer.echo(f"  ⚠ {a}")
+    if not data.get("alerts"):
+        typer.echo("  No drift detected.")
 
 
 @cli.command()
