@@ -1,0 +1,12 @@
+# vocab CI configuration
+# Structural checks for CI pipelines.
+
+blast:
+  max_impacted: 20
+  critical_paths: []
+
+lifecycle:
+  min_signal_weeks: 4
+
+search:
+  common_threshold: 0.8
