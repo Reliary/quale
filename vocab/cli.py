@@ -334,7 +334,7 @@ def preflight(
     files: Annotated[list[str] | None, typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
     diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against the working tree")] = None,
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
-    format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), json, checklist, compact, llm, full")] = "tool",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), verify, json, checklist, compact, llm, full")] = "tool",
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Show math-heavy signals (SNR, expansion risk details)")] = False,
 ):
     """File-scoped pre-edit/review risk card.
@@ -375,6 +375,21 @@ def preflight(
     if format == "llm":
         from vocab.formats.llm import format_preflight_llm
         typer.echo(format_preflight_llm(data))
+        return
+    if format == "verify":
+        vtypes = _classify_verify_types(verify_candidates[:5] if verify_candidates else [], data.get("changed_files", []))
+        verify_data = {
+            "schema_version": 1,
+            "verification_mc": {
+                "question": "Which file would verify this change?",
+                "candidates": verify_candidates[:5] if verify_candidates else [],
+                "max_selections": 1,
+                "types": vtypes,
+            },
+            "verification_confidence": ver_confidence,
+            "desert_warning": _desert_text(ver_confidence, data.get("changed_files", [])),
+        }
+        typer.echo(json.dumps(verify_data, separators=(",", ":")))
         return
     if format == "tool":
         tool_data = {

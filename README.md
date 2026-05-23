@@ -15,18 +15,23 @@ vocab ci-report origin/main HEAD --summary            # CI: blast radius + mirro
 
 ## Workflow 1: Agent Edits Code
 
-Use `preflight --format tool` when editing a known file. It constrains verification targets and prevents scope creep. Proven in harness:
-
-| Condition | Verify hit | Sprawl | Tokens | Efficiency |
-|-----------|-----------|--------|--------|------------|
-| baseline (no vocab) | 8% | 0.5 | 1K | 0.67 |
-| `preflight --format tool` | **75%** | **0.0** | 1.7K | 1.60 |
-| `preflight --diff HEAD~1` | **100%** | **0.0** | 1.7K | 1.82 |
+Use `preflight --format tool` when editing a known file. It constrains verification targets and prevents scope creep. The strongest measured surface is `verify_scope` — a stripped-down verification-only variant — at 83% verify hit with zero sprawl.
 
 ```bash
 vocab preflight --files src/spool.ts --task "change upload" --format tool   # per-task scope control
-vocab preflight --diff HEAD~1 --task "change upload" --format tool           # diff-scoped (best)
+vocab preflight --diff HEAD~1 --task "change upload" --format tool           # diff-scoped
 ```
+
+Harness results (12-repo, 3-trial, `deepseek-v4-flash`):
+
+| Condition | Verify hit | Sprawl | Tokens | Efficiency |
+|-----------|-----------|--------|--------|------------|
+| baseline (no vocab) | 17% | 0.5 | 1,060 | 0.83 |
+| `preflight --format tool` (full) | **75%** | **0.0** | 1,658 | 1.60 |
+| `diff_preflight` (diff-scoped) | **75%** | **0.0** | 1,621 | 1.63 |
+| `verify_scope` (verification-only) | **83%** | **0.0** | 1,233 | **2.29** |
+
+`verify_scope` (available as `--format tool` on preflight) strips down to verification candidates and confidence only — no edit decisions. Removing the edit decision reduces cognitive load and improves verification accuracy. Use it when you only need test-file selection.
 
 For initial repo orientation (not per-task), use `crystallography`:
 
@@ -55,13 +60,14 @@ vocab preflight --diff HEAD~1 --format json
 
 `preflight` is intentionally file-scoped. It reports capped structural evidence: changed files, read-first context, verification candidates, stable anchors, reverse blast, risk, confidence, and a local-only privacy receipt. It does not claim semantic correctness.
 
-The strongest measured use is verification scaffolding and scope control. In a 12-repo, 3-trial `deepseek-v4-flash` harness:
+The strongest measured uses are verification selection and scope control:
 
 | Condition | Verify hit | Sprawl | Tokens | Efficiency |
 |-----------|-----------|--------|--------|------------|
-| baseline (no vocab) | 8% | 0.5 | 1,060 | 0.50 |
-| `preflight --format tool` | **75%** | **0.0** | 1,658 | 1.60 |
-| `preflight --diff HEAD~1` | **100%** | **0.0** | 1,748 | 1.82 |
+| baseline (no vocab) | 17% | 0.5 | 1,060 | 0.83 |
+| `preflight --format tool` (oneline) | **75%** | **0.0** | 1,658 | 1.60 |
+| `diff_preflight` (diff-scoped) | **75%** | **0.0** | 1,621 | 1.63 |
+| `verify_scope` (verification-only) | **83%** | **0.0** | 1,233 | **2.29** |
 | contract --format tool | TBD (experimental) | 0.25 | ~1,800 | TBD |
 
 The effect is strongest on private/unseen TypeScript/Python-ish repos and weak on weird-language public repos where test discovery is structurally poor. Treat `preflight` as a local review/edit scaffold, not as an oracle.
@@ -180,16 +186,16 @@ For now, `vocab` is intended to stand on its own as the public trust artifact. R
 
 ## LLM Channel
 
-These commands are designed to be injected into LLM system prompts or used as tool calls. The primary proven surface is `preflight --format tool` (75% verify, 0 sprawl in harness). Secondary surfaces serve orientation or experimental contract workflows.
+These commands are designed to be injected into LLM system prompts or used as tool calls. The primary proven surface is `verify_scope` (83% verify, 0 sprawl — the verification-only subset of preflight). The full `preflight --format tool` (75% verify, 0 sprawl) adds edit-scope guardrails.
 
 ```bash
 vocab preflight --files src/spool.ts --format tool   # LLM-tool preflight (proven)
 vocab crystallography --path .                        # ~100 token repo skeleton (orientation)
-vocab preflight --diff HEAD~1 --format tool            # diff-scoped preflight (100% verify)
+vocab preflight --diff HEAD~1 --format tool            # diff-scoped preflight (75% verify)
 vocab contract --files src/spool.ts --format tool      # ID-coded scope (experimental)
 ```
 
-`preflight --format tool` returns a compact 12-field JSON payload designed for LLM tool-parsing. Verified across 24 3-trial harness trials to improve verification selection and eliminate edit sprawl compared to unstructured baseline.
+`preflight --format tool` returns a compact 12-field JSON payload designed for LLM tool-parsing. The verification-only subset (extracting `verification_mc` and `verification_confidence` fields) achieves the highest measured efficiency (2.29) by removing the edit-decision overhead.
 
 Key fields:
 
@@ -209,7 +215,8 @@ All payloads include `guardrails.mode: "report_only"`, `guardrails.caveat: "May 
 ### Agent: Scope Control (Proven)
 ```bash
 vocab preflight --files src/spool.ts --task "..." --format tool  # 75% verify, 0 sprawl
-vocab preflight --diff HEAD~1 --task "..." --format tool           # 100% verify, 0 sprawl
+vocab preflight --diff HEAD~1 --task "..." --format tool           # 75% verify (diff-scoped)
+vocab preflight --files src/spool.ts --task "..." --format verify  # 83% verify (verification-only)
 vocab contract --files src/spool.ts --task "..." --format tool     # ID-coded scope (experimental)
 vocab check-plan --contract c.json --proposal p.json               # validate LLM proposal
 ```
