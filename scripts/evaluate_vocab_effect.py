@@ -109,7 +109,7 @@ CASES: tuple[Case, ...] = (
          "add a handler for listing fingerprints by source",
          "internal/handlers/fingerprint_read.go",
          ("internal/handlers/fingerprint_read.go", "internal/handlers/app.go", "internal/services/fingerprint.go"),
-         ("internal/handlers/fingerprint_read_test.go",)),
+         ("tests/functional/api_fingerprints_test.go",)),
     Case("private_unseen", "vocab", "/home/user/src/vocab",
          "add a file-scoped preflight command",
          "vocab/cli.py",
@@ -119,7 +119,7 @@ CASES: tuple[Case, ...] = (
          "add a minhash compression backend for fuzzy duplicate detection",
          "app/compression/__init__.py",
          ("app/compression/__init__.py", "app/compression/crispr_v2_backend.py", "app/compression/base.py"),
-         ("evals/test_crispr_v2.py",)),
+         ("tests/test_minhash_index.py",)),
 )
 
 
@@ -127,15 +127,19 @@ DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", 
 PREFLIGHT_CONDITIONS = (
     "candidate_baseline", "preflight_compact", "preflight_checklist", "verify_mcq",
     "preflight_tool", "preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy",
-    "preflight_tool_llm", "preflight_tool_full", "preflight_tool_calibrated", "negotiate",
-    "e2e_negotiate", "contract_oneline", "contract_prompt", "contract_checkplan",
-    "preflight_tool_abl_no_cochange", "preflight_tool_abl_no_orphans",
-    "preflight_tool_abl_no_snr", "preflight_tool_abl_no_temp_peer",
-    "preflight_tool_abl_only_baseline",
-    "knock_baseline_only", "knock_baseline_co_change", "knock_baseline_orphans",
-    "knock_baseline_keystone", "knock_baseline_temp_peer", "knock_baseline_snr",
-    "fmt_baseline_json", "fmt_baseline_oneline", "fmt_baseline_keyvalue",
-    "fmt_baseline_sentence", "fmt_baseline_none",
+    "fmt_baseline_oneline", "fmt_baseline_json", "fmt_baseline_sentence",
+
+    # Contract conditions
+    "contract_oneline", "contract_prompt", "contract_checkplan",
+
+    # Knock-in: baseline only with one extra signal each
+    "knock_baseline_only", "knock_baseline_co_change", "knock_baseline_keystone",
+
+    # Combined discovery + preflight
+    "discovery_then_preflight",
+
+    # Diff-based preflight (simulates PR review)
+    "diff_preflight",
 )
 
 
@@ -526,6 +530,27 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             guidance = ""
         elif route.get("command"):
             guidance = "Route: " + " ".join(route.get("command", []))
+    elif condition == "discovery_then_preflight":
+        discovery_guidance = run_vocab(case.path, ["agent-bootstrap", "--path", case.path, "--task", case.task, "--summary"])
+        preflight_guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+        guidance = f"Discovery overview:\n{discovery_guidance}\n\nEdit preflight:\n{preflight_guidance}"
+    elif condition == "diff_preflight":
+        # Use HEAD~0..HEAD diff to simulate PR review
+        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--diff", "HEAD~0", "--task", case.task, "--format", "tool"])
+        if "error" in raw.lower() or not raw.strip():
+            raw = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+        else:
+            try:
+                p = json.loads(raw)
+                baseline_keys = {"schema_version", "risk", "confidence", "reason",
+                                 "changed_files", "read_first",
+                                 "verification_mc", "verification_confidence",
+                                 "expansion_risk", "edit_sprawl_guard",
+                                 "desert_warning", "guardrails"}
+                base = {k: p[k] for k in baseline_keys if k in p}
+                guidance = json.dumps(base, separators=(",", ":"))
+            except (json.JSONDecodeError, TypeError):
+                guidance = raw if raw else preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
 
     system = (
         "You are about to edit a candidate file. Decide verification and avoid unnecessary edit sprawl. "
