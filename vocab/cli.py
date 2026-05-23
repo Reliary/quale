@@ -416,7 +416,9 @@ def preflight(
         # P1: Format calibration — strip signals based on model identity
         if model in ("deepseek-v4-flash", "deepseek-chat", "mistral"):
             _calibrate_tool_for_flash(tool_data)
-        typer.echo(json.dumps(tool_data, indent=2))
+            typer.echo(json.dumps(tool_data, separators=(",", ":")))
+        else:
+            typer.echo(json.dumps(tool_data, indent=2))
         return
     if format == "checklist":
         _print_preflight_checklist(data)
@@ -426,7 +428,9 @@ def preflight(
 
 
 def _calibrate_tool_for_flash(tool_data: dict) -> None:
-    """Strip down to baseline-only fields proven most efficient for flash models."""
+    """Strip down to baseline-only fields proven most efficient for flash models.
+    Uses oneline JSON (separators=(',',':')) for minimal token cost.
+    """
     baseline_keys = {"schema_version", "risk", "confidence", "reason",
                      "changed_files", "read_first",
                      "verification_mc", "verification_confidence",

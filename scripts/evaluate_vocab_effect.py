@@ -127,9 +127,14 @@ PREFLIGHT_CONDITIONS = (
     "candidate_baseline", "preflight_compact", "preflight_checklist", "verify_mcq",
     "preflight_tool", "preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy",
     "preflight_tool_llm", "preflight_tool_full", "preflight_tool_calibrated", "negotiate",
+    "e2e_negotiate",
     "preflight_tool_abl_no_cochange", "preflight_tool_abl_no_orphans",
     "preflight_tool_abl_no_snr", "preflight_tool_abl_no_temp_peer",
     "preflight_tool_abl_only_baseline",
+    "knock_baseline_only", "knock_baseline_co_change", "knock_baseline_orphans",
+    "knock_baseline_keystone", "knock_baseline_temp_peer", "knock_baseline_snr",
+    "fmt_baseline_json", "fmt_baseline_oneline", "fmt_baseline_keyvalue",
+    "fmt_baseline_sentence", "fmt_baseline_none",
 )
 
 
@@ -262,13 +267,36 @@ def score_discovery(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
 def score_preflight(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
     verify = normalize_list(parsed.get("verify"))
     extra_edits = [file for file in normalize_list(parsed.get("extra_edits")) if file != case.edit_file]
+    semantic_sprawl = _semantic_sprawl_score(extra_edits, case.edit_file, case.task)
     return {
         "verify_hit": any(file in verify for file in case.verify_files),
         "verify_hit_count": sum(1 for file in case.verify_files if file in verify),
         "extra_edit_count": len(extra_edits),
         "extra_edits": extra_edits[:5],
         "verify": verify[:5],
+        "semantic_sprawl_score": semantic_sprawl,
     }
+
+
+def _semantic_sprawl_score(extra_edits: list[str], edit_file: str, task: str) -> float:
+    """Estimate how semantically distant proposed extra edits are from task scope.
+    0.0 = all proposed files are task-relevant. 1.0 = all are unrelated.
+    Uses path/stem overlap with task keywords — no vocab scan needed.
+    """
+    if not extra_edits:
+        return 0.0
+    task_tokens = {w.lower() for w in task.split() if len(w) > 3} if task else set()
+    if not task_tokens:
+        return 0.0
+    scores = []
+    for f in extra_edits:
+        path_tokens = set(f.replace("/", " ").replace(".", " ").replace("-", " ").replace("_", " ").lower().split())
+        overlap = len(task_tokens & path_tokens)
+        if overlap == 0:
+            scores.append(1.0)
+        else:
+            scores.append(1.0 / (1.0 + overlap))
+    return round(sum(scores) / len(scores), 3) if scores else 0.0
 
 
 def discovery_messages(case: Case, condition: str, files: list[str]) -> list[dict[str, str]]:
@@ -350,6 +378,89 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 "risk": d.get("final_risk", "unknown"),
             }, indent=2)
         except (json.JSONDecodeError, KeyError):
+            guidance = raw
+    elif condition == "e2e_negotiate":
+        raw = run_vocab(case.path, ["negotiate", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        try:
+            d = json.loads(raw)
+            guidance = json.dumps({
+                "format": "e2e_negotiate",
+                "turn": 1,
+                "total_rounds": d.get("total_rounds", 0),
+                "scope_reduction_suggested": d.get("reduced", 0) > 0,
+                "initial_scope": d.get("initial_files_count", 0),
+                "final_scope": d.get("final_files_count", 0),
+                "reduced": d.get("reduced", 0),
+                "keystone_files": d.get("keystone_files", []),
+                "changed_files": d.get("final_files", [case.edit_file]),
+                "risk": d.get("final_risk", "unknown"),
+            }, indent=2)
+        except (json.JSONDecodeError, KeyError):
+            guidance = raw
+    elif condition.startswith("knock_"):
+        knock = condition.replace("knock_baseline_", "")
+        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+        try:
+            p = json.loads(raw)
+            baseline_keys = {"schema_version", "risk", "confidence", "reason",
+                             "changed_files", "read_first",
+                             "verification_mc", "verification_confidence",
+                             "expansion_risk", "edit_sprawl_guard",
+                             "desert_warning", "guardrails"}
+            kept = {k: v for k, v in p.items() if k in baseline_keys}
+            add_map = {
+                "co_change": ["co_change"],
+                "orphans": ["structural_orphans"],
+                "keystone": ["file_classifications", "keystone_files"],
+                "temp_peer": ["temperature", "peer_relative", "safety_envelope"],
+                "snr": ["snr_annotations"],
+            }
+            for k in add_map.get(knock, []):
+                if k in p:
+                    kept[k] = p[k]
+            guidance = json.dumps(kept, indent=2)
+        except (json.JSONDecodeError, TypeError):
+            guidance = raw
+    elif condition.startswith("fmt_"):
+        style = condition.replace("fmt_baseline_", "")
+        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool", "--model", "deepseek-v4-flash"])
+        try:
+            p = json.loads(raw)
+            baseline_keys = {"schema_version", "risk", "confidence", "reason",
+                             "changed_files", "read_first",
+                             "verification_mc", "verification_confidence",
+                             "expansion_risk", "edit_sprawl_guard",
+                             "desert_warning", "guardrails"}
+            base = {k: p[k] for k in baseline_keys if k in p}
+            if style == "json":
+                guidance = json.dumps(base, indent=2)
+            elif style == "oneline":
+                guidance = json.dumps(base, separators=(",", ":"))
+            elif style == "keyvalue":
+                lines = []
+                for k, v in base.items():
+                    v_str = json.dumps(v, separators=(",", ":")) if not isinstance(v, str) else str(v)
+                    lines.append(f"{k}: {v_str}")
+                guidance = "\n".join(lines)
+            elif style == "sentence":
+                parts = []
+                parts.append(f"Risk: {base.get('risk', 'unknown')}.")
+                files_list = base.get("changed_files", [])
+                parts.append(f"Changed: {', '.join(files_list)}.")
+                ver = base.get("verification_mc", {})
+                cands = ver.get("candidates", [])
+                if cands:
+                    parts.append(f"Verify with: {', '.join(cands)}.")
+                else:
+                    parts.append("No verification candidates.")
+                exp = base.get("expansion_risk", [])
+                if exp:
+                    parts.append(f"Defer: {', '.join(exp[:3])}.")
+                parts.append(f"Confidence: {base.get('confidence', 'unknown')}.")
+                guidance = " ".join(parts)
+            elif style == "none":
+                guidance = ""
+        except (json.JSONDecodeError, TypeError):
             guidance = raw
     elif condition.startswith("preflight_tool_abl_"):
         ablation = condition.replace("preflight_tool_abl_", "")
@@ -584,6 +695,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
                     "verify_hit_rate": avg_verify,
                     "avg_verify_hit_count": avg_num(rows, "verify_hit_count"),
                     "avg_extra_edit_count": avg_sprawl,
+                    "avg_semantic_sprawl": avg_num(rows, "semantic_sprawl_score"),
                     "avg_input_tokens": avg_tokens,
                     "efficiency_score": efficiency,
                 }
