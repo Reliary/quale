@@ -336,6 +336,7 @@ def preflight(
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), json, checklist, compact, llm")] = "tool",
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Show math-heavy signals (SNR, expansion risk details)")] = False,
+    model: Annotated[str | None, typer.Option("--model", help="Model name for format calibration (e.g. deepseek-v4-flash)")] = None,
 ):
     """File-scoped pre-edit/review risk card.
 
@@ -406,10 +407,15 @@ def preflight(
             "desert_warning": _desert_text(ver_confidence, data.get("changed_files", [])),
             "co_change": data.get("co_change", []),
             "structural_orphans": data.get("structural_orphans", []),
+            "file_classifications": data.get("file_classifications", []),
+            "keystone_files": data.get("keystone_files", []),
             "snr_annotations": snr,
             "capability_boundary": capability,
             "guardrails": data.get("guardrails", {}),
         }
+        # P1: Format calibration — strip signals based on model identity
+        if model in ("deepseek-v4-flash", "deepseek-chat", "mistral"):
+            _calibrate_tool_for_flash(tool_data)
         typer.echo(json.dumps(tool_data, indent=2))
         return
     if format == "checklist":
@@ -419,7 +425,113 @@ def preflight(
     _print_preflight(data)
 
 
+def _calibrate_tool_for_flash(tool_data: dict) -> None:
+    """Strip down to baseline-only fields proven most efficient for flash models."""
+    baseline_keys = {"schema_version", "risk", "confidence", "reason",
+                     "changed_files", "read_first",
+                     "verification_mc", "verification_confidence",
+                     "expansion_risk", "edit_sprawl_guard",
+                     "desert_warning", "guardrails"}
+    for k in list(tool_data.keys()):
+        if k not in baseline_keys:
+            del tool_data[k]
 
+
+@cli.command()
+def negotiate(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str] | None, typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: json(default), tool, compact")] = "json",
+    max_rounds: Annotated[int, typer.Option("--max-rounds", help="Max negotiation rounds before emitting final contract")] = 3,
+):
+    """Self-terminating scope negotiation — LLM proposes, vocab checks, repeat until stable.
+
+    After each round, if risk > low and scope broadens, suggests which files to drop.
+    Stops after risk <= low or max_rounds.
+
+    Examples:
+      vocab negotiate --files src/spool.ts --task "change upload behavior"
+      vocab negotiate --files src/cli.py,src/reports.py --task "add command" --max-rounds 2
+    """
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    from vocab.reports import _normalize_preflight_files
+
+    history = []
+    current_files = _normalize_preflight_files(path, files) if files else []
+    initial_count = len(current_files)
+    if not current_files:
+        typer.echo("provide --files so negotiate stays file-scoped", err=True)
+        raise typer.Exit(1)
+
+    for round_idx in range(1, max_rounds + 1):
+        data = preflight_report(path=path, files=current_files, task=task)
+        if "error" in data:
+            typer.echo(f"Round {round_idx}: {data['error']}", err=True)
+            raise typer.Exit(1)
+
+        risk = data.get("risk", "unknown")
+        keystone = data.get("keystone_files", [])
+        expansion = data.get("expansion_risk", [])
+        blast_count = len(data.get("reverse_blast", []))
+        changed_count = len(current_files)
+
+        round_record = {
+            "round": round_idx,
+            "files": list(current_files),
+            "risk": risk,
+            "keystone_files": keystone,
+            "expansion_risk": expansion,
+            "blast_count": blast_count,
+            "changed_count": changed_count,
+        }
+        history.append(round_record)
+
+        if risk in ("low", "none") and blast_count <= 3:
+            round_record["reason"] = "risk acceptable"
+            break
+        if risk in ("high", "mixed") and len(current_files) > 1 and round_idx < max_rounds:
+            classifications = data.get("file_classifications", [])
+            safe_to_drop = [
+                f["file"] for f in classifications
+                if f.get("class") in ("NON_SELF", "SELF_STANDARD")
+                and f["file"] not in expansion
+                and f["file"] not in keystone
+            ]
+            if safe_to_drop:
+                dropped = safe_to_drop[0]
+                current_files = [f for f in current_files if f != dropped]
+                round_record["dropped"] = dropped
+                round_record["reason"] = f"dropped {dropped} to reduce scope"
+                continue
+        round_record["reason"] = "max rounds or cannot narrow further"
+        break
+
+    result = {
+        "schema_version": 1,
+        "status": "ok",
+        "total_rounds": len(history),
+        "final_risk": history[-1]["risk"],
+        "final_files": history[-1]["files"],
+        "final_files_count": len(history[-1]["files"]),
+        "initial_files_count": initial_count,
+        "reduced": initial_count - len(history[-1]["files"]),
+        "history": history,
+        "keystone_files": history[-1].get("keystone_files", []),
+    }
+    if format == "compact":
+        status = "STABLE" if result["final_risk"] in ("low", "none") else "BROAD"
+        typer.echo(f"  NEGOTIATE: {status}  files={result['final_files_count']}/{result['initial_files_count']}  risk={result['final_risk']}  rounds={result['total_rounds']}")
+        if result["keystone_files"]:
+            typer.echo(f"  KEYSTONE: {', '.join(result['keystone_files'][:3])}")
+        if result["reduced"] > 0:
+            typer.echo(f"  DROPPED: {result['reduced']} file(s)")
+    else:
+        typer.echo(json.dumps(result, indent=2))
 
 
 @cli.command()
