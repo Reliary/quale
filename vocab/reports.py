@@ -428,6 +428,7 @@ def build_contract(path: str = ".", files: list[str] | None = None,
             "edit_ids must be from allowed_edit.",
             "verify_ids must be from verify_options unless verification_desert is true.",
             "Request boundary IDs via expand_scope instead of editing them directly.",
+            "Each expand_scope entry must include a reason: [{\"id\": \"B1\", \"reason\": \"why this boundary file is needed\"}]",
         ],
         "guardrails": {
             "mode": "report_only_contract",
@@ -447,7 +448,13 @@ def validate_plan(contract: dict, proposal: dict, allow_paths: bool = False) -> 
 
     edit_ids = _string_list(proposal.get("edit_ids"))
     verify_ids = _string_list(proposal.get("verify_ids"))
-    expand_ids = _expand_scope_ids(proposal.get("expand_scope"))
+    expand_raw = proposal.get("expand_scope", [])
+    if isinstance(expand_raw, list):
+        expand_no_reason = [item["id"] for item in expand_raw
+                           if isinstance(item, dict) and "id" in item and "reason" not in item]
+    else:
+        expand_no_reason = []
+    expand_ids = _expand_scope_ids(expand_raw)
     manual_verify = _string_list(proposal.get("manual_verify"))
 
     used_ids = edit_ids + verify_ids + expand_ids
@@ -478,6 +485,9 @@ def validate_plan(contract: dict, proposal: dict, allow_paths: bool = False) -> 
     invalid_expands = [item for item in expand_ids if item in known_ids and item not in boundary]
     if invalid_expands:
         violations.append({"code": "expand_scope_must_use_boundary_ids", "ids": invalid_expands})
+
+    if expand_no_reason:
+        violations.append({"code": "expand_scope_missing_reason", "ids": expand_no_reason})
 
     needs_reflight = bool(expand_ids) and not violations
     valid = not violations and not needs_reflight
@@ -581,6 +591,12 @@ def _preflight_verify_files(changed: list[str], bootstrap: dict | None, file_voc
         base = os.path.splitext(os.path.basename(fv.path))[0].replace(".test", "").replace("_test", "").lower()
         if base in changed_bases and fv.path not in verify:
             verify.append(fv.path)
+    changed_dirs = set()
+    for f in changed:
+        d = os.path.dirname(f)
+        if d:
+            changed_dirs.add(d)
+    verify.sort(key=lambda f: (0 if os.path.dirname(f) in changed_dirs else 1, f))
     return verify[:3]
 
 
