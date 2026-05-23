@@ -126,7 +126,7 @@ CASES: tuple[Case, ...] = (
 
 
 DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", "crystallography", "route_policy")
-PREFLIGHT_CONDITIONS = (
+    PREFLIGHT_CONDITIONS = (
     "candidate_baseline", "preflight_compact", "preflight_checklist", "verify_mcq",
     "preflight_tool", "preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy",
     "fmt_baseline_oneline", "fmt_baseline_json", "fmt_baseline_sentence",
@@ -145,6 +145,9 @@ PREFLIGHT_CONDITIONS = (
 
     # Unmeasured agent-facing surfaces
     "verify_scope", "ask", "negotiate_simple",
+
+    # Gap signature + vaccination
+    "verify_classify",
 )
 
 
@@ -572,6 +575,9 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 guidance = json.dumps(base, separators=(",", ":"))
             except (json.JSONDecodeError, TypeError):
                 guidance = raw if raw else preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+    elif condition == "verify_classify":
+        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "verify"])
+        guidance = raw
     elif condition == "verify_scope":
         raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
         try:
@@ -600,6 +606,12 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         system += " Obey report-only sprawl guidance: do not propose extra_edits unless the task explicitly requires them."
     if condition in {"desert_aware_preflight", "route_policy"}:
         system += " Do not use source files as verification unless they are explicitly test or suite files; empty verify is better than a fake test."
+    if condition == "verify_classify":
+        system = (
+            "You are verifying a candidate edit. You have gap classification and vaccination hints. "
+            "Return exactly one compact JSON object and no markdown. "
+            "Use keys: verify (array of relative paths), should_edit_candidate (boolean)."
+        )
     if condition == "verify_scope":
         system = (
             "You are verifying a candidate edit. Choose which test file(s) to run after editing. "
