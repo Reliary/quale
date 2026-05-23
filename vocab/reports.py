@@ -355,6 +355,183 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     }
 
 
+def build_contract(path: str = ".", files: list[str] | None = None,
+                   task: str | None = None) -> dict:
+    """Build an ID-coded structural edit contract for LLM plans.
+
+    The contract is intentionally smaller and stricter than preflight output:
+    the LLM should choose IDs, not invent paths.
+    """
+    preflight = preflight_report(path=path, files=files, task=task)
+    if "error" in preflight:
+        return {"schema_version": 1, "error": preflight["error"]}
+
+    file_map: dict[str, str] = {}
+    allowed_edit: list[str] = []
+    verify_options: list[str] = []
+    boundary: list[str] = []
+
+    for idx, file in enumerate(preflight.get("changed_files", [])[:8], 1):
+        fid = _contract_id("F", idx, file)
+        file_map[fid] = file
+        allowed_edit.append(fid)
+
+    for idx, file in enumerate(preflight.get("verification_candidates", [])[:5], 1):
+        if file in file_map.values():
+            continue
+        fid = _contract_id("T", idx, file)
+        file_map[fid] = file
+        verify_options.append(fid)
+
+    boundary_paths: list[str] = []
+    for key in ("expansion_risk", "read_first"):
+        for file in preflight.get(key, []) or []:
+            if file not in file_map.values() and file not in boundary_paths:
+                boundary_paths.append(file)
+    for idx, file in enumerate(boundary_paths[:8], 1):
+        fid = _contract_id("B", idx, file)
+        file_map[fid] = file
+        boundary.append(fid)
+
+    import hashlib
+    scope_payload = json.dumps({
+        "task": task or "",
+        "allowed_edit": [file_map[i] for i in allowed_edit],
+        "verify_options": [file_map[i] for i in verify_options],
+        "boundary": [file_map[i] for i in boundary],
+    }, sort_keys=True)
+    digest = hashlib.sha256(scope_payload.encode()).hexdigest()
+    verification_desert = not verify_options or preflight.get("verification_confidence", {}).get("level") == "low"
+
+    return {
+        "schema_version": 1,
+        "contract_id": f"c_{digest[:10]}",
+        "mode": "scoped_edit",
+        "task": task,
+        "files": file_map,
+        "allowed_edit": allowed_edit,
+        "verify_options": verify_options,
+        "boundary": boundary,
+        "forbidden": [],
+        "verification_desert": verification_desert,
+        "risk": preflight.get("risk", "unknown"),
+        "confidence": preflight.get("confidence", "unknown"),
+        "scope_hash": f"sha256-{digest}",
+        "must_return": {
+            "edit_ids": [],
+            "verify_ids": [],
+            "expand_scope": [],
+            "manual_verify": [],
+        },
+        "rules": [
+            "Return IDs only, not raw paths.",
+            "edit_ids must be from allowed_edit.",
+            "verify_ids must be from verify_options unless verification_desert is true.",
+            "Request boundary IDs via expand_scope instead of editing them directly.",
+        ],
+        "guardrails": {
+            "mode": "report_only_contract",
+            "not_semantic_truth": True,
+            "rerun_preflight_after_expand_scope": True,
+        },
+    }
+
+
+def validate_plan(contract: dict, proposal: dict, allow_paths: bool = False) -> dict:
+    """Validate an LLM plan against an ID-coded contract."""
+    file_map = contract.get("files", {}) if isinstance(contract.get("files"), dict) else {}
+    known_ids = set(file_map)
+    allowed_edit = set(contract.get("allowed_edit", []))
+    verify_options = set(contract.get("verify_options", []))
+    boundary = set(contract.get("boundary", []))
+
+    edit_ids = _string_list(proposal.get("edit_ids"))
+    verify_ids = _string_list(proposal.get("verify_ids"))
+    expand_ids = _expand_scope_ids(proposal.get("expand_scope"))
+    manual_verify = _string_list(proposal.get("manual_verify"))
+
+    used_ids = edit_ids + verify_ids + expand_ids
+    violations: list[dict[str, Any]] = []
+    unknown = [item for item in used_ids if item not in known_ids]
+    if unknown:
+        violations.append({"code": "unknown_id", "ids": unknown})
+
+    raw_paths = [item for item in used_ids if _looks_like_path(item)]
+    if raw_paths and not allow_paths:
+        violations.append({"code": "raw_path_not_allowed", "values": raw_paths})
+
+    bad_edits = [item for item in edit_ids if item in known_ids and item not in allowed_edit]
+    if bad_edits:
+        violations.append({"code": "edit_outside_allowed_scope", "ids": bad_edits})
+
+    bad_verify = [item for item in verify_ids if item in known_ids and item not in verify_options]
+    if bad_verify:
+        violations.append({"code": "verify_id_not_allowed", "ids": bad_verify})
+
+    if contract.get("verification_desert") and verify_ids:
+        violations.append({"code": "verification_desert_requires_manual_verify", "ids": verify_ids})
+
+    boundary_edits = [item for item in edit_ids if item in boundary and item not in expand_ids]
+    if boundary_edits:
+        violations.append({"code": "boundary_edit_requires_expand_scope", "ids": boundary_edits})
+
+    invalid_expands = [item for item in expand_ids if item in known_ids and item not in boundary]
+    if invalid_expands:
+        violations.append({"code": "expand_scope_must_use_boundary_ids", "ids": invalid_expands})
+
+    needs_reflight = bool(expand_ids) and not violations
+    valid = not violations and not needs_reflight
+    return {
+        "schema_version": 1,
+        "contract_id": contract.get("contract_id", ""),
+        "valid": valid,
+        "needs_reflight": needs_reflight,
+        "scope_expansion_requested": bool(expand_ids),
+        "violations": violations,
+        "edit_paths": [file_map[i] for i in edit_ids if i in file_map],
+        "verify_paths": [file_map[i] for i in verify_ids if i in file_map],
+        "expand_paths": [file_map[i] for i in expand_ids if i in file_map],
+        "manual_verify": manual_verify,
+        "guardrails": {
+            "mode": "deterministic_validation",
+            "not_semantic_truth": True,
+            "allow_paths": allow_paths,
+        },
+    }
+
+
+def _contract_id(prefix: str, index: int, path: str) -> str:
+    import hashlib
+    suffix = hashlib.sha256(f"{prefix}:{index}:{path}".encode()).hexdigest()[0]
+    return f"{prefix}{index}{suffix}"
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
+def _expand_scope_ids(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            result.append(item)
+        elif isinstance(item, dict) and isinstance(item.get("id"), str):
+            result.append(item["id"])
+    return result
+
+
+def _looks_like_path(value: str) -> bool:
+    return "/" in value or "\\" in value or bool(re.search(r"\.[A-Za-z0-9]{1,8}$", value))
+
+
 def _normalize_preflight_files(repo_path: str, files: list[str]) -> list[str]:
     normalized = []
     for item in files:

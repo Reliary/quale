@@ -19,7 +19,7 @@ from vocab.scanner import (scan_codebase, search_cross_repo,
 from vocab.bootstrap import (bootstrap_repo, explore_repo, compute_modules)
 from vocab.reports import (ci_report, inspect_repo, repo_fingerprint,
                            compute_stability, compute_lifecycles, concept_timeline,
-                           preflight_report)
+                           preflight_report, build_contract, validate_plan)
 from vocab.compare import (compare_repos, phrase_provenance, pr_blast_radius)
 from vocab.formats.terminal import (format_terminal, format_json, format_html, format_quick,
                                      format_lifecycles, format_blast_radius,
@@ -42,7 +42,7 @@ cli = typer.Typer(
 
     Workflow groups (common uses):
       ORIENTATION    agent-bootstrap, explore, modules, crystallography, inspect
-      PREFLIGHT      preflight, verify-scope, diff-structural, route, negotiate
+      PREFLIGHT      preflight, contract, check-plan, verify-scope, diff-structural, route, negotiate
       HISTORY        timeline, lifecycle, stable, provenance, genesis
       CROSS-REPO     compare, search, bond, lattice
       CI/GATES       ci-report, pr-report, gate
@@ -357,6 +357,17 @@ def preflight(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
 
+    verify_candidates = data.get("verification_candidates", data.get("verify_with", []))
+    ver_confidence = data.get("verification_confidence", {})
+    sprawl = data.get("edit_sprawl_guard", {})
+    wa = sprawl.get("warnings", [])
+    qs = [w.get("question_extras", "").strip() for w in wa if w.get("question_extras")]
+    sprawl_instruction = (
+        "Before broadening scope, verify each extra file: " + "; ".join(qs)
+        if qs else
+        "Do not propose extra_edits unless the task explicitly requires them."
+    )
+
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
@@ -365,16 +376,6 @@ def preflight(
         typer.echo(format_preflight_llm(data))
         return
     if format == "tool":
-        verify_candidates = data.get("verification_candidates", data.get("verify_with", []))
-        ver_confidence = data.get("verification_confidence", {})
-        sprawl = data.get("edit_sprawl_guard", {})
-        wa = sprawl.get("warnings", [])
-        qs = [w.get("question_extras", "").strip() for w in wa if w.get("question_extras")]
-        sprawl_instruction = (
-            "Before broadening scope, verify each extra file: " + "; ".join(qs)
-            if qs else
-            "Do not propose extra_edits unless the task explicitly requires them."
-        )
         tool_data = {
             "schema_version": 1,
             "risk": data.get("risk", "unknown"),
@@ -440,6 +441,75 @@ def preflight(
         return
     data["verbose"] = verbose
     _print_preflight(data)
+
+
+@cli.command()
+def contract(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str] | None, typer.Option("--files", help="Allowed edit file(s); repeat or comma-separate")] = None,
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), json, prompt")] = "tool",
+):
+    """Emit an ID-coded structural contract for deterministic LLM plans.
+
+    The LLM should return IDs from the contract, not raw paths.
+    """
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not files:
+        typer.echo("provide --files so contract stays file-scoped", err=True)
+        raise typer.Exit(1)
+
+    data = build_contract(path=path, files=files, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    if format == "prompt":
+        typer.echo("Return exactly one JSON object using IDs only: {\"edit_ids\":[],\"verify_ids\":[],\"expand_scope\":[],\"manual_verify\":[]}")
+        typer.echo(json.dumps(data, separators=(",", ":")))
+        return
+    typer.echo(json.dumps(data, separators=(",", ":")))
+
+
+@cli.command(name="check-plan")
+def check_plan(
+    contract_file: Annotated[Path, typer.Option("--contract", "-c", help="Contract JSON file")],
+    proposal_file: Annotated[Path | None, typer.Option("--proposal", "-p", help="Proposal JSON file; stdin when omitted")] = None,
+    allow_paths: Annotated[bool, typer.Option("--allow-paths", help="Allow raw paths in proposal (not recommended)")] = False,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), json, compact")] = "tool",
+):
+    """Validate an LLM plan against an ID-coded contract."""
+    try:
+        contract_data = json.loads(contract_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        typer.echo(f"failed to read contract: {e}", err=True)
+        raise typer.Exit(1)
+    try:
+        raw = proposal_file.read_text(encoding="utf-8") if proposal_file else sys.stdin.read()
+        proposal = json.loads(raw)
+    except Exception as e:
+        typer.echo(f"failed to read proposal: {e}", err=True)
+        raise typer.Exit(1)
+
+    result = validate_plan(contract_data, proposal, allow_paths=allow_paths)
+    if format == "compact":
+        if result.get("valid"):
+            typer.echo("VALID plan: scope contained")
+        elif result.get("needs_reflight"):
+            typer.echo("NEEDS_REFLIGHT: scope expansion requested")
+        else:
+            codes = ", ".join(v.get("code", "unknown") for v in result.get("violations", []))
+            typer.echo(f"INVALID plan: {codes}")
+        return
+    if format == "json":
+        typer.echo(json.dumps(result, indent=2))
+    else:
+        typer.echo(json.dumps(result, separators=(",", ":")))
 
 
 @cli.command()
