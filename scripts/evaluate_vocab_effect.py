@@ -127,6 +127,9 @@ PREFLIGHT_CONDITIONS = (
     "candidate_baseline", "preflight_compact", "preflight_checklist", "verify_mcq",
     "preflight_tool", "preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy",
     "preflight_tool_llm", "preflight_tool_full",
+    "preflight_tool_abl_no_cochange", "preflight_tool_abl_no_orphans",
+    "preflight_tool_abl_no_snr", "preflight_tool_abl_no_temp_peer",
+    "preflight_tool_abl_only_baseline",
 )
 
 
@@ -327,6 +330,27 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "llm"])
     elif condition == "preflight_tool_full":
         guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+    elif condition.startswith("preflight_tool_abl_"):
+        ablation = condition.replace("preflight_tool_abl_", "")
+        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+        try:
+            parsed = json.loads(raw)
+            if ablation == "no_cochange":
+                parsed.pop("co_change", None)
+            elif ablation == "no_orphans":
+                parsed.pop("structural_orphans", None)
+            elif ablation == "no_snr":
+                parsed.pop("snr_annotations", None)
+            elif ablation == "no_temp_peer":
+                parsed.pop("temperature", None)
+                parsed.pop("peer_relative", None)
+                parsed.pop("safety_envelope", None)
+            elif ablation == "only_baseline":
+                keys_to_keep = {"schema_version", "risk", "confidence", "reason", "changed_files", "read_first", "verification_mc", "verification_confidence", "expansion_risk", "edit_sprawl_guard", "desert_warning", "guardrails"}
+                parsed = {k: v for k, v in parsed.items() if k in keys_to_keep}
+            guidance = json.dumps(parsed, indent=2)
+        except (json.JSONDecodeError, TypeError):
+            guidance = raw
     elif condition == "route_policy":
         route = run_route(case, files=[case.edit_file])
         if route.get("action") == "preflight_tool":
@@ -520,15 +544,27 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
                     "avg_input_tokens": avg_num(rows, "input_tokens"),
                 }
             else:
+                avg_verify = avg_bool(rows, "verify_hit")
+                avg_sprawl = avg_num(rows, "extra_edit_count")
+                avg_tokens = avg_num(rows, "input_tokens")
+                # Efficiency = (2×verify + (1−sprawl)) / (tokens / baseline_tokens)
+                baseline_cond = "candidate_baseline"
+                baseline_rows = [r for r in suite_rows if r["condition"] == baseline_cond]
+                baseline_tokens = avg_num(baseline_rows, "input_tokens") if baseline_rows else avg_tokens
+                efficiency = round(
+                    ((avg_verify * 2 + max(0, 1 - avg_sprawl)) / max(avg_tokens / baseline_tokens, 0.01)),
+                    3,
+                ) if baseline_tokens > 0 else 0.0
                 summary[suite][condition] = {
                     "runs": len(rows),
                     "attempted": len(attempted),
                     "error_rate": round(len(errored) / len(attempted), 3),
                     "parse_error_rate": round(len(parsed_errors) / len(attempted), 3),
-                    "verify_hit_rate": avg_bool(rows, "verify_hit"),
+                    "verify_hit_rate": avg_verify,
                     "avg_verify_hit_count": avg_num(rows, "verify_hit_count"),
-                    "avg_extra_edit_count": avg_num(rows, "extra_edit_count"),
-                    "avg_input_tokens": avg_num(rows, "input_tokens"),
+                    "avg_extra_edit_count": avg_sprawl,
+                    "avg_input_tokens": avg_tokens,
+                    "efficiency_score": efficiency,
                 }
     return summary
 
