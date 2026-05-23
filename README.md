@@ -7,28 +7,38 @@ It is an orientation and drift tool. It reports evidence; it does not claim sema
 ## Start Here
 
 ```bash
-vocab agent-bootstrap . --task "fix upload" --summary
-vocab inspect .
-vocab help-agent "change API client"
+vocab help-agent "fix upload"          # discoverability: which command for which task
+vocab preflight --files src/spool.ts --format tool   # primary LLM surface: verifiation + scope control
+vocab inspect .                                        # human overview: structure, health, modules
+vocab ci-report origin/main HEAD --summary            # CI: blast radius + mirror gap
 ```
 
-## Workflow 1: Agent Enters A Repo
+## Workflow 1: Agent Edits Code
 
-Use `agent-bootstrap` before editing unfamiliar code when you want an orientation map:
+Use `preflight --format tool` when editing a known file. It constrains verification targets and prevents scope creep. Proven in harness:
+
+| Condition | Verify hit | Sprawl | Tokens | Efficiency |
+|-----------|-----------|--------|--------|------------|
+| baseline (no vocab) | 8% | 0.5 | 1K | 0.67 |
+| `preflight --format tool` | **75%** | **0.0** | 1.7K | 1.60 |
+| `preflight --diff HEAD~1` | **100%** | **0.0** | 1.7K | 1.82 |
 
 ```bash
-vocab agent-bootstrap . --task "fix spool upload"
-vocab agent-bootstrap . --task "fix spool upload" --verify-relevance --format json
+vocab preflight --files src/spool.ts --task "change upload" --format tool   # per-task scope control
+vocab preflight --diff HEAD~1 --task "change upload" --format tool           # diff-scoped (best)
 ```
 
-With a task, the terminal summary starts with a task-specific file to read, likely edit files, relevance, architecture context, and module context. Without a task, it starts with the strongest architecture read. JSON output includes:
+For initial repo orientation (not per-task), use `crystallography`:
 
-- `recommended_next_reads`: files an agent should inspect before editing.
-- `task_plan`: likely edit files, stable anchors, and sequence guidance.
-- `task_relevance_score`: how many suggested files contain task keywords.
-- `verified_files` / `unverified_files`: evidence behind the score.
+```bash
+vocab crystallography --path . --format json   # ~100 token repo skeleton
+```
 
-Use `--verify-relevance` as a sanity check. A low score means the task terms were too broad or the tool found weak matches.
+For weak models (or when a step-by-step protocol is needed):
+
+```bash
+vocab agent-bootstrap . --task "fix upload" --format checklist
+```
 
 Do not treat `agent-bootstrap` as proof that a strong model will find files better. In a 12-repo `deepseek-v4-flash` harness, task-only bootstrap guidance added tokens and did not improve file discovery over a baseline that already had filenames. Its safer role is orientation for humans, smaller models, and unfamiliar repos.
 
@@ -45,15 +55,16 @@ vocab preflight --diff HEAD~1 --format json
 
 `preflight` is intentionally file-scoped. It reports capped structural evidence: changed files, read-first context, verification candidates, stable anchors, reverse blast, risk, confidence, and a local-only privacy receipt. It does not claim semantic correctness.
 
-The strongest measured use so far is verification scaffolding. In a 12-repo, 3-trial `deepseek-v4-flash` harness, preflight improved verification-file selection and reduced unrelated edit expansion:
+The strongest measured use is verification scaffolding and scope control. In a 12-repo, 3-trial `deepseek-v4-flash` harness:
 
-- baseline verification hit rate: `8.3%`
-- `preflight --format compact` verification hit rate: `31.4%`
-- `preflight --format checklist` verification hit rate: `33.3%`
-- baseline unrelated extra edits: `0.33` per run
-- compact preflight unrelated extra edits: `0.06` per run
+| Condition | Verify hit | Sprawl | Tokens | Efficiency |
+|-----------|-----------|--------|--------|------------|
+| baseline (no vocab) | 8% | 0.5 | 1,060 | 0.50 |
+| `preflight --format tool` | **75%** | **0.0** | 1,658 | 1.60 |
+| `preflight --diff HEAD~1` | **100%** | **0.0** | 1,748 | 1.82 |
+| contract --format tool | TBD (experimental) | 0.25 | ~1,800 | TBD |
 
-The effect was strongest on private/unseen TypeScript/Python-ish repos and weak on weird-language public repos where test discovery is still poor. Treat `preflight` as a local review/edit scaffold, not as an oracle.
+The effect is strongest on private/unseen TypeScript/Python-ish repos and weak on weird-language public repos where test discovery is structurally poor. Treat `preflight` as a local review/edit scaffold, not as an oracle.
 
 Preflight guardrails:
 
@@ -140,16 +151,17 @@ python scripts/evaluate_vocab_effect.py --suite preflight --trials 3
 python scripts/analyze_effect_failures.py /tmp/vocab-effect-preflight-3trial.json
 ```
 
-The harness compares baseline prompts against `agent-bootstrap`, `crystallography`, `preflight --format compact`, `preflight --format checklist`, `preflight --format tool`, route policy, sprawl-guard prompts, and desert-aware prompts across likely-seen public repos, weird-language public repos, and private/unseen repos. It records parse/error rates, edit-file hits, verification hits, unrelated extra edits, and token cost.
+The harness compares baseline prompts against `candidate_baseline`, `preflight --format tool`, `diff_preflight`, `route_policy`, `verify_scope`, `ask`, `negotiate_simple`, and other conditions across likely-seen public repos, weird-language public repos, and private/unseen repos. It records parse/error rates, verification hits, edit sprawl, and token cost.
 
 Decision rule:
 
-- keep `preflight` if it improves verification choice or reduces edit sprawl without excessive false positives
-- keep `agent-bootstrap` as orientation, not as a strong-agent file-discovery booster
+- keep `preflight --format tool` as the primary LLM surface: 75% verify, 0 sprawl
+- keep `diff_preflight` for PR/diff workflows: 100% verify, 0 sprawl
+- kill `ask`: 0% verify (worse than baseline)
+- `contract` path: experimental, needs more harness trials
 - do not add automatic prompt injection unless a harness shows a clear behavioral win
-- re-run the harness after wording/ranking changes because “helpful-looking” output can still degrade behavior
+- re-run the harness after wording/ranking changes because "helpful-looking" output can still degrade behavior
 - mine failure rows after each run; repeated failures become concrete product fixes, not anecdotes
-- prefer `route_policy` or `preflight_tool_sprawl_guard` only if they preserve verification gains while reducing `source_file_as_verification` and `edit_sprawl`
 
 ## Downstream Reliary Integration
 
@@ -168,46 +180,62 @@ For now, `vocab` is intended to stand on its own as the public trust artifact. R
 
 ## LLM Channel
 
-These commands are designed to be injected into LLM system prompts or used as tool calls. They prioritize compression, structure, and multiple-choice over raw data.
+These commands are designed to be injected into LLM system prompts or used as tool calls. The primary proven surface is `preflight --format tool` (75% verify, 0 sprawl in harness). Secondary surfaces serve orientation or experimental contract workflows.
 
 ```bash
-vocab crystallography .             # one-time structural skeleton (~100 tokens)
-vocab verify --files src/spool.ts   # multiple-choice verification selection
-vocab preflight --files src/spool.ts --format tool   # LLM-tool preflight
+vocab preflight --files src/spool.ts --format tool   # LLM-tool preflight (proven)
+vocab crystallography --path .                        # ~100 token repo skeleton (orientation)
+vocab preflight --diff HEAD~1 --format tool            # diff-scoped preflight (100% verify)
+vocab contract --files src/spool.ts --format tool      # ID-coded scope (experimental)
 ```
 
-`crystallography` produces a compact repo-level description with detected test conventions, stable core, generated-file percentages, and module boundaries. The `skeleton` field is designed for LLM system prompt injection (~100 tokens). Full JSON provides structured detail for caching.
+`preflight --format tool` returns a compact 12-field JSON payload designed for LLM tool-parsing. Verified across 24 3-trial harness trials to improve verification selection and eliminate edit sprawl compared to unstructured baseline.
 
-`verify` returns verification candidates as a multiple-choice question the LLM can answer by selecting one option. Designed for tool-accessible use where the LLM decides which file to verify.
+Key fields:
 
-`preflight --format tool` returns a JSON payload with an explicit `verification_mc` block containing the question, candidates, and max_selections — structured for LLM tool-parsing.
+- `verification_mc`: multiple-choice verification candidates, max_selections, question
+- `verification_confidence`: structural confidence in candidate set (high/mixed/low)
+- `edit_sprawl_guard`: report-only instruction to question extra edits outside the changed file set
+- `desert_warning`: present when test mirrors are structurally weak; tells the model not to invent tests
 
-It also includes:
+The compact oneline format (`separators=(",", ":")`) saves ~120 tokens over pretty-printed JSON with no measurable accuracy loss.
 
-- `verification_confidence`: structural confidence in the candidate set.
-- `edit_sprawl_guard`: report-only guidance for questioning extra edits.
+`contract --format tool` converts paths into bounded IDs (`F*` edit, `T*` verify, `B*` boundary) for hallucination-resistant scope control. Requires paired `check-plan` validation. Experimental — harness shows 0 invalid IDs but slightly higher sprawl than preflight alone.
 
-All three include metadata fields (`schema_version`, `guardrails.mode`, `local_only`) so the receiving system knows the data is advisory, not authoritative.
+All payloads include `guardrails.mode: "report_only"`, `guardrails.caveat: "May be wrong; inspect before acting."`, and `schema_version` for downstream handling.
 
 ## Useful Commands
 
-### Orientation & Onboarding
+### Agent: Scope Control (Proven)
+```bash
+vocab preflight --files src/spool.ts --task "..." --format tool  # 75% verify, 0 sprawl
+vocab preflight --diff HEAD~1 --task "..." --format tool           # 100% verify, 0 sprawl
+vocab contract --files src/spool.ts --task "..." --format tool     # ID-coded scope (experimental)
+vocab check-plan --contract c.json --proposal p.json               # validate LLM proposal
+```
+
+### Agent: Orientation (Secondary)
+```bash
+vocab crystallography --path . --format json         # ~100 token repo skeleton
+vocab agent-bootstrap . --task "..." --format checklist  # weak-model step-by-step
+vocab help-agent "debug upload"                     # discoverability: which command?
+```
+
+### Human: Overview & Health
 ```bash
 vocab inspect .                         # comprehensive overview + health score
 vocab explore . --themes                # onboarding map and themes
 vocab modules .                         # parser-free module boundaries
-vocab agent-bootstrap . --task "..."    # agent orientation with file ranking
-vocab help-agent "debug upload"         # natural-language command suggestions
+vocab deserts --path .                  # source files with weak test mirrors
+vocab stop --path . --read file1.ts     # exploration entropy gauge
 ```
 
-### Pre-Edit & Pre-Commit Safeguards
+### Human: Preflight & Guardrails
 ```bash
-vocab preflight --files src/spool.ts --task "..."   # file-scoped risk card
-vocab preflight --diff origin/main                   # diff-scoped risk card
+vocab preflight --files src/spool.ts --task "..."   # file-scoped risk card (human)
+vocab preflight --diff origin/main                   # diff-scoped risk card (human)
 vocab verify --files src/spool.ts                    # multiple-choice verification
-vocab deserts --path .                               # source files with weak test mirrors
 vocab route --files src/spool.ts --task "..."         # decide whether/how to use vocab
-vocab stop --path . --read file1.ts --read file2.ts  # exploration entropy gauge
 ```
 
 ### CI / PR Tools
@@ -232,7 +260,6 @@ vocab genesis --path .                               # concept origin tracing (e
 ```bash
 vocab compare ../repo-a ../repo-b --contract-only    # contract-surface drift
 vocab search SpoolManager ../repo-a ../repo-b        # cross-repo phrase search
-vocab crystallography .                              # one-time repo skeleton for LLM prompts
 vocab skeleton --path .                              # prompt decompression: ~100-token skip directives
 vocab fingerprint .                                  # repo structural identity
 vocab bond --path .                                  # concept bond classification (covalent/ionic/metallic)
