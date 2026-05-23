@@ -80,6 +80,16 @@ LLM UI rule of thumb:
 - known files or diff: use `vocab preflight --format tool`
 - high-risk edit: include the `edit_sprawl_guard` and verification confidence fields
 
+Experimental deterministic contracts:
+
+```bash
+vocab contract --files src/spool.ts --task "change upload behavior"
+vocab contract --files src/spool.ts --format prompt
+vocab check-plan --contract contract.json --proposal proposal.json --format json
+```
+
+`contract` converts paths into bounded IDs: `F*` for allowed edits, `T*` for verification choices, and `B*` for boundary/context files. `check-plan` validates the LLM's returned IDs and rejects unknown IDs, raw paths, edits outside the allowed scope, and boundary edits that did not request `expand_scope`. In the first focused harness, contracts eliminated raw-path hallucination and invalid IDs, but did not beat `preflight --format tool` on sprawl; keep this path experimental for now.
+
 Use `ci-report` locally to see structural impact before review:
 
 ```bash
