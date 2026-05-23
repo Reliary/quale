@@ -819,16 +819,111 @@ def deserts(
 
 
 @cli.command()
+def entangle(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    lookback: Annotated[int, typer.Option("--lookback", "-n", help="Commits to scan")] = 200,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    target: Annotated[str | None, typer.Option("--target", help="Show only pairs involving this file")] = None,
+):
+    """Show file co-change entanglement from git history.
+
+    Entangled files share no vocabulary but are frequently committed together.
+    Bridges the structural gap where phrase-matching fails.
+    """
+    from vocab.reports import entanglement_matrix
+    data = entanglement_matrix(path=path, lookback_commits=lookback)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    pairs = data.get("pairs", [])
+    if target:
+        pairs = [p for p in pairs if target in (p["file_a"], p["file_b"])]
+    if not pairs:
+        typer.echo(f"No entangled pairs found ({data.get('note', '')})")
+        return
+    typer.echo(f"Top entangled pairs (scanned {data['total_commits_scanned']} commits):")
+    for p in pairs[:20]:
+        marker = " ⬅" if target in (p["file_a"], p["file_b"]) else ""
+        typer.echo(f"  {p['file_a']:45s} ↔ {p['file_b']:45s}  count={p['co_change_count']:3d} prob={p['co_change_probability']:.2f}{marker}")
+
+
+@cli.command()
+def cartridge(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
+    diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against working tree")] = None,
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Compressed context packet — smallest useful scope for LLM verification."""
+    from vocab.reports import cartridge_report
+    data = cartridge_report(path=path, files=files or None, diff_ref=diff, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    typer.echo(f"Mode: {data['mode']}  |  Confidence: {data['confidence']}  |  Stop-after: {data['stop_after']}")
+    if data.get("verification_candidates"):
+        typer.echo("Verify candidates:")
+        for c in data["verification_candidates"]:
+            typer.echo(f"  {c}")
+    if data.get("entangled_candidates"):
+        typer.echo("Entangled candidates:")
+        for e in data["entangled_candidates"]:
+            typer.echo(f"  {e['file']}  (prob={e['score']:.2f})  {e.get('reason', '')}")
+    if data.get("negative_scope"):
+        typer.echo("Avoid editing:")
+        for f in data["negative_scope"]:
+            typer.echo(f"  {f}")
+    if data.get("desert"):
+        typer.echo(f"Desert: {data.get('desert_note', 'no candidates')}")
+
+
+@cli.command(name="check-diff")
+def check_diff(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    diff_ref: Annotated[str, typer.Option("--diff", help="Git ref to diff against (default HEAD~1)")] = "HEAD~1",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Post-proposal defect scan: detect structural violations.
+    
+    Checks for stable anchor edits, generated file edits, mirror weakening,
+    and large change sets. Report-only — no semantic claims.
+    """
+    from vocab.reports import check_diff_report
+    data = check_diff_report(path=path, diff_ref=diff_ref)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    if not data.get("defects"):
+        typer.echo("No structural defects detected.")
+        return
+    for d in data["defects"]:
+        severity = d.get("severity", "low")
+        marker = "🔴" if severity == "high" else ("🟡" if severity == "moderate" else "⚪")
+        typer.echo(f"  {marker} [{severity}] {d['type']}: {d['file']}  — {d.get('detail', '')}")
+
+
+@cli.command()
 def route(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     task: Annotated[str | None, typer.Option("--task", "-t", help="Task description")] = None,
     files: Annotated[list[str] | None, typer.Option("--files", help="Known target files; repeat or comma-separate")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
-    """Route whether vocab should be used for this task.
+    """Route intervention tier: none / verify / contract / human.
 
-    Encodes measured policy: use preflight when files are known;
-    avoid task-only bootstrap as default strong-model guidance.
+    Routes trivial changes past the LLM, uses cartridge for standard
+    verification, escalates to contract for risky changes, and flags
+    verification deserts for human review.
     """
     from vocab.reports import route_recommendation
 
@@ -848,11 +943,12 @@ def route(
 
     c = lambda t, col: _color(t, col)
     action = data.get("action", "unknown")
-    color = "green" if action == "preflight_tool" else ("yellow" if action != "no_vocab" else "gray")
+    color = "green" if action == "verify" else ("yellow" if action == "contract" else "gray")
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c("  VOCAB ROUTE", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(f"  Action: {c(action, color)}")
+    typer.echo(f"  Tier: {c(action, color)}")
     if data.get("command"):
         typer.echo(f"  Command: {c(' '.join(data['command']), 'green')}")
     for reason in data.get("reasons", []):

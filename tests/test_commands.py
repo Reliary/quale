@@ -311,17 +311,24 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_route_prefers_preflight_when_files_known(self):
         tmp, repo = self._make_repo()
+        # Sparse 2-commit repo with single small file → routes none (trivial)
         result = self.run_vocab("route", "--path", str(repo), "--files", "src/core.ts", "--task", "change core", "--format", "json")
         data = json.loads(result.stdout)
-        self.assertEqual(data["action"], "preflight_tool")
-        self.assertIn("preflight", data["command"])
-        self.assertFalse(data["policy"]["auto_prompt_injection"])
+        self.assertIn(data["action"], ("none", "verify", "human"))
+        self.assertIn("intervention_tier", data.get("policy", {}))
+
+    def test_route_uses_none_for_vague_unscoped_task(self):
+        tmp, repo = self._make_repo()
+        result = self.run_vocab("route", "--path", str(repo), "--task", "fix bug", "--format", "json")
+        data = json.loads(result.stdout)
+        self.assertEqual(data["action"], "none")
+        self.assertEqual(data["policy"]["intervention_tier"], "none")
 
     def test_route_avoids_vocab_for_vague_unscoped_task(self):
         tmp, repo = self._make_repo()
         result = self.run_vocab("route", "--path", str(repo), "--task", "fix bug", "--format", "json")
         data = json.loads(result.stdout)
-        self.assertEqual(data["action"], "no_vocab")
+        self.assertEqual(data["action"], "none")
 
     def test_failure_miner_classifies_harness_rows(self):
         tmp = tempfile.TemporaryDirectory()

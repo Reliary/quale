@@ -361,6 +361,219 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     }
 
 
+def entanglement_matrix(path: str = ".", lookback_commits: int = 200) -> dict:
+    """Build co-change entanglement matrix from git history."""
+    from collections import Counter
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository.", "pairs": []}
+    path = os.path.abspath(path)
+    log = vgit.ref_log(path, count=lookback_commits)
+    if len(log) < 3:
+        return {"schema_version": 1, "pairs": [], "note": "not enough history"}
+    shas = [ref.sha for ref in log]
+    pair_counter: Counter[tuple[str, str]] = Counter()
+    file_counter: Counter[str] = Counter()
+    pair_last_seen: dict[tuple[str, str], str] = {}
+    import subprocess
+    for sha in shas[:lookback_commits]:
+        try:
+            out = subprocess.run(
+                ["git", "diff", "--name-only", "-z", f"{sha}^..{sha}"],
+                capture_output=True, cwd=path, timeout=10,
+            )
+            files = [f.decode("utf-8", errors="replace") for f in out.stdout.split(b"\0") if f]
+        except Exception:
+            continue
+        files = [f for f in files if f]
+        for f in files:
+            file_counter[f] += 1
+        if len(files) >= 2 and len(files) <= 50:
+            for i in range(len(files)):
+                for j in range(i + 1, len(files)):
+                    a, b = (files[i], files[j]) if files[i] < files[j] else (files[j], files[i])
+                    pair_counter[(a, b)] += 1
+                    pair_last_seen[(a, b)] = sha[:10]
+    total_pairs = sum(pair_counter.values())
+    threshold = max(2, lookback_commits // 100)
+    pairs = []
+    for (a, b), count in pair_counter.most_common(500):
+        if count < threshold:
+            continue
+        prob = round(count / max(file_counter[a], file_counter[b], 1), 2)
+        pairs.append({
+            "file_a": a, "file_b": b,
+            "co_change_count": count,
+            "co_change_probability": prob,
+            "a_appearances": file_counter[a],
+            "b_appearances": file_counter[b],
+            "last_seen": pair_last_seen.get((a, b), ""),
+        })
+    return {
+        "schema_version": 1, "path": path,
+        "total_commits_scanned": len(shas),
+        "total_pairs": len(pairs),
+        "pairs": pairs[:100],
+    }
+
+
+def _entangled_candidates_for_changed(changed: list[str], matrix: dict) -> list[dict]:
+    """Given changed files, return entangled verification candidates."""
+    candidates = []
+    changed_set = set(changed)
+    for pair in matrix.get("pairs", []):
+        a, b = pair["file_a"], pair["file_b"]
+        if a in changed_set and b not in changed_set:
+            if "/test" in b.lower() or "tests/" in b.lower() or b.endswith(("_test.go", "_test.py", ".test.ts", "_test.rs", "_test.exs")):
+                candidates.append({"file": b, "score": pair["co_change_probability"],
+                                   "count": pair["co_change_count"],
+                                   "reason": f"co-changed with {a} {pair['co_change_count']} times"})
+        elif b in changed_set and a not in changed_set:
+            if "/test" in a.lower() or "tests/" in a.lower() or a.endswith(("_test.go", "_test.py", ".test.ts", "_test.rs", "_test.exs")):
+                candidates.append({"file": a, "score": pair["co_change_probability"],
+                                   "count": pair["co_change_count"],
+                                   "reason": f"co-changed with {b} {pair['co_change_count']} times"})
+    candidates.sort(key=lambda x: -x["score"])
+    return candidates[:5]
+
+
+def cartridge_report(path: str = ".", files: list[str] | None = None,
+                     diff_ref: str | None = None, task: str | None = None) -> dict:
+    """Compressed context packet — smallest useful scope for LLM verification."""
+    from vocab.scanner import scan_codebase, _mirror_signals
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if files:
+        changed = list(dict.fromkeys(files))
+    elif diff_ref:
+        try:
+            changed = vgit.diff_worktree(path, diff_ref)
+        except Exception as e:
+            return {"error": str(e)}
+    else:
+        return {"error": "provide --files or --diff"}
+    changed = list(dict.fromkeys(changed))
+    if not changed:
+        return {"error": "no changed files"}
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    bootstrap = None
+    if task:
+        try:
+            from vocab.bootstrap import bootstrap_repo
+            bootstrap = bootstrap_repo(path, task=task)
+        except Exception:
+            pass
+    verify_with = _preflight_verify_files(changed, bootstrap, analysis.file_vocabs)
+    matrix = entanglement_matrix(path)
+    entangled = _entangled_candidates_for_changed(changed, matrix)
+    all_candidates = list(dict.fromkeys(verify_with + [e["file"] for e in entangled]))
+    avoid = []
+    if bootstrap:
+        for item in bootstrap.get("avoid_touching_without_context", []):
+            f = item.get("file", "")
+            if f and f not in changed:
+                avoid.append(f)
+    mirror = _mirror_signals(changed, analysis.file_vocabs)
+    des = "no verification candidates" if not all_candidates else ""
+    if mirror and mirror.get("mirror_ratio", 1.0) < 0.3:
+        des += " thin source/test mirror"
+    return {
+        "schema_version": 1, "mode": "verify",
+        "changed_files": changed,
+        "verification_candidates": all_candidates[:5],
+        "entangled_candidates": entangled[:3] if entangled else [],
+        "negative_scope": avoid[:5],
+        "desert": bool(des), "desert_note": des.strip() or None,
+        "confidence": "high" if len(all_candidates) >= 1 else "low",
+        "mirror_ratio": round(mirror.get("mirror_ratio", 0.0), 2) if mirror else 0.0,
+        "stop_after": "choose_one_of" if all_candidates else "report_desert",
+    }
+
+
+def check_diff_report(path: str = ".", diff_ref: str = "HEAD~1") -> dict:
+    """Post-proposal defect scan: detect edits that break repo structure."""
+    from vocab.scanner import scan_codebase, _mirror_signals, _is_generated
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        changed = vgit.diff_worktree(path, diff_ref)
+    except Exception as e:
+        return {"error": str(e)}
+    changed = list(dict.fromkeys(changed))
+    if not changed:
+        return {"schema_version": 1, "defects": [], "diff": diff_ref, "note": "no changed files"}
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    mirror = _mirror_signals(changed, analysis.file_vocabs)
+    defects = []
+    try:
+        stability_data = compute_stability(path, weeks=12)
+    except Exception:
+        stability_data = []
+    stable_by_file = {item["file"]: item for item in stability_data}
+    for f in changed:
+        s = stable_by_file.get(f)
+        if s and s.get("persistence", 0) >= 0.8:
+            defects.append({"type": "stable_anchor_touched", "file": f,
+                            "detail": f"stable anchor (persistence {s['persistence']:.1%})", "severity": "moderate"})
+    for f in changed:
+        if _is_generated(f):
+            defects.append({"type": "generated_file_edited", "file": f,
+                            "detail": "editing generated file directly", "severity": "low"})
+    if mirror:
+        unmirrored = mirror.get("unmirrored_source_concepts", [])
+        if len(unmirrored) > 5:
+            defects.append({"type": "mirror_weakened", "file": ", ".join(changed[:3]),
+                            "detail": f"{len(unmirrored)} source concepts have no test mirror", "severity": "moderate"})
+    if len(changed) > 20:
+        defects.append({"type": "large_change_set", "file": f"{len(changed)} files",
+                        "detail": "change set exceeds 20 files", "severity": "high"})
+    return {
+        "schema_version": 1, "diff": diff_ref,
+        "changed_files": changed, "defects": defects,
+        "defect_count": len(defects),
+        "max_severity": max((d.get("severity", "low") for d in defects), default="none") if defects else "none",
+    }
+
+
+def _route_path(path: str, changed: list[str], analysis, task: str | None = None) -> str:
+    """Determine the correct intervention tier for a given change set."""
+    from vocab.scanner import _is_generated
+    decl_exts = {".yml", ".yaml", ".json", ".proto", ".sql", ".env", ".cfg", ".toml", ".ini", ".md", ".txt"}
+    if all(any(f.endswith(e) for e in decl_exts) for f in changed):
+        return "none"
+    if len(changed) == 1 and _is_generated(changed[0]):
+        return "none"
+    if len(changed) == 1:
+        for fv in analysis.file_vocabs if analysis else []:
+            if fv.path == changed[0] and fv.total_phrases <= 2:
+                return "none"
+    verify_with = _preflight_verify_files(changed, None, analysis.file_vocabs if analysis else [])
+    if not verify_with:
+        try:
+            matrix = entanglement_matrix(path, lookback_commits=50)
+            entangled = _entangled_candidates_for_changed(changed, matrix)
+            if not entangled:
+                return "human"
+        except Exception:
+            return "human"
+    try:
+        stability_data = compute_stability(path, weeks=12)
+        stable_by_file = {item["file"]: item for item in stability_data}
+        for f in changed:
+            if f in stable_by_file and stable_by_file[f].get("persistence", 0) >= 0.8:
+                return "contract"
+    except Exception:
+        pass
+    return "verify"
+
+
 def reverse_verify_report(path: str = ".", files: list[str] | None = None,
                            diff_ref: str | None = None) -> dict:
     """Given changed test files, find source files that likely need verification."""
@@ -1203,47 +1416,61 @@ def _verification_desert_reason(score: float, candidates: list[str], test_dirs: 
 # ── Vocab routing policy ─────────────────────────────────────────
 
 def route_recommendation(path: str, task: str | None = None, files: list[str] | None = None) -> dict:
-    """Decide whether vocab should be used for this interaction.
+    """Decide intervention tier: none / verify / contract / human.
 
-    The measured data says task-only bootstrap can hurt strong models, while
-    file-scoped preflight can reduce edit sprawl and improve verification.
-    This router encodes that policy explicitly.
+    Routes trivial changes past the LLM, uses cartridge for standard
+    verification, escalates to contract for risky changes, and flags
+    verification deserts for human review.
     """
+    from vocab.scanner import scan_codebase
     if not vgit.is_repo(path):
         return {"error": "Not a git repository.", "schema_version": 1}
-
-    normalized_files = _normalize_preflight_files(os.path.abspath(path), files or []) if files else []
-    reasons: list[str] = []
-    warnings: list[str] = []
+    path = os.path.abspath(path)
+    normalized_files = _normalize_preflight_files(path, files or []) if files else []
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception:
+        analysis = None
 
     if normalized_files:
-        action = "preflight_tool"
-        command = ["vocab", "preflight", "--path", path]
-        for file in normalized_files[:10]:
-            command.extend(["--files", file])
+        action = _route_path(path, normalized_files, analysis, task)
+    elif task and _task_is_vague(task):
+        action = "none"
+    elif task:
+        action = "verify"
+    else:
+        action = "human"
+
+    reasons: list[str] = []
+    warnings: list[str] = []
+    command: list[str] = []
+
+    if action == "none":
+        command = []
+        reasons.append("change is structurally trivial; no LLM verification needed")
+    elif action == "verify":
+        command = ["vocab", "cartridge", "--path", path]
+        for f in normalized_files[:10]:
+            command.extend(["--files", f])
         if task:
             command.extend(["--task", task])
-        command.extend(["--format", "tool"])
-        reasons.append("file-scoped context is available; measured preflight reduces edit sprawl")
-    elif task and _task_is_vague(task):
-        action = "no_vocab"
-        command = []
-        reasons.append("task is vague and file scope is unknown; bootstrap has measured discovery harm on strong models")
-        warnings.append("ask for target files or run normal search/grep first")
-    elif task:
-        action = "crystallography_only"
-        command = ["vocab", "skeleton", "--path", path]
-        reasons.append("task has no file scope; use only a tiny repo skeleton, not bootstrap guidance")
-    else:
-        action = "inspect_human"
+        reasons.append("file-scoped verification cartridge available")
+    elif action == "contract":
+        command = ["vocab", "contract", "--path", path, "--format", "tool"]
+        for f in normalized_files[:10]:
+            command.extend(["--files", f])
+        if task:
+            command.extend(["--task", task])
+        reasons.append("risky change set; use ID-coded contract")
+    elif action == "human":
         command = ["vocab", "inspect", path]
-        reasons.append("no task/files provided; use human-oriented orientation")
+        reasons.append("verification desert or no file scope; human review recommended")
 
     deserts = verification_deserts(path, max_results=5)
     if not deserts.get("error"):
         mirror_ratio = deserts.get("mirror_ratio", 0.0)
         if mirror_ratio < 0.25 and _is_weird_language(path):
-            warnings.append("verification topology is sparse; treat test suggestions as low confidence")
+            warnings.append("verification topology is sparse; treat suggestions as low confidence")
 
     return {
         "schema_version": 1,
@@ -1252,9 +1479,11 @@ def route_recommendation(path: str, task: str | None = None, files: list[str] | 
         "reasons": reasons,
         "warnings": warnings,
         "policy": {
-            "bootstrap_default": "avoid_for_strong_models",
-            "preflight_default": "use_when_files_known",
-            "auto_prompt_injection": False,
+            "intervention_tier": action,
+            "null_route_threshold": "trivial_declarative_generated_changes_get_no_llm",
+            "verify_threshold": "default_file_scoped_guidance",
+            "contract_threshold": "stable_anchor_or_broad_mirror_gap",
+            "human_threshold": "verification_desert_or_no_file_scope",
         },
         "confidence": "high" if normalized_files else "mixed",
     }
