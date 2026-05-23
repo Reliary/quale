@@ -1813,16 +1813,55 @@ def modules(
 def help_agent(task: Annotated[str, typer.Argument(help="Engineering task description")]):
     """Recommend useful vocab commands for an agent task."""
     task_lower = task.lower()
-    commands = [
-        ("vocab agent-bootstrap . --task \"<task>\" --format json", "Start with task-aware orientation.", True),
-        ("vocab inspect . --format json", "Read repo structure and stable anchors.", False),
-    ]
-    if any(word in task_lower for word in ("pr", "review", "change", "refactor", "edit")):
-        commands.append(("vocab ci-report origin/main HEAD --format json", "Check structural impact before PR.", False))
-    if any(word in task_lower for word in ("api", "client", "server", "contract", "integration")):
-        commands.append(("vocab compare ../repo-a ../repo-b --format json", "Compare paired repo vocabulary.", True))
-    if any(word in task_lower for word in ("history", "why", "when", "provenance")):
-        commands.append(("vocab provenance <phrase> --format json", "Trace when a concept appeared or disappeared.", True))
+    commands: list[tuple[str, str, bool]] = []
+
+    # Primary agent surface — proven by harness
+    commands.append(("vocab preflight --path . --files <file> --task \"<task>\" --format tool",
+                     "Verify candidates and stay in scope for a candidate edit file.", True))
+    commands.append(("vocab contract --path . --files <file> --task \"<task>\" --format tool",
+                     "Bounded ID-coded scope contract (experimental).", True))
+    commands.append(("vocab check-plan --contract <contract.json> --proposal <proposal.json>",
+                     "Validate LLM proposal against contract (experimental).", True))
+
+    # Task-specific secondary
+    if any(word in task_lower for word in ("pr", "review", "change", "refactor", "edit", "feature", "fix")):
+        commands.append(("vocab preflight --path . --diff HEAD~1 --task \"<task>\" --format tool",
+                         "Diff-scoped preflight for PR review (100% verify in testing).", True))
+        commands.append(("vocab ci-report origin/main HEAD --format json",
+                         "Check structural impact before PR (human/CI tool).", False))
+
+    # Orientation
+    commands.append(("vocab crystallography --path . --format json",
+                     "Compact repo skeleton for initial orientation (not per-task).", False))
+    commands.append(("vocab agent-bootstrap . --task \"<task>\" --format checklist",
+                     "Weak-model orientation: step-by-step protocol (not for strong models).", True))
+
+    # Deep investigations
+    if any(word in task_lower for word in ("history", "why", "when", "provenance", "timeline")):
+        commands.append(("vocab provenance <phrase> --format json",
+                         "Trace when a concept appeared or disappeared.", True))
+        commands.append(("vocab stable . --format json",
+                         "Surface files and phrases that persist across git history.", False))
+    if any(word in task_lower for word in ("contract", "integration", "cross", "drift", "compare")):
+        commands.append(("vocab compare <repo-a> <repo-b> --format json",
+                         "Cross-repo vocabulary alignment and drift asymmetry.", True))
+
+    # Unmeasured agent commands — harness-validated behavior unknown
+    if any(word in task_lower for word in ("negotiate", "scope")):
+        commands.append(("vocab negotiate --path . --files <file> --task \"<task>\" --format json",
+                         "[UNMEASURED] Multi-turn scope containment protocol.", True))
+    if any(word in task_lower for word in ("verify", "test", "check")):
+        commands.append(("vocab verify --path . --files <file> --task \"<task>\"",
+                         "[UNMEASURED] Multiple-choice verification candidates.", True))
+    if any(word in task_lower for word in ("route", "decide", "whether")):
+        commands.append(("vocab route --path . --task \"<task>\" --format json",
+                         "[UNMEASURED] Routing logic that decides when to use vocab.", True))
+
+    # Discoverability
+    commands.append(("vocab explore . --format json --quick",
+                     "Quick onboarding: most distinctive source files.", False))
+    commands.append(("vocab help-agent \"<task>\"",
+                     "This command — show recommended commands for any task.", True))
 
     typer.echo(json.dumps({
         "schema_version": 1,

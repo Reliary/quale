@@ -757,18 +757,35 @@ def _checkpoint_path(output_path: Path) -> Path:
 
 
 def _load_completed(output_path: Path) -> set[tuple[str, str, str, str, int]]:
-    """Build (suite, bucket, repo, condition, trial) set from existing output."""
-    if not output_path.exists():
-        return set()
-    try:
-        data = json.loads(output_path.read_text(encoding="utf-8"))
-        results = data.get("results", [])
-        return {
-            (r["suite"], r["bucket"], r["repo"], r["condition"], r["trial"])
-            for r in results if "error" not in r and "_parse_error" not in r
-        }
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return set()
+    """Build (suite, bucket, repo, condition, trial) set from existing output AND checkpoint."""
+    completed: set[tuple[str, str, str, str, int]] = set()
+
+    # Load from final output file if it exists
+    if output_path.exists():
+        try:
+            data = json.loads(output_path.read_text(encoding="utf-8"))
+            results = data.get("results", [])
+            for r in results:
+                if "error" not in r and "_parse_error" not in r:
+                    completed.add((r["suite"], r["bucket"], r["repo"], r["condition"], r["trial"]))
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+
+    # Also load from checkpoint JSONL — captures rows from interrupted runs
+    cp = _checkpoint_path(output_path)
+    if cp.exists():
+        for line in cp.read_text(encoding="utf-8").strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+                if "error" not in r and "_parse_error" not in r:
+                    completed.add((r["suite"], r["bucket"], r["repo"], r["condition"], r["trial"]))
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+
+    return completed
 
 
 def _append_checkpoint(output_path: Path, row: dict) -> None:
