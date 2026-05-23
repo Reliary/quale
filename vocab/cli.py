@@ -320,7 +320,7 @@ def preflight(
     files: Annotated[list[str] | None, typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
     diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against the working tree")] = None,
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
-    format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), json, checklist, compact")] = "tool",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), json, checklist, compact, llm")] = "tool",
 ):
     """File-scoped pre-edit/review risk card.
 
@@ -345,6 +345,10 @@ def preflight(
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
+    if format == "llm":
+        from vocab.formats.llm import format_preflight_llm
+        typer.echo(format_preflight_llm(data))
+        return
     if format == "tool":
         # LLM-tool-accessible format: compact JSON + explicit verification MC
         verify_candidates = data.get("verification_candidates", data.get("verify_with", []))
@@ -357,13 +361,24 @@ def preflight(
             if qs else
             "Do not propose extra_edits unless the task explicitly requires them."
         )
+        peer = data.get("peer_relative_risk", {})
+        envelope = data.get("safety_envelope", {})
+        snr = data.get("snr_annotations", {})
+        capability = data.get("capability_boundary", "")
         tool_data = {
             "schema_version": 1,
             "risk": data.get("risk", "unknown"),
-            "reason": "; ".join(data.get("reasons", [])),
             "confidence": data.get("confidence", "unknown"),
+            "temperature": data.get("temperature", "WARM"),
+            "peer_relative": peer.get("peer_text", ""),
+            "reason": "; ".join(data.get("reasons", [])),
             "changed_files": data.get("changed_files", []),
             "read_first": data.get("read_first", []),
+            "safety_envelope": {
+                "inside": envelope.get("inside", []),
+                "at_boundary": envelope.get("at_boundary", []),
+                "boundary_count": envelope.get("boundary_count", 0),
+            },
             "verification_mc": {
                 "question": "Which file would verify this change?",
                 "candidates": verify_candidates[:3] if verify_candidates else [],
@@ -373,6 +388,8 @@ def preflight(
             "expansion_risk": data.get("expansion_risk", data.get("avoid_expanding_into", [])),
             "edit_sprawl_guard": {**sprawl, "instruction": sprawl_instruction},
             "desert_warning": _desert_text(ver_confidence, data.get("changed_files", [])),
+            "snr_annotations": snr,
+            "capability_boundary": capability,
             "guardrails": data.get("guardrails", {}),
         }
         typer.echo(json.dumps(tool_data, indent=2))
@@ -954,24 +971,56 @@ def _print_agent_checklist(data: dict, task: str | None):
 def _print_preflight(data: dict) -> None:
     c = lambda t, col: _color(t, col)
     risk_color = {"low": "green", "moderate": "yellow", "high": "red", "unknown": "gray"}.get(data.get("risk"), "gray")
+    temp = data.get("temperature", "WARM")
+    temp_color = {"HOT": "red", "WARM": "yellow", "COLD": "cyan"}.get(temp, "gray")
+    peer = data.get("peer_relative_risk", {})
+    peer_text = peer.get("peer_text", "")
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c("  VOCAB PREFLIGHT", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(f"  Risk: {c(data.get('risk', 'unknown'), risk_color)}")
-    typer.echo(f"  Confidence: {c(data.get('confidence', 'unknown'), 'cyan')}")
+    typer.echo(f"  Risk: {c(data.get('risk', 'unknown'), risk_color)}  "
+               f"Temp: {c(temp, temp_color)}  "
+               f"Conf: {c(data.get('confidence', 'unknown'), 'cyan')}")
+    if peer_text:
+        typer.echo(f"  Scope: {c(peer_text, 'gray')}")
     typer.echo(f"  Why: {c('; '.join(data.get('reasons', [])), 'gray')}")
     caveat = data.get("guardrails", {}).get("caveat", "May be wrong; inspect before acting.")
     typer.echo(c(f"  Caveat: {caveat}", "yellow"))
     typer.echo("")
+
+    # Constraint-first: scope boundary BEFORE suggestions
+    envelope = data.get("safety_envelope", {})
+    inside = envelope.get("inside", [])
+    boundary = envelope.get("at_boundary", [])
+    if inside:
+        typer.echo(c("  INSIDE ENVELOPE (safe to edit):", "subheader"))
+        for file in inside[:5]:
+            typer.echo(f"    {c('✓', 'green')} {file}")
+        typer.echo("")
+    if boundary:
+        typer.echo(c("  AT BOUNDARY (verify before touching):", "yellow"))
+        for file in boundary[:5]:
+            typer.echo(f"    {c('→', 'yellow')} {file}")
+        typer.echo("")
+
+    do_not_touch = data.get("expansion_risk", data.get("avoid_expanding_into", []))
+    if do_not_touch:
+        typer.echo(c("  DO NOT TOUCH WITHOUT CONTEXT:", "red"))
+        for item in do_not_touch[:5]:
+            typer.echo(f"    {c('✗', 'red')} {item}")
+        typer.echo("")
+
+    # Followed by actual suggestions
     typer.echo(c("  Changed files:", "subheader"))
     for file in data.get("changed_files", [])[:8]:
-        typer.echo(f"    {c('+', 'green')} {file}")
+        ft = data.get("file_temperatures", {}).get(file, "")
+        ft_tag = f" {c(f'[{ft}]', temp_color)}" if ft else ""
+        typer.echo(f"    {c('+', 'green')} {file}{ft_tag}")
     typer.echo("")
 
     sections = [
         ("READ FIRST", data.get("read_first", []), "green"),
         ("VERIFY CANDIDATES", data.get("verification_candidates", data.get("verify_with", [])), "cyan"),
-        ("EXPANSION RISK", data.get("expansion_risk", data.get("avoid_expanding_into", [])), "yellow"),
     ]
     for label, items, color in sections:
         if not items:
@@ -983,7 +1032,7 @@ def _print_preflight(data: dict) -> None:
 
     blast = data.get("reverse_blast", [])
     if blast:
-        typer.echo(c("  REVERSE BLAST:", "subheader"))
+        typer.echo(c("  BLAST RADIUS:", "subheader"))
         for item in blast[:5]:
             concepts = ", ".join(item.get("concepts", [])[:3])
             typer.echo(f"    {c(str(item.get('shared_concepts', 0)), 'yellow')} shared  {item.get('file')}  {c(concepts, 'gray')}")
@@ -997,8 +1046,21 @@ def _print_preflight(data: dict) -> None:
             typer.echo(f"    {c(item.get('file', ''), 'red')}  {c(f'{persistence:.0%}', 'gray')}")
         typer.echo("")
 
+    # SNR annotations
+    snr = data.get("snr_annotations", {})
+    if snr:
+        typer.echo(c("  SIGNAL ANALYSIS:", "subheader"))
+        for key, val in snr.items():
+            t = val.get("type", "?")
+            tc = "green" if t == "signal" else "gray"
+            typer.echo(f"    {c(f'{key}:{t}', tc)}  {c(val.get('detail', ''), 'gray')}")
+        typer.echo("")
+
     receipt = data.get("privacy_receipt", {})
     typer.echo(c(f"  Privacy: local only={receipt.get('local_only', True)}, uploaded={receipt.get('uploaded', False)}, network={receipt.get('network', False)}", "gray"))
+    cap = data.get("capability_boundary", "")
+    if cap:
+        typer.echo(c(f"  {cap}", "gray"))
     typer.echo(c("  Mode: report-only; do not treat as semantic truth or coverage proof.", "gray"))
 
 
@@ -1033,7 +1095,7 @@ def agent_bootstrap(
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description to find related files")] = None,
     verify_relevance: Annotated[bool, typer.Option("--verify-relevance", help="Verify surfaced files contain task keywords")] = False,
     summary: Annotated[bool, typer.Option("--summary", help="Only show the decision-oriented startup summary")] = False,
-    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json, checklist")] = "compact",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json, checklist, llm")] = "compact",
 ):
     """One-shot agent bootstrap: explore + modules + stability + related files.
 
@@ -1054,6 +1116,11 @@ def agent_bootstrap(
 
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
+        return
+
+    if format == "llm":
+        from vocab.formats.llm import format_bootstrap_llm
+        typer.echo(format_bootstrap_llm(data))
         return
 
     if format == "checklist":
@@ -2171,6 +2238,209 @@ def bond(
             samples = ", ".join(m["sample_files"][:2])
             typer.echo(f"    {c(m['concept'], 'yellow'):<30} {m['file_count']} files  ({samples})")
         typer.echo("")
+
+
+@cli.command(name="diff-structural")
+def diff_structural(
+    path: Annotated[str, typer.Argument(help="Repository path")] = ".",
+    ref_a: Annotated[str | None, typer.Option("--before", help="Base ref (default: HEAD~1)")] = None,
+    ref_b: Annotated[str | None, typer.Option("--after", help="Head ref (default: HEAD)")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Structural fingerprint diff between two git refs.
+
+    Compares repo fingerprints, detects lattice defects,
+    measures entropy acceleration, and lists changed files.
+    All from grammar-free structural signals.
+    """
+    from vocab.reports import structural_diff
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    data = structural_diff(path, ref_a=ref_a, ref_b=ref_b)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  STRUCTURAL DIFF", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Fingerprint changed: {c(str(data.get('fingerprint_changed', '?')), 'yellow')}")
+    typer.echo(f"  Changed files: {c(str(data.get('changed_file_count', 0)), 'cyan')}")
+    if data.get("entropy_acceleration") is not None:
+        trend = data.get("entropy_trend", "stable")
+        tc = "red" if trend == "accelerating" else "green"
+        typer.echo(f"  Entropy: {c(trend, tc)} ({data['entropy_acceleration']})")
+    defects = data.get("defects", {})
+    if defects:
+        total = sum(len(v) for v in defects.values())
+        typer.echo(f"  Lattice defects: {c(str(total), 'yellow')}")
+    changed = data.get("changed_files", [])
+    if changed:
+        typer.echo("")
+        typer.echo(c("  Changed files:", "subheader"))
+        for f in changed[:10]:
+            typer.echo(f"    {c('~', 'yellow')} {f}")
+        if len(changed) > 10:
+            typer.echo(f"    ... and {len(changed)-10} more")
+    typer.echo("")
+
+
+@cli.command()
+def ask(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    question: Annotated[str, typer.Argument(help="Question about the repo")] = "",
+    files: Annotated[list[str] | None, typer.Option("--files", help="Scoped file(s); repeat or comma-separate")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Answer natural-language questions about a repo using existing structural data.
+
+    Examples:
+      vocab ask "Is src/spool.ts safe to edit?"
+      vocab ask "What verifies changes to cli.py?"
+      vocab ask "What files share concepts with ingest.go?"
+      vocab ask "Is this repo healthy?"
+      vocab ask "Does this repo have tests?"
+    """
+    from vocab.reports import answer_question
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    if not question:
+        typer.echo("Provide a question, e.g.: 'Is src/spool.ts safe to edit?'", err=True)
+        raise typer.Exit(1)
+
+    data = answer_question(path, question, files=files)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    ans = data.get("answer", {})
+    if isinstance(ans, dict):
+        typer.echo(c(f"{'━' * 60}", "cyan"))
+        typer.echo(c("  VOCAB ASK", "header"))
+        typer.echo(c(f"{'━' * 60}", "cyan"))
+        for key, val in ans.items():
+            if isinstance(val, list):
+                typer.echo(f"  {c(key.replace('_', ' ').title(), 'subheader')}:")
+                for item in val[:5]:
+                    if isinstance(item, dict):
+                        typer.echo(f"    {'  '.join(f'{k}:{v}' for k, v in item.items()[:3])}")
+                    else:
+                        typer.echo(f"    {item}")
+            elif isinstance(val, str):
+                typer.echo(f"  {c(key.replace('_', ' ').title(), 'subheader')}: {val}")
+            elif val is not None:
+                typer.echo(f"  {c(key.replace('_', ' ').title(), 'subheader')}: {val}")
+        typer.echo("")
+    sources = data.get("sources", [])
+    if sources:
+        typer.echo(c(f"  Sources: {', '.join(sources)}", "gray"))
+    cap = "Vocab sees structure, not semantics. Answers are structural hints only."
+    typer.echo(c(f"  {cap}", "gray"))
+
+
+@cli.command(name="verify-scope")
+def verify_scope(
+    path: Annotated[str, typer.Argument(help="Repository path")] = ".",
+    files: Annotated[list[str] | None, typer.Option("--files", help="Expected/contract files; repeat or comma-separate")] = None,
+    diff: Annotated[str, typer.Option("--diff", help="Git ref to diff against")] = "HEAD",
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Post-edit scope verification: compare actual diff against expected contract.
+
+    Run after editing to verify scope matched the preflight commitment.
+    Reports scope violations, unexpected stable anchor touches, and
+    produces a structural receipt.
+    """
+    from vocab.reports import verify_scope as _verify_scope
+
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    if files:
+        norm = []
+        for item in files:
+            for raw in item.split(","):
+                raw = raw.strip()
+                if raw:
+                    norm.append(raw)
+        contract_files = norm
+    else:
+        contract_files = None
+
+    data = _verify_scope(path, contract_files=contract_files, diff_ref=diff, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    c = lambda t, col: _color(t, col)
+    receipt = data.get("receipt", {})
+    scope_kept = receipt.get("scope_kept", False)
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(c("  SCOPE VERIFICATION", "header"))
+    typer.echo(c(f"{'━' * 60}", "cyan"))
+    typer.echo(f"  Scope matched: {c('YES' if scope_kept else 'NO', 'green' if scope_kept else 'red')}")
+    typer.echo(f"  Expected files: {c(str(data.get('expected_count', 0)), 'cyan')}")
+    typer.echo(f"  Actual files: {c(str(data.get('actual_count', 0)), 'cyan')}")
+
+    violations = data.get("scope_violations", [])
+    if violations:
+        typer.echo("")
+        typer.echo(c("  SCOPE VIOLATIONS:", "red"))
+        for v in violations[:5]:
+            typer.echo(f"    {c('✗', 'red')} {v}")
+        typer.echo("")
+
+    stable_warnings = data.get("unexpected_stable_anchors", [])
+    if stable_warnings:
+        typer.echo(c("  UNEXPECTED STABLE TOUCHES:", "red"))
+        for s in stable_warnings[:3]:
+            typer.echo(f"    {c('!', 'red')} {s.get('file', '')}")
+
+    risk = data.get("post_edit_risk", "unknown")
+    risk_c = {"low": "green", "moderate": "yellow", "high": "red", "unknown": "gray"}.get(risk, "gray")
+    typer.echo(f"  Post-edit risk: {c(risk, risk_c)}  "
+               f"Temp: {c(data.get('post_edit_temperature', 'WARM'), 'cyan')}")
+
+    actual = data.get("actual_changed_files", [])
+    if actual:
+        typer.echo("")
+        typer.echo(c("  Files changed:", "subheader"))
+        for f in actual[:8]:
+            status = "✓" if f in (contract_files or []) else "?"
+            typer.echo(f"    {c(status, 'green' if status == '✓' else 'yellow')} {f}")
+        if len(actual) > 8:
+            typer.echo(f"    ... and {len(actual)-8} more")
+    typer.echo("")
+
+    checksum = data.get("repo_checksum", "")
+    if checksum and format != "json":
+        typer.echo(c(f"  Receipt checksum: {checksum[:16]}...", "gray"))
+    typer.echo(c("  Mode: report-only receipt; identifies scope changes, not correctness.", "gray"))
 
 
 def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
