@@ -745,6 +745,17 @@ def agent_bootstrap(
             typer.echo(f"           {c(bc[1]['concept'], 'yellow')} ({bc[1]['file_count']} files){c(f' — {bc[1]["files"][0]}', 'gray')}")
     typer.echo("")
 
+    # Anti-guidance: files to NOT touch
+    avoid = data.get("avoid_touching_without_context", [])
+    if avoid:
+        bad_anchor = [a for a in avoid[:3] if a.get("persistence", 0) >= 0.9]
+        if bad_anchor:
+            typer.echo(c("  DO NOT EDIT:", "subheader"))
+            for a in bad_anchor[:3]:
+                pct_str = f'{a["persistence"]:.0%}'
+                typer.echo(f"    {c('✗', 'red')} {c(a['file'], 'yellow')}  (stable {pct_str} — {c(a.get('reason', 'architectural foundation'), 'gray')})")
+            typer.echo("")
+
     if summary:
         return
 
@@ -1052,6 +1063,14 @@ def inspect(
             typer.echo(c(f"    … +{module_count - 5} more modules", "gray"))
         typer.echo("")
 
+    debt = data.get("debt_candidates", [])
+    if debt:
+        typer.echo(c("  DEBT CANDIDATES (low uniqueness + churn potential):", "subheader"))
+        for d in debt[:8]:
+            bar = _bar(d["debt"] * 100, 10)
+            typer.echo(f"    {bar} {c(f'{d['debt']:.2f}', 'red')}  {c(d['language'], 'gray'):<8} {d['file']}")
+        typer.echo("")
+
     typer.echo(c(f"{'━' * 60}", "cyan"))
 
 
@@ -1098,6 +1117,8 @@ def compare(
     repo_a: Annotated[str, typer.Argument(help="First repo path")],
     repo_b: Annotated[str, typer.Argument(help="Second repo path")],
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
+    contract_only: Annotated[bool, typer.Option("--contract-only", help="Only compare contract surface paths (api/, client/, types)")] = False,
+    fail_on_drift: Annotated[float | None, typer.Option("--fail-on-drift", help="Exit with code 1 if drift score exceeds this threshold (0-1)")] = None,
 ):
     """Cross-repo vocabulary alignment and drift asymmetry."""
     repo_a = os.path.abspath(repo_a)
@@ -1106,20 +1127,36 @@ def compare(
         typer.echo("Both paths must be git repositories.", err=True)
         raise typer.Exit(1)
 
-    result = compare_repos(repo_a, repo_b)
+    result = compare_repos(repo_a, repo_b, contract_only=contract_only)
     if format == "json":
         typer.echo(json.dumps(result, indent=2))
+        if fail_on_drift is not None:
+            drift = result.get("drift_score", 1.0)
+            if drift >= fail_on_drift:
+                typer.echo(f"  (drift {drift:.2f} >= threshold {fail_on_drift}) FAIL")
+                raise typer.Exit(1)
         return
 
     c = lambda t, color: _color(t, color)
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(f"  {c('VOCABULARY ALIGNMENT', 'header')}: {result['repo_a']} <-> {result['repo_b']}")
+    if result.get("contract_only"):
+        typer.echo(c(f"  (contract surface only — api/, client/, types)", "gray"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(f"  {result['repo_a']}: {result['a_total_phrases']} concepts")
     typer.echo(f"  {result['repo_b']}: {result['b_total_phrases']} concepts")
     typer.echo(f"  Shared: {result['shared_phrases']} ({result['alignment']:.0%} aligned)")
+    drift = result.get("drift_score", 0.0)
+    drift_color = "green" if drift < 0.10 else ("yellow" if drift < 0.25 else "red")
+    typer.echo(f"  Drift: {c(f'{drift:.0%}', drift_color)}")
     for phrase in result.get("drift_candidates", [])[:15]:
         typer.echo(f"  - {phrase}")
+    if fail_on_drift is not None:
+        if drift >= fail_on_drift:
+            typer.echo(c(f"  DRIFT FAIL: {drift:.2f} >= {fail_on_drift}", "red"))
+            raise typer.Exit(1)
+        else:
+            typer.echo(c(f"  drift {drift:.2f} < {fail_on_drift} PASS", "green"))
 
 
 @cli.command()

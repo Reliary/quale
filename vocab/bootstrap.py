@@ -533,7 +533,7 @@ def _rank_related_files(path: str, keywords: list[str], analysis: CodebaseAnalys
             continue
         role = _task_file_role(fv.path)
         if role == "test":
-            score += 1
+            score -= 2
         elif role == "script":
             score -= 1
         elif role == "example":
@@ -551,6 +551,39 @@ def _rank_related_files(path: str, keywords: list[str], analysis: CodebaseAnalys
     ranked = sorted(scores.values(), key=lambda x: (_task_role_rank(x["role"]), -x["matches"], x["file"]))
     source_matches = [item for item in ranked if item["role"] != "test"][:10]
     test_matches = [item for item in ranked if item["role"] == "test"][:5]
+
+    # Second pass: identifier-sharing boost
+    # Files matching no keywords may still be structurally relevant (e.g. pattern files).
+    # If they share distinctive identifiers with the top-ranked keyword match, pull them in.
+    if analysis and source_matches:
+        top_keyword_file = source_matches[0]["file"]
+        top_keyword_ids = set()
+        for fv in _code_file_vocabs(analysis):
+            if fv.path == top_keyword_file:
+                top_keyword_ids = set(fv.vocabulary.keys())
+                break
+        scored_paths = set(scores.keys())
+        extra: list[dict] = []
+        for fv in _code_file_vocabs(analysis):
+            if fv.path in scored_paths:
+                continue
+            role = _task_file_role(fv.path)
+            if role in ("test", "script", "example", "minified"):
+                continue
+            if _is_generated(fv.path):
+                continue
+            fv_ids = set(fv.vocabulary.keys())
+            shared = len(top_keyword_ids & fv_ids)
+            if shared >= 6:
+                extra.append({
+                    "file": fv.path,
+                    "phrase": "structural-match",
+                    "matches": shared,
+                    "role": role,
+                })
+        extra.sort(key=lambda x: -x["matches"])
+        source_matches = (source_matches + extra)[:10]
+
     return source_matches + test_matches
 
 

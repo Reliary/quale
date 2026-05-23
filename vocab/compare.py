@@ -12,28 +12,74 @@ if TYPE_CHECKING:
     from vocab.scanner import CodebaseAnalysis, FileVocab
 
 
+# ── Contract surface helpers ──────────────────────────────────────
+
+_CONTRACT_PREFIXES = ("api/", "client/", "shared/", "types/", "internal/handlers/",
+                       "internal/models/", "packages/", "internal/types/", "internal/api/")
+_CONTRACT_SUFFIXES = (".types.ts", ".types.go", ".d.ts", "_types.go", "_api.go",
+                       "_client.go", "_handler.go", ".proto", "types.ts", "types.go",
+                       "contract.ts", "contract.go")
+
+
+def _is_contract_surface(filepath: str) -> bool:
+    """True if filepath looks like it defines API/client contract surface."""
+    norm = filepath.replace("\\", "/")
+    base = norm.rsplit("/", 1)[-1] if "/" in norm else norm
+    for prefix in _CONTRACT_PREFIXES:
+        if norm.startswith(prefix):
+            return True
+    for suffix in _CONTRACT_SUFFIXES:
+        if norm.endswith(suffix):
+            return True
+    # Directory-path matches
+    for segment in norm.split("/"):
+        if segment in ("types", "api", "client", "contract", "handlers", "models", "routes"):
+            return True
+    # Monorepo package source: packages/X/src/ contains interface/export files
+    if norm.count("/") >= 2 and ("/src/" in norm or "/core/" in norm or "/agent/" in norm):
+        for keyword in ("index", "types", "api", "contract", "plugin", "client", "routes"):
+            if base.startswith(keyword) or base == keyword + ".ts" or base == keyword + ".go":
+                return True
+    return False
+
+
 # ── Compare repos ─────────────────────────────────────────────────
 
-def compare_repos(repo_a: str, repo_b: str) -> dict:
+def compare_repos(repo_a: str, repo_b: str, contract_only: bool = False) -> dict:
     from vocab.scanner import scan_codebase, _snapshot_phrases, _identifier_file_map, _code_file_vocabs, _structural_information_score, _is_test_path
 
     analysis_a = scan_codebase(repo_a, quiet=True, max_files=2500, max_seconds=30)
     analysis_b = scan_codebase(repo_b, quiet=True, max_files=2500, max_seconds=30)
 
-    phrases_a = _snapshot_phrases(analysis_a)
-    phrases_b = _snapshot_phrases(analysis_b)
-    files_a, langs_a = _identifier_file_map(analysis_a, include_tests=False)
-    files_b, langs_b = _identifier_file_map(analysis_b, include_tests=False)
+    a_name = os.path.basename(os.path.normpath(repo_a))
+    b_name = os.path.basename(os.path.normpath(repo_b))
+
+    if contract_only:
+        analysis_a.file_vocabs = [fv for fv in analysis_a.file_vocabs if _is_contract_surface(fv.path)]
+        analysis_b.file_vocabs = [fv for fv in analysis_b.file_vocabs if _is_contract_surface(fv.path)]
+        phrases_a: set[str] = set()
+        for fv in analysis_a.file_vocabs:
+            if not _is_test_path(fv.path):
+                phrases_a.update(fv.vocabulary.keys())
+        phrases_b: set[str] = set()
+        for fv in analysis_b.file_vocabs:
+            if not _is_test_path(fv.path):
+                phrases_b.update(fv.vocabulary.keys())
+        files_a, langs_a = _identifier_file_map(analysis_a, include_tests=False)
+        files_b, langs_b = _identifier_file_map(analysis_b, include_tests=False)
+        total_a = max(len([fv for fv in analysis_a.file_vocabs if not _is_test_path(fv.path)]), 1)
+        total_b = max(len([fv for fv in analysis_b.file_vocabs if not _is_test_path(fv.path)]), 1)
+    else:
+        phrases_a = _snapshot_phrases(analysis_a)
+        phrases_b = _snapshot_phrases(analysis_b)
+        files_a, langs_a = _identifier_file_map(analysis_a, include_tests=False)
+        files_b, langs_b = _identifier_file_map(analysis_b, include_tests=False)
+        total_a = max(len([fv for fv in _code_file_vocabs(analysis_a) if not _is_test_path(fv.path)]), 1)
+        total_b = max(len([fv for fv in _code_file_vocabs(analysis_b) if not _is_test_path(fv.path)]), 1)
 
     shared = phrases_a & phrases_b
     only_a = phrases_a - phrases_b
     only_b = phrases_b - phrases_a
-
-    a_name = os.path.basename(os.path.normpath(repo_a))
-    b_name = os.path.basename(os.path.normpath(repo_b))
-
-    total_a = max(len([fv for fv in _code_file_vocabs(analysis_a) if not _is_test_path(fv.path)]), 1)
-    total_b = max(len([fv for fv in _code_file_vocabs(analysis_b) if not _is_test_path(fv.path)]), 1)
 
     def ranked_drift(phrases: set[str], file_map: dict[str, set[str]], lang_map: dict[str, set[str]], total: int) -> list[dict]:
         rows = []
@@ -70,6 +116,7 @@ def compare_repos(repo_a: str, repo_b: str) -> dict:
         "schema_version": 1,
         "repo_a": a_name,
         "repo_b": b_name,
+        "contract_only": contract_only,
         "a_total_phrases": len(phrases_a),
         "b_total_phrases": len(phrases_b),
         "shared_phrases": len(shared),
@@ -87,6 +134,7 @@ def compare_repos(repo_a: str, repo_b: str) -> dict:
             "a_unique_ratio": round(a_unique_ratio, 3),
             "b_unique_ratio": round(b_unique_ratio, 3),
         },
+        "drift_score": round(1.0 - alignment, 3),
         "a_languages": dict(sorted(analysis_a.languages.items(), key=lambda x: -x[1])),
         "b_languages": dict(sorted(analysis_b.languages.items(), key=lambda x: -x[1])),
     }

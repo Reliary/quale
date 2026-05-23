@@ -407,6 +407,26 @@ def inspect_repo(path: str) -> dict:
     except Exception:
         avg_age = 0
 
+    # Debt candidates: files with low uniqueness + low identifier coverage
+    # debt = (1 - normalized_uniqueness) * (1 - coverage)
+    # High debt = generic file with churn potential
+    files = explore_data.get("files", [])
+    debt_candidates = []
+    for f in files:
+        unique = f.get("unique_score", 0)
+        coverage = f.get("coverage", 0)
+        norm_unique = min(unique / 30, 1.0)
+        debt = round((1.0 - norm_unique) * max(0.0, 1.0 - coverage), 3)
+        if debt >= 0.5:
+            debt_candidates.append({
+                "file": f["file"],
+                "debt": debt,
+                "unique_score": round(unique, 1),
+                "coverage": round(coverage, 3),
+                "language": f.get("language", "?"),
+            })
+    debt_candidates.sort(key=lambda x: -x["debt"])
+
     return {
         "schema_version": 1,
         "explore": explore_data,
@@ -414,6 +434,7 @@ def inspect_repo(path: str) -> dict:
         "binding_concepts": binding,
         "timeline": timeline_data,
         "avg_concept_age_weeks": avg_age,
+        "debt_candidates": debt_candidates[:15],
     }
 
 
