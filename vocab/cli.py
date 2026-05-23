@@ -367,7 +367,7 @@ def preflight(
         if qs else
         "Do not propose extra_edits unless the task explicitly requires them."
     )
-    vtypes = _classify_verify_types(verify_candidates[:3] if verify_candidates else [], data.get("changed_files", []))
+    vtypes = _classify_verify_types(verify_candidates[:5] if verify_candidates else [], data.get("changed_files", []))
 
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
@@ -386,7 +386,7 @@ def preflight(
             "read_first": data.get("read_first", []),
             "verification_mc": {
                 "question": "Which file would verify this change?",
-                "candidates": verify_candidates[:3] if verify_candidates else [],
+                "candidates": verify_candidates[:5] if verify_candidates else [],
                 "max_selections": 1,
                 "types": vtypes,
             },
@@ -420,7 +420,7 @@ def preflight(
             },
             "verification_mc": {
                 "question": "Which file would verify this change?",
-                "candidates": verify_candidates[:3] if verify_candidates else [],
+                "candidates": verify_candidates[:5] if verify_candidates else [],
                 "max_selections": 1,
                 "types": vtypes,
             },

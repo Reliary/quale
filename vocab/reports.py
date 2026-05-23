@@ -605,7 +605,7 @@ def _preflight_verify_files(changed: list[str], bootstrap: dict | None, file_voc
         3,
         f
     ))
-    return verify[:3]
+    return verify[:5]
 
 
 def _explain_verify_candidates(changed: list[str], bootstrap: dict | None, file_vocabs, verify_with: list[str]) -> list[dict[str, str]]:
@@ -638,7 +638,7 @@ def _explain_verify_candidates(changed: list[str], bootstrap: dict | None, file_
             details.append({"path": vpath, "reason": f"same directory '{vdir}' as changed file"})
             continue
         details.append({"path": vpath, "reason": "test discovery convention"})
-    return details[:3]
+    return details[:5]
 
 
 def _preflight_avoid(changed: list[str], stable_touched: list[dict], blast: list[dict], bootstrap: dict | None,
