@@ -1377,30 +1377,21 @@ def zk_proof_report(path: str = ".", schema_file: str = "", generated_code: str 
         return {"error": f"read failed: {e}"}
 
     # Extract allowed identifiers from schema
+    # Extract allowed identifiers from schema (not builtins)
+    _BUILTIN_WORDS = frozenset({
+        "true", "false", "null", "undefined", "async", "await", "return", "if", "else",
+        "for", "while", "switch", "case", "break", "continue", "try", "catch", "finally",
+        "throw", "new", "delete", "typeof", "instanceof", "import", "export", "from",
+        "const", "let", "var", "function", "class", "extends", "implements", "interface",
+        "type", "enum", "namespace", "this", "super", "string", "number", "boolean",
+        "any", "void", "never", "Promise", "Array", "Record", "Partial", "Pick", "Omit",
+        "Required", "Readonly", "Map", "Set", "Error",
+    })
     token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{2,45}\b')
     allowed: set[str] = set()
     for m in token_re.finditer(schema_text):
         allowed.add(m.group())
-    # Add common keywords and structural tokens
-    for kw in ["true", "false", "null", "undefined", "async", "await", "return", "if", "else", "for", "while", "switch", "case", "break", "continue", "try", "catch", "finally", "throw", "new", "delete", "typeof", "instanceof", "import", "export", "from", "const", "let", "var", "function", "class", "extends", "implements", "interface", "type", "enum", "namespace", "this", "super"]:
-        allowed.add(kw)
-    allowed.add("string")
-    allowed.add("number")
-    allowed.add("boolean")
-    allowed.add("any")
-    allowed.add("void")
-    allowed.add("never")
-    allowed.add("Promise")
-    allowed.add("Array")
-    allowed.add("Record")
-    allowed.add("Partial")
-    allowed.add("Pick")
-    allowed.add("Omit")
-    allowed.add("Required")
-    allowed.add("Readonly")
-    allowed.add("Map")
-    allowed.add("Set")
-    allowed.add("Error")
+    allowed.update(_BUILTIN_WORDS)
 
     # Extract identifiers from generated code
     code_identifiers: set[str] = set()
@@ -1408,13 +1399,33 @@ def zk_proof_report(path: str = ".", schema_file: str = "", generated_code: str 
     for m in code_token_re.finditer(generated_code):
         code_identifiers.add(m.group())
 
-    # Check each identifier
+    # Filter out local programming identifiers (not schema concepts)
+    _LOCAL_PATTERNS = {
+        "tmp", "temp", "res", "val", "key", "idx", "len", "max", "min", "sum",
+        "arr", "obj", "str", "num", "fn", "cb", "err", "msg", "pos", "ptr",
+        "arg", "args", "ret", "dst", "src", "acc", "buf", "cfg", "ctx",
+        "i", "j", "k", "n", "x", "y", "z", "ok", "ex", "el", "e", "ev",
+    }
+    schema_naming = sorted(allowed, key=lambda a: -len(a))[:5]
+    schema_has_upper = any(a[0].isupper() for a in allowed if len(a) > 2)
+
+    filtered: set[str] = set()
+    for ident in code_identifiers:
+        if ident in allowed:
+            continue
+        if len(ident) <= 3:
+            continue
+        if ident.lower() in _LOCAL_PATTERNS:
+            continue
+        filtered.add(ident)
+
+    # Check each filtered identifier against allowed set
     violations: list[dict] = []
-    for ident in sorted(code_identifiers):
+    schema_specific = allowed - _BUILTIN_WORDS
+    for ident in sorted(filtered):
         if ident not in allowed:
-            # Find closest allowed alternative
-            candidates = sorted(allowed, key=lambda a: sum(1 for x, y in zip(a, ident) if x != y) + abs(len(a) - len(ident)))
-            best = candidates[:3] if candidates else []
+            candidates = sorted(schema_specific, key=lambda a: sum(1 for x, y in zip(a, ident) if x != y) + abs(len(a) - len(ident)))
+            best = candidates[:3] if candidates else sorted(allowed, key=lambda a: sum(1 for x, y in zip(a, ident) if x != y) + abs(len(a) - len(ident)))[:3]
             violations.append({
                 "identifier": ident,
                 "allowed_alternatives": best,
