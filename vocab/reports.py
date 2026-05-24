@@ -636,6 +636,86 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
     return result
 
 
+def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
+    """Seed the adaptive router's fragment matrix using git history.
+
+    Evaluates historical commits that touched both source and test files,
+    treating the test file modified in the commit as ground truth. This
+    populates the fragment matrix with real repo-specific accuracy data
+    before the first LLM agent task runs.
+
+    Speed: scans up to 2500 files. On large repos (llama.cpp, 2400 files)
+    may take 10-30s total for 20 commits.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository.", "seeded": 0}
+    path = os.path.abspath(path)
+
+    log = vgit.ref_log(path, count=max_commits * 5)
+    if not log:
+        return {"error": "No git history found.", "seeded": 0}
+
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception:
+        return {"error": "scan failed", "seeded": 0}
+
+    matrix = entanglement_matrix(path, lookback_commits=100)
+    seeded_count = 0
+
+    for ref in log:
+        if seeded_count >= max_commits:
+            break
+        sha = ref.sha
+        try:
+            diff_files = vgit.diff_refs(path, f"{sha}^", sha)
+        except Exception:
+            continue
+        if not diff_files:
+            continue
+
+        source_files = []
+        test_files: set[str] = set()
+        for f in diff_files:
+            lf = f.lower()
+            if ("/test" in lf or "tests/" in lf or
+                f.endswith(("_test.go", "_test.py", ".test.ts", "_test.rs", "_test.exs"))):
+                test_files.add(f)
+            else:
+                source_files.append(f)
+
+        if not source_files or not test_files:
+            continue
+
+        file_types = [_file_type(f) for f in source_files]
+        dom_type = max(set(file_types), key=file_types.count) if file_types else "unknown"
+
+        verify_with = _preflight_verify_files(source_files, None, analysis.file_vocabs)
+        entangled = _entangled_candidates_for_changed(source_files, matrix)
+        co_located = _co_located_tests(source_files, analysis.file_vocabs)
+
+        all_candidates = list(dict.fromkeys(verify_with))
+        for c in co_located:
+            if c["file"] not in all_candidates:
+                all_candidates.append(c["file"])
+        for e in entangled:
+            if e["file"] not in all_candidates:
+                all_candidates.append(e["file"])
+
+        if not all_candidates:
+            _append_fragment_entry(path, dom_type, "cartridge", 0, False, source_files)
+            seeded_count += 1
+            continue
+
+        chosen = all_candidates[0]
+        hit = bool(chosen in test_files) or _self_assess_hit(path, source_files, chosen)
+        _append_fragment_entry(path, dom_type, "cartridge", len(all_candidates), hit, source_files)
+        seeded_count += 1
+
+    return {"schema_version": 1, "seeded_trials": seeded_count}
+
+
 def _vaccination_notes(file_classifications: list[dict]) -> list[str]:
     """Static 'memory cell' patterns injected when gap types are detected."""
     _GAP_PATTERNS = {

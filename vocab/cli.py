@@ -2272,8 +2272,19 @@ def pr_report(
 
 
 @cli.command(rich_help_panel="Utilities")
-def init(path: Annotated[str, typer.Argument(help="Path to repo")] = "."):
-    """Generate a .vocab.yml config file and cache repo-map scan."""
+def init(
+    path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
+    seed: Annotated[bool, typer.Option("--seed", "--no-seed", help="Seed fragment router from git history")] = True,
+):
+    """Generate a .vocab.yml config file and cache repo-map scan.
+
+    By default also seeds the fragment router using up to 20 historical
+    commits so the adaptive router has accuracy data before the first
+    LLM task runs. Use --no-seed to skip.
+
+    Speed: seeding scans up to 2500 files. On large repos (2400+ files)
+    may take 10-30s additional.
+    """
     target = os.path.join(os.path.abspath(path), ".vocab.yml")
     if not os.path.exists(target):
         os.makedirs(os.path.abspath(path), exist_ok=True)
@@ -2300,7 +2311,13 @@ search:
         data = crystallography(path_abs)
         if "error" not in data:
             _save_cached(path_abs, data)
-            typer.echo(f"Cached repo-map scan for delta tracking.")
+            typer.echo("Cached repo-map scan for delta tracking.")
+        if seed:
+            from vocab.reports import seed_fragment_matrix
+            typer.echo("Seeding fragment router from recent commits... ", nl=False)
+            seed_data = seed_fragment_matrix(path_abs, max_commits=20)
+            seeded = seed_data.get("seeded_trials", 0)
+            typer.echo(_color(f"done ({seeded} historical trials seeded).", "green"))
     else:
         typer.echo("Not a git repository; skipping cache.")
 
