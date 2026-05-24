@@ -480,7 +480,20 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
     des = "no verification candidates" if not all_candidates else ""
     if mirror and mirror.get("mirror_ratio", 1.0) < 0.3:
         des += " thin source/test mirror"
-    return {
+
+    changed_bases = set()
+    for f in changed:
+        b = os.path.splitext(os.path.basename(f))[0].lower()
+        b = b.replace("test_", "").replace("_test", "").replace(".test", "").replace("spec_", "").replace("_spec", "")
+        if b:
+            changed_bases.add(b)
+
+    det = _deterministic_verify(all_candidates, entangled, changed_bases)
+    negs = _negative_verify_files(changed, analysis.file_vocabs)
+    horizon = _verification_horizon(all_candidates, entangled, changed, changed_bases)
+    osc = _oscillator_candidates(changed, analysis.file_vocabs, matrix, bootstrap)
+
+    result = {
         "schema_version": 1, "mode": "verify",
         "changed_files": changed,
         "verification_candidates": all_candidates[:5],
@@ -489,89 +502,62 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
         "desert": bool(des), "desert_note": des.strip() or None,
         "confidence": "high" if len(all_candidates) >= 1 else "low",
         "mirror_ratio": round(mirror.get("mirror_ratio", 0.0), 2) if mirror else 0.0,
-        "stop_after": "choose_one_of" if all_candidates else "report_desert",
+        "stop_after": "deterministic" if det else ("choose_one_of" if all_candidates else "report_desert"),
+        "deterministic_verify": det,
+        "negative_verify": negs if negs else None,
+        "verification_horizon": horizon[:5] if horizon else None,
+        "oscillator": osc if osc.get("verdict") == "divergent" else None,
     }
 
-
-def check_diff_report(path: str = ".", diff_ref: str = "HEAD~1") -> dict:
-    """Post-proposal defect scan: detect edits that break repo structure."""
-    from vocab.scanner import scan_codebase, _mirror_signals, _is_generated
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
     try:
-        changed = vgit.diff_worktree(path, diff_ref)
-    except Exception as e:
-        return {"error": str(e)}
-    changed = list(dict.fromkeys(changed))
-    if not changed:
-        return {"schema_version": 1, "defects": [], "diff": diff_ref, "note": "no changed files"}
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-    mirror = _mirror_signals(changed, analysis.file_vocabs)
-    defects = []
-    try:
-        stability_data = compute_stability(path, weeks=12)
-    except Exception:
-        stability_data = []
-    stable_by_file = {item["file"]: item for item in stability_data}
-    for f in changed:
-        s = stable_by_file.get(f)
-        if s and s.get("persistence", 0) >= 0.8:
-            defects.append({"type": "stable_anchor_touched", "file": f,
-                            "detail": f"stable anchor (persistence {s['persistence']:.1%})", "severity": "moderate"})
-    for f in changed:
-        if _is_generated(f):
-            defects.append({"type": "generated_file_edited", "file": f,
-                            "detail": "editing generated file directly", "severity": "low"})
-    if mirror:
-        unmirrored = mirror.get("unmirrored_source_concepts", [])
-        if len(unmirrored) > 5:
-            defects.append({"type": "mirror_weakened", "file": ", ".join(changed[:3]),
-                            "detail": f"{len(unmirrored)} source concepts have no test mirror", "severity": "moderate"})
-    if len(changed) > 20:
-        defects.append({"type": "large_change_set", "file": f"{len(changed)} files",
-                        "detail": "change set exceeds 20 files", "severity": "high"})
-    return {
-        "schema_version": 1, "diff": diff_ref,
-        "changed_files": changed, "defects": defects,
-        "defect_count": len(defects),
-        "max_severity": max((d.get("severity", "low") for d in defects), default="none") if defects else "none",
-    }
-
-
-def _route_path(path: str, changed: list[str], analysis, task: str | None = None) -> str:
-    """Determine the correct intervention tier for a given change set."""
-    from vocab.scanner import _is_generated
-    decl_exts = {".yml", ".yaml", ".json", ".proto", ".sql", ".env", ".cfg", ".toml", ".ini", ".md", ".txt"}
-
-    has_substance = bool(task and len(task) > 10 and task not in ("fix bug", "cleanup", "refactor", "tidy up", "misc"))
-
-    if all(any(f.endswith(e) for e in decl_exts) for f in changed):
-        return "verify" if has_substance else "none"
-    if len(changed) == 1 and _is_generated(changed[0]):
-        return "verify" if has_substance else "none"
-    # Removed phrase-count gate — tiny files still need verification if task has substance.
-    verify_with = _preflight_verify_files(changed, None, analysis.file_vocabs if analysis else [])
-    if not verify_with:
-        try:
-            matrix = entanglement_matrix(path, lookback_commits=50)
-            entangled = _entangled_candidates_for_changed(changed, matrix)
-            if not entangled:
-                return "human"
-        except Exception:
-            return "human"
-    try:
-        stability_data = compute_stability(path, weeks=12)
-        stable_by_file = {item["file"]: item for item in stability_data}
-        for f in changed:
-            if f in stable_by_file and stable_by_file[f].get("persistence", 0) >= 0.8:
-                return "contract"
+        file_types = [_file_type(f) for f in changed]
+        dom_type = max(set(file_types), key=file_types.count) if file_types else "unknown"
+        chosen = result.get("deterministic_verify", {}).get("file") or (all_candidates[0] if all_candidates else None)
+        if chosen:
+            hit = _self_assess_hit(path, changed, chosen)
+            _append_fragment_entry(path, dom_type, "cartridge", len(all_candidates), hit, changed)
     except Exception:
         pass
-    return "verify"
+
+    return result
+
+
+def _vaccination_notes(file_classifications: list[dict]) -> list[str]:
+    """Static 'memory cell' patterns injected when gap types are detected."""
+    _GAP_PATTERNS = {
+        "init_file": "Files named __init__*, index*, mod* have weak structural test mirrors. Manually check upstream module tests.",
+        "generated": "Generated files follow generator test conventions, not source structure. Check the generator's test output.",
+        "dead_code": "This file's identifiers appear nowhere else in the codebase. It may be unused or standalone.",
+        "cross_package": "This change's identifiers appear in multiple test packages. Run the full integration suite, not just unit tests.",
+        "declarative_only": "Config/schema files define behavior; verify via integration suite or schema tests.",
+    }
+    seen = set()
+    notes = []
+    for fc in file_classifications:
+        gap = fc.get("gap_type")
+        if gap and gap in _GAP_PATTERNS and gap not in seen:
+            seen.add(gap)
+            notes.append(_GAP_PATTERNS[gap])
+    return notes
+
+
+
+
+def verify_classify_report(path: str = ".", files: list[str] | None = None,
+                            diff_ref: str | None = None) -> dict:
+    """Gap signature per changed file: verifiability, gap type, vaccination notes."""
+    preflight = preflight_report(path=path, files=files, diff_ref=diff_ref)
+    if "error" in preflight:
+        return {"schema_version": 1, "error": preflight["error"]}
+    return {
+        "schema_version": 1,
+        "changed_files": preflight.get("verify_classifications", []),
+        "vaccination": preflight.get("vaccination_notes", []),
+        "verification_confidence": preflight.get("verification_confidence", {}),
+        "guardrails": {"mode": "report_only", "caveat": "Gap classes are structural heuristics."},
+    }
+
+
 
 
 def reverse_verify_report(path: str = ".", files: list[str] | None = None,
@@ -639,79 +625,9 @@ def reverse_verify_report(path: str = ".", files: list[str] | None = None,
     return result
 
 
-def verify_classify_report(path: str = ".", files: list[str] | None = None,
-                            diff_ref: str | None = None) -> dict:
-    """Gap signature per changed file: verifiability, gap type, vaccination notes."""
-    preflight = preflight_report(path=path, files=files, diff_ref=diff_ref)
-    if "error" in preflight:
-        return {"schema_version": 1, "error": preflight["error"]}
-    return {
-        "schema_version": 1,
-        "changed_files": preflight.get("verify_classifications", []),
-        "vaccination": preflight.get("vaccination_notes", []),
-        "verification_confidence": preflight.get("verification_confidence", {}),
-        "guardrails": {"mode": "report_only", "caveat": "Gap classes are structural heuristics."},
-    }
 
 
-def covalent_verify_bonds(path: str = ".", files: list[str] | None = None) -> dict:
-    """Detect when a change requires running multiple test files together."""
-    from vocab.scanner import scan_codebase
 
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    if not files:
-        return {"error": "provide --files"}
-    changed = _normalize_preflight_files(path, list(files))
-    if not changed:
-        return {"error": "no changed files found"}
-
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-
-    path_vocabs = {}
-    for fv in analysis.file_vocabs:
-        path_vocabs[fv.path] = {phrase for phrase in fv.vocabulary}
-
-    changed_vocab = set()
-    for f in changed:
-        cv = path_vocabs.get(f, set())
-        changed_vocab.update(cv)
-
-    test_files = []
-    for fv in analysis.file_vocabs:
-        if "/test" in fv.path.lower() or "tests/" in fv.path.lower() or ".test." in fv.path.lower() or "_test." in fv.path.lower():
-            overlap = len(changed_vocab & set(fv.vocabulary.keys()))
-            if overlap > 0:
-                test_files.append({"path": fv.path, "overlap": overlap})
-
-    test_files.sort(key=lambda x: -x["overlap"])
-    top_tests = test_files[:5]
-
-    bonds = []
-    if len(top_tests) >= 2:
-        for i in range(len(top_tests)):
-            for j in range(i + 1, len(top_tests)):
-                ti = top_tests[i]
-                tj = top_tests[j]
-                combined = ti["overlap"] + tj["overlap"]
-                bonds.append({"tests": [ti["path"], tj["path"]],
-                              "combined_vocab_overlap": combined,
-                              "reason": "both tests share vocabulary with changed file"})
-
-    bonds.sort(key=lambda x: -x["combined_vocab_overlap"])
-
-    return {
-        "schema_version": 1,
-        "changed_files": changed,
-        "top_test_candidates": top_tests,
-        "bonds": bonds[:3],
-        "bond_count": len([b for b in bonds[:3] if b["combined_vocab_overlap"] > 3]),
-        "guardrails": {"mode": "report_only", "caveat": "Bonds are vocabulary overlap hints."},
-    }
 
 
 def verification_drift(path: str = ".", commits: int = 10) -> dict:
@@ -810,6 +726,901 @@ class _DriftAlerter:
         self._prev_level = numeric
 
 
+
+
+
+
+
+def covalent_verify_bonds(path: str = ".", files: list[str] | None = None) -> dict:
+    """Detect when a change requires running multiple test files together."""
+    from vocab.scanner import scan_codebase
+
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not files:
+        return {"error": "provide --files"}
+    changed = _normalize_preflight_files(path, list(files))
+    if not changed:
+        return {"error": "no changed files found"}
+
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    path_vocabs = {}
+    for fv in analysis.file_vocabs:
+        path_vocabs[fv.path] = {phrase for phrase in fv.vocabulary}
+
+    changed_vocab = set()
+    for f in changed:
+        cv = path_vocabs.get(f, set())
+        changed_vocab.update(cv)
+
+    test_files = []
+    for fv in analysis.file_vocabs:
+        if "/test" in fv.path.lower() or "tests/" in fv.path.lower() or ".test." in fv.path.lower() or "_test." in fv.path.lower():
+            overlap = len(changed_vocab & set(fv.vocabulary.keys()))
+            if overlap > 0:
+                test_files.append({"path": fv.path, "overlap": overlap})
+
+    test_files.sort(key=lambda x: -x["overlap"])
+    top_tests = test_files[:5]
+
+    bonds = []
+    if len(top_tests) >= 2:
+        for i in range(len(top_tests)):
+            for j in range(i + 1, len(top_tests)):
+                ti = top_tests[i]
+                tj = top_tests[j]
+                combined = ti["overlap"] + tj["overlap"]
+                bonds.append({"tests": [ti["path"], tj["path"]],
+                              "combined_vocab_overlap": combined,
+                              "reason": "both tests share vocabulary with changed file"})
+
+    bonds.sort(key=lambda x: -x["combined_vocab_overlap"])
+
+    return {
+        "schema_version": 1,
+        "changed_files": changed,
+        "top_test_candidates": top_tests,
+        "bonds": bonds[:3],
+        "bond_count": len([b for b in bonds[:3] if b["combined_vocab_overlap"] > 3]),
+        "guardrails": {"mode": "report_only", "caveat": "Bonds are vocabulary overlap hints."},
+    }
+
+
+
+
+def _file_type(path: str) -> str:
+    """Classify file type for fragment matrix routing."""
+    base = os.path.basename(path).lower()
+    ext = os.path.splitext(path)[1].lower()
+    if "__init__" in base:
+        return f"{ext.lstrip('.')}_init"
+    if ext == ".go":
+        return "go_test" if base.endswith("_test.go") else "go"
+    if ext == ".py":
+        return "py_test" if base.startswith("test_") else "py"
+    if ext == ".ts":
+        return "ts_test" if ".test." in base else "ts"
+    if ext in (".rs",):
+        return "rs_test" if base.endswith("_test.rs") else "rs"
+    if ext in (".js", ".jsx"):
+        return "js_test" if ".test." in base else "js"
+    if ext in (".ex", ".exs"):
+        return "ex_test" if base.endswith("_test.exs") else "ex"
+    return ext.lstrip(".") or "unknown"
+
+
+_FRAGMENT_MATRIX_PATH = ".reliary/vocab/fragment_matrix.json"
+
+
+def _load_fragment_matrix(path: str = ".") -> dict:
+    """Load fragment matrix from cache. Returns {(repo, file_type, condition): {hit_count, trial_count}}."""
+    fp = os.path.join(os.path.abspath(path), _FRAGMENT_MATRIX_PATH)
+    if not os.path.exists(fp):
+        return {}
+    try:
+        with open(fp) as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    entries = data.get("entries", []) if isinstance(data, dict) else []
+    result = {}
+    for e in entries:
+        key = (e.get("repo", ""), e.get("file_type", ""), e.get("condition", ""))
+        result[key] = {"hit_count": e.get("hit_count", 0), "trial_count": e.get("trial_count", 0), "updated_at": e.get("updated_at", "")}
+    return result
+
+
+def _save_fragment_matrix(path: str, entries: list[dict]):
+    """Save fragment matrix entries to cache."""
+    fp = os.path.join(os.path.abspath(path), _FRAGMENT_MATRIX_PATH)
+    os.makedirs(os.path.dirname(fp), exist_ok=True)
+    with open(fp, "w") as f:
+        json.dump({"schema_version": 1, "entries": entries}, f, indent=2, default=str)
+
+
+def _append_fragment_entry(path: str, file_type: str, condition: str, candidates_count: int, verify_hit: bool, changed_files: list[str] | None = None):
+    """Append a labeled trial outcome to the fragment matrix."""
+    try:
+        existing = _load_fragment_matrix(path)
+        repo = os.path.basename(os.path.realpath(path))
+        key = (repo, file_type, condition)
+        entry = existing.get(key, {"hit_count": 0, "trial_count": 0})
+        entry["hit_count"] += (1 if verify_hit else 0)
+        entry["trial_count"] += 1
+        existing[key] = entry
+        entries = []
+        for (r, ft, c), e in existing.items():
+            entries.append({"repo": r, "file_type": ft, "condition": c, **e})
+        _save_fragment_matrix(path, entries)
+    except Exception:
+        pass
+
+
+def _deterministic_verify(verify_with: list[str], entangled: list[dict], changed_bases: set[str]) -> dict | None:
+    """Check if verification choice is structurally unambiguous. Returns {file, score, rule} or None."""
+    if not verify_with:
+        return None
+    entangle_by_file = {e["file"]: e.get("score", 0) for e in entangled}
+    for c in verify_with:
+        c_base = os.path.splitext(os.path.basename(c))[0].lower()
+        c_base = c_base.replace("test_", "").replace("_test", "").replace(".test", "")
+        stem_match = c_base in changed_bases
+        ent_score = entangle_by_file.get(c, 0)
+        if stem_match and ent_score > 0.5:
+            return {"file": c, "score": 1.0, "rule": "stem_match_and_entanglement"}
+        if stem_match and ent_score > 0.3:
+            return {"file": c, "score": 0.90, "rule": "stem_match_weak_entanglement"}
+        if stem_match:
+            return {"file": c, "score": 0.85, "rule": "stem_match"}
+        if ent_score > 0.7:
+            return {"file": c, "score": 0.80, "rule": "entanglement_only"}
+    if len(verify_with) >= 2:
+        d0, d1 = verify_with[0].count("/"), verify_with[1].count("/")
+        s0, s1 = max(0.1, 1.0 - d0 * 0.15), max(0.1, 1.0 - d1 * 0.15)
+        if s0 > s1 * 2:
+            return {"file": verify_with[0], "score": 0.75, "rule": "clear_leader"}
+    return None
+
+
+def _negative_verify_files(changed: list[str], file_vocabs: list) -> list[str]:
+    """Test files with zero vocabulary overlap with changed files."""
+    changed_set = set(changed)
+    changed_vocab = set()
+    for fv in file_vocabs:
+        if fv.path in changed_set:
+            changed_vocab.update(fv.vocabulary.keys() if hasattr(fv, "vocabulary") else [])
+    if not changed_vocab:
+        return []
+    negatives = []
+    for fv in file_vocabs:
+        p = fv.path.lower()
+        if not any(p.endswith(e) for e in ("_test.go", "_test.py", ".test.ts", "_test.rs", "_test.exs", "test_.py", ".spec.ts")):
+            continue
+        if fv.path in changed_set:
+            continue
+        fv_vocab = set(fv.vocabulary.keys() if hasattr(fv, "vocabulary") else [])
+        if fv_vocab and not (fv_vocab & changed_vocab):
+            negatives.append(fv.path)
+    negatives.sort()
+    return negatives[:5]
+
+
+def _cost_tier(candidate: str, changed: list[str]) -> str:
+    """Classify verification cost: unit, integration, or e2e."""
+    for cf in changed:
+        if os.path.dirname(cf) == os.path.dirname(candidate):
+            return "unit"
+    path = candidate.lower()
+    if any(seg in path.split(os.sep) for seg in ("e2e", "integration", "functional", "playwright", "cypress")):
+        return "e2e"
+    return "integration"
+
+
+def _verification_horizon(verify_with: list[str], entangled: list[dict], changed: list[str], changed_bases: set[str]) -> list[dict]:
+    """Ordered verification candidates with cost tiers."""
+    ent_scores = {e["file"]: e.get("score", 0) for e in entangled}
+    horizon = []
+    for c in verify_with:
+        c_base = os.path.splitext(os.path.basename(c))[0].lower()
+        c_base = c_base.replace("test_", "").replace("_test", "").replace(".test", "")
+        stem_match = c_base in changed_bases
+        ent_score = ent_scores.get(c, 0)
+        horizon.append({"file": c, "tier": _cost_tier(c, changed), "stem_match": stem_match, "entanglement_score": ent_score})
+    horizon.sort(key=lambda x: (0 if x["stem_match"] else 1, 0 if x["tier"] == "unit" else (1 if x["tier"] == "integration" else 2), -x["entanglement_score"]))
+    return horizon
+
+
+def _oscillator_candidates(changed: list[str], file_vocabs: list, matrix: dict, bootstrap: dict | None) -> dict:
+    """Run 3 guidance variants, compute intersection."""
+    scope_cands = set(_preflight_verify_files(changed, None, file_vocabs))
+    boostrapped = _preflight_verify_files(changed, bootstrap, file_vocabs)
+    cart_cands = set(boostrapped)
+    ent_cands = set(c for c in scope_cands) | {e["file"] for e in _entangled_candidates_for_changed(changed, matrix)}
+    intersection = scope_cands & cart_cands & ent_cands
+    union = scope_cands | cart_cands | ent_cands
+    return {"intersection": sorted(intersection)[:3] if intersection else [], "union": sorted(union)[:5] if union else [], "intersection_ratio": round(len(intersection) / max(len(union), 1), 2), "verdict": "strong" if intersection else "divergent"}
+
+
+def _self_assess_hit(path: str, changed: list[str], chosen_verify: str) -> bool:
+    """Determine if chosen_verify shares vocabulary with changed files."""
+    try:
+        from vocab.scanner import scan_codebase
+        analysis = scan_codebase(path, quiet=True, max_files=500, max_seconds=10)
+        changed_set = set(changed)
+        changed_vocab = set()
+        for fv in analysis.file_vocabs:
+            if fv.path in changed_set:
+                changed_vocab.update(fv.vocabulary.keys())
+        for fv in analysis.file_vocabs:
+            if fv.path == chosen_verify:
+                verify_vocab = set(fv.vocabulary.keys())
+                return len(changed_vocab & verify_vocab) >= 1
+        return False
+    except Exception:
+        return False
+
+
+def check_diff_report(path: str = ".", diff_ref: str = "HEAD~1") -> dict:
+    """Post-proposal defect scan: detect edits that break repo structure."""
+    from vocab.scanner import scan_codebase, _mirror_signals, _is_generated
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        changed = vgit.diff_worktree(path, diff_ref)
+    except Exception as e:
+        return {"error": str(e)}
+    changed = list(dict.fromkeys(changed))
+    if not changed:
+        return {"schema_version": 1, "defects": [], "diff": diff_ref, "note": "no changed files"}
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    mirror = _mirror_signals(changed, analysis.file_vocabs)
+    defects = []
+    try:
+        stability_data = compute_stability(path, weeks=12)
+    except Exception:
+        stability_data = []
+    stable_by_file = {item["file"]: item for item in stability_data}
+    for f in changed:
+        s = stable_by_file.get(f)
+        if s and s.get("persistence", 0) >= 0.8:
+            defects.append({"type": "stable_anchor_touched", "file": f,
+                            "detail": f"stable anchor (persistence {s['persistence']:.1%})", "severity": "moderate"})
+    for f in changed:
+        if _is_generated(f):
+            defects.append({"type": "generated_file_edited", "file": f,
+                            "detail": "editing generated file directly", "severity": "low"})
+    if mirror:
+        unmirrored = mirror.get("unmirrored_source_concepts", [])
+        if len(unmirrored) > 5:
+            defects.append({"type": "mirror_weakened", "file": ", ".join(changed[:3]),
+                            "detail": f"{len(unmirrored)} source concepts have no test mirror", "severity": "moderate"})
+    if len(changed) > 20:
+        defects.append({"type": "large_change_set", "file": f"{len(changed)} files",
+                        "detail": "change set exceeds 20 files", "severity": "high"})
+    return {
+        "schema_version": 1, "diff": diff_ref,
+        "changed_files": changed, "defects": defects,
+        "defect_count": len(defects),
+        "max_severity": max((d.get("severity", "low") for d in defects), default="none") if defects else "none",
+    }
+
+
+def _normalize_preflight_files(repo_path: str, files: list[str]) -> list[str]:
+    normalized = []
+    for item in files:
+        for raw in item.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            full = raw if os.path.isabs(raw) else os.path.join(repo_path, raw)
+            rel = os.path.relpath(full, repo_path) if os.path.isabs(raw) else raw
+            rel = rel.replace("\\", "/").lstrip("./")
+            if rel.startswith("../"):
+                continue
+            normalized.append(rel)
+    return normalized
+
+
+
+
+def _preflight_read_first(changed: list[str], bootstrap: dict | None, blast: list[dict]) -> list[str]:
+    reads = list(changed[:3])
+    if bootstrap:
+        for item in bootstrap.get("recommended_next_reads", []):
+            file = item.get("file")
+            if file and file not in reads:
+                reads.append(file)
+        for item in bootstrap.get("related_files_for_task", []):
+            file = item.get("file")
+            if file and item.get("role") != "test" and file not in reads:
+                reads.append(file)
+    for item in blast[:3]:
+        file = item.get("file")
+        if file and file not in reads:
+            reads.append(file)
+    return reads[:3]
+
+
+
+
+def _preflight_verify_files(changed: list[str], bootstrap: dict | None, file_vocabs) -> list[str]:
+    verify = []
+    bootstrap_added: set[str] = set()
+    if bootstrap:
+        for item in bootstrap.get("related_files_for_task", []):
+            file = item.get("file")
+            if file and item.get("role") == "test" and file not in verify:
+                verify.append(file)
+                bootstrap_added.add(file)
+    changed_bases = {os.path.splitext(os.path.basename(f))[0].replace(".", "").lower() for f in changed}
+    for fv in file_vocabs:
+        norm = fv.path.lower()
+        if "/test" not in norm and "tests/" not in norm and ".test." not in norm and "_test." not in norm:
+            continue
+        base = os.path.splitext(os.path.basename(fv.path))[0].replace(".test", "").replace("_test", "").lower()
+        if base in changed_bases and fv.path not in verify:
+            verify.append(fv.path)
+    changed_dirs = set()
+    for f in changed:
+        d = os.path.dirname(f)
+        if d:
+            changed_dirs.add(d)
+    verify.sort(key=lambda f: (
+        0 if f in bootstrap_added and os.path.splitext(os.path.basename(f))[0].replace(".test", "").replace("_test", "").lower() in changed_bases else
+        1 if f in bootstrap_added else
+        2 if os.path.dirname(f) in changed_dirs else
+        3,
+        f
+    ))
+    return verify[:5]
+
+
+
+
+def _preflight_avoid(changed: list[str], stable_touched: list[dict], blast: list[dict], bootstrap: dict | None,
+                     verify_with: list[str] | None = None) -> list[str]:
+    avoid = []
+    excluded = set(changed) | set(verify_with or [])
+    if bootstrap:
+        for item in bootstrap.get("avoid_touching_without_context", []):
+            file = item.get("file")
+            if file and file not in excluded and item.get("persistence", 0) >= 0.8:
+                avoid.append(file)
+    for item in blast:
+        file = item.get("file")
+        if file and file not in excluded:
+            avoid.append(file)
+    return list(dict.fromkeys(avoid))[:5]
+
+
+
+
+def _preflight_reasons(changed: list[str], stable_touched: list[dict], blast: list[dict], mirror: dict) -> list[str]:
+    reasons = []
+    if stable_touched:
+        reasons.append(f"touches {len(stable_touched)} stable anchor{'s' if len(stable_touched) != 1 else ''}")
+    if blast:
+        reasons.append(f"reverse blast reaches {min(len(blast), 5)} ranked file{'s' if len(blast) != 1 else ''}")
+    if len(changed) > 3:
+        reasons.append(f"broad edit set ({len(changed)} files)")
+    mirror_ratio = mirror.get("mirror_ratio", 1.0) if mirror else 1.0
+    if mirror and mirror_ratio < 0.5:
+        reasons.append(f"source/test mirror is thin ({mirror_ratio:.0%})")
+    if not reasons:
+        reasons.append("file-scoped local scan")
+    return reasons[:4]
+
+
+
+
+def _preflight_risk(changed: list[str], stable_touched: list[dict], blast: list[dict]) -> str:
+    top_shared = blast[0].get("shared_concepts", 0) if blast else 0
+    if stable_touched and (top_shared > 10 or len(blast) > 10):
+        return "high"
+    if len(changed) > 10 or top_shared > 20:
+        return "high"
+    if stable_touched or top_shared > 8 or len(blast) > 5:
+        return "moderate"
+    return "low"
+
+
+
+
+def _preflight_confidence(changed: list[str], bootstrap: dict | None, file_vocabs) -> str:
+    existing = {fv.path for fv in file_vocabs}
+    coverage = sum(1 for f in changed if f in existing) / max(len(changed), 1)
+    relevance = bootstrap.get("task_relevance_score", 0.5) if bootstrap else 0.5
+    score = (coverage + relevance) / 2
+    if score >= 0.8:
+        return "high"
+    if score >= 0.5:
+        return "mixed"
+    return "low"
+
+
+
+
+def _contract_id(prefix: str, index: int, path: str) -> str:
+    import hashlib
+    suffix = hashlib.sha256(f"{prefix}:{index}:{path}".encode()).hexdigest()[0]
+    return f"{prefix}{index}{suffix}"
+
+
+
+
+def _expand_scope_ids(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            result.append(item)
+        elif isinstance(item, dict) and isinstance(item.get("id"), str):
+            result.append(item["id"])
+    return result
+
+
+
+
+def _edit_sprawl_guard(changed: list[str], avoid_expanding: list[str], stable_touched: list[dict], blast: list[dict]) -> dict:
+    questioned: list[dict] = []
+    blast_by_file = {item.get("file"): item for item in blast}
+    for file in avoid_expanding[:5]:
+        blast_item = blast_by_file.get(file, {})
+        shared = blast_item.get("shared_concepts", 0)
+        level = "high" if shared >= 20 else ("medium" if shared >= 8 else "low")
+        questioned.append({
+            "file": file,
+            "level": level,
+            "reason": f"outside requested edit set; shares {shared} structural concepts" if shared else "outside requested edit set",
+        })
+
+    return {
+        "mode": "report_only",
+        "allow_changed_files": changed[:10],
+        "question_extra_edits": questioned,
+        "stable_anchors_touched": stable_touched[:5],
+        "instruction": "Edit changed_files first. Treat extra edits as questionable unless the task explicitly requires them.",
+        "never_block": True,
+    }
+
+
+# ── Verification deserts ─────────────────────────────────────────
+
+
+
+def _explain_verify_candidates(changed: list[str], bootstrap: dict | None, file_vocabs, verify_with: list[str]) -> list[dict[str, str]]:
+    """Return per-candidate match reason for each verification file."""
+    if not verify_with:
+        return []
+    changed_bases = {os.path.splitext(os.path.basename(f))[0].replace(".", "").lower() for f in changed}
+    changed_dirs = set()
+    for f in changed:
+        parts = f.split("/")
+        if len(parts) > 1:
+            changed_dirs.add("/".join(parts[:-1]))
+    # Collect task-relevant tests
+    task_tests = set()
+    if bootstrap:
+        for item in bootstrap.get("related_files_for_task", []):
+            if item.get("role") == "test" and item.get("file"):
+                task_tests.add(item["file"])
+    details = []
+    for vpath in verify_with:
+        if vpath in task_tests:
+            details.append({"path": vpath, "reason": "task relevance"})
+            continue
+        vbase = os.path.splitext(os.path.basename(vpath))[0].replace(".test", "").replace("_test", "").lower()
+        if vbase in changed_bases:
+            details.append({"path": vpath, "reason": f"stem '{vbase}' matches changed file"})
+            continue
+        vdir = vpath.rsplit("/", 1)[0] if "/" in vpath else ""
+        if vdir in changed_dirs:
+            details.append({"path": vpath, "reason": f"same directory '{vdir}' as changed file"})
+            continue
+        details.append({"path": vpath, "reason": "test discovery convention"})
+    return details[:5]
+
+
+
+
+def _looks_like_path(value: str) -> bool:
+    return "/" in value or "\\" in value or bool(re.search(r"\.[A-Za-z0-9]{1,8}$", value))
+
+
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
+
+
+def _source_stem(path: str) -> str:
+    base = os.path.basename(path).lower()
+    stem = os.path.splitext(base)[0]
+    return stem.replace(".", "").replace("_", "").replace("-", "")
+
+
+
+
+def _test_stem(path: str) -> str:
+    base = os.path.basename(path).lower()
+    stem = os.path.splitext(base)[0]
+    for marker in ("test_", "_test", ".test", "spec_", "_spec", ".spec"):
+        stem = stem.replace(marker, "")
+    return stem.replace(".", "").replace("_", "").replace("-", "")
+
+
+
+
+def _verification_candidates_for_source(source_path: str, stem: str, test_paths: list[str], test_by_stem: dict[str, list[str]]) -> list[str]:
+    candidates = list(test_by_stem.get(stem, []))
+    source_parts = source_path.split("/")[:-1]
+    source_dir_tokens = {part.lower() for part in source_parts if part}
+    for test in test_paths:
+        if test in candidates:
+            continue
+        test_lower = test.lower()
+        if stem and stem in _test_stem(test):
+            candidates.append(test)
+            continue
+        overlap = source_dir_tokens & {part.lower() for part in test.split("/")[:-1]}
+        if overlap and os.path.basename(source_path).split(".")[0].lower() in test_lower:
+            candidates.append(test)
+    return list(dict.fromkeys(candidates))[:5]
+
+
+
+
+def _verification_confidence(changed: list[str], verify_with: list[str], mirror: dict | None, file_vocabs) -> dict:
+    existing = {fv.path for fv in file_vocabs}
+    existing_candidates = [path for path in verify_with if path in existing]
+    mirror_ratio = mirror.get("mirror_ratio", 0.0) if mirror else 0.0
+    source_count = len(changed)
+    candidate_count = len(verify_with)
+
+    reasons: list[str] = []
+    if candidate_count == 0:
+        level = "low"
+        reasons.append("no structural verification candidates found")
+    elif len(existing_candidates) < candidate_count:
+        level = "low"
+        reasons.append("some verification candidates were not found in the current scan")
+    elif mirror_ratio >= 0.7 and candidate_count >= 1:
+        level = "high"
+        reasons.append("source/test mirror signal is strong")
+    elif mirror_ratio >= 0.3 or candidate_count >= 1:
+        level = "mixed"
+        reasons.append("some verification candidates found, but mirror signal is thin")
+    else:
+        level = "low"
+        reasons.append("verification topology is sparse")
+
+    return {
+        "level": level,
+        "candidate_count": candidate_count,
+        "existing_candidate_count": len(existing_candidates),
+        "mirror_ratio": round(mirror_ratio, 3),
+        "reasons": reasons[:3],
+        "caveat": "Candidates are structural hints, not proof of test coverage.",
+    }
+
+
+
+
+def _verification_desert_reason(score: float, candidates: list[str], test_dirs: set[str], source_path: str) -> str:
+    if candidates:
+        return "only one obvious verification candidate" if len(candidates) == 1 else "has structural test mirror"
+    if not test_dirs:
+        return "no test directories detected in scanned files"
+    if score >= 0.75:
+        return "no same-name or nearby test mirror found"
+    return "nearby test directory exists, but no direct source/test mirror found"
+
+
+# ── Vocab routing policy ─────────────────────────────────────────
+
+
+
+def _verification_desert_score(source_path: str, candidates: list[str], test_dirs: set[str]) -> float:
+    if candidates:
+        return 0.0 if len(candidates) >= 2 else 0.25
+    parts = source_path.split("/")
+    has_nearby_test_dir = any(source_path.startswith(prefix.rsplit("/", 1)[0]) for prefix in test_dirs if "/" in prefix)
+    score = 0.75
+    if not test_dirs:
+        score = 1.0
+    elif has_nearby_test_dir:
+        score = 0.55
+    if any(part in {"examples", "scripts", "docs"} for part in parts):
+        score = min(score, 0.45)
+    return score
+
+
+
+
+def verification_deserts(path: str, max_results: int = 20) -> dict:
+    """Find source files with weak structural verification mirrors.
+
+    This is not test coverage. It only reports places where source files
+    lack obvious same-name, nearby, or task-convention test mirrors.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository.", "schema_version": 1}
+
+    from vocab.scanner import scan_codebase, _is_generated, _is_lock_file, _DEAD_CODE_EXTS
+    from vocab.bootstrap import _task_file_role
+
+    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    if not analysis.file_vocabs:
+        return {"error": "No source files found.", "schema_version": 1}
+
+    all_paths = [fv.path for fv in analysis.file_vocabs]
+    test_paths = [p for p in all_paths if _task_file_role(p) == "test"]
+    test_by_stem: dict[str, list[str]] = defaultdict(list)
+    test_dirs = set()
+    for p in test_paths:
+        stem = _test_stem(p)
+        test_by_stem[stem].append(p)
+        parts = p.split("/")
+        for idx, part in enumerate(parts):
+            if "test" in part.lower():
+                test_dirs.add("/".join(parts[:idx + 1]))
+
+    deserts: list[dict] = []
+    source_count = 0
+    mirrored_count = 0
+    for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if (ext not in _DEAD_CODE_EXTS or _task_file_role(fv.path) != "source"
+                or _is_generated(fv.path) or _is_lock_file(fv.path)
+                or fv.path.startswith((".reliary/", ".vocab-cache/"))
+                or os.path.basename(fv.path).startswith(".")):
+            continue
+        source_count += 1
+        stem = _source_stem(fv.path)
+        candidates = _verification_candidates_for_source(fv.path, stem, test_paths, test_by_stem)
+        score = _verification_desert_score(fv.path, candidates, test_dirs)
+        if candidates:
+            mirrored_count += 1
+        if score >= 0.55:
+            deserts.append({
+                "file": fv.path,
+                "score": round(score, 3),
+                "candidate_count": len(candidates),
+                "candidates": candidates[:3],
+                "reason": _verification_desert_reason(score, candidates, test_dirs, fv.path),
+            })
+
+    deserts.sort(key=lambda item: (-item["score"], item["candidate_count"], item["file"]))
+    mirror_ratio = mirrored_count / max(source_count, 1)
+    return {
+        "schema_version": 1,
+        "source_files": source_count,
+        "test_files": len(test_paths),
+        "mirrored_source_files": mirrored_count,
+        "mirror_ratio": round(mirror_ratio, 3),
+        "deserts": deserts[:max_results],
+        "confidence": "mixed — structural mirror only, not coverage" if test_paths else "low — no test files detected",
+        "guardrails": {
+            "mode": "report_only",
+            "not_coverage_proof": True,
+            "caveat": "A desert means no obvious structural test mirror, not that behavior is untested.",
+        },
+    }
+
+
+
+
+def _classify_verifiability(filepath: str, changed: list[str], verify_with: list[str],
+                            file_vocabs, analysis) -> dict:
+    """Classify a single changed file's verifiability class.
+    Returns {file, verifiability, gap_type, reason, confidence}."""
+    from vocab.scanner import _is_generated
+    base = os.path.splitext(os.path.basename(filepath))[0]
+    lower_base = base.lower()
+    lower_path = filepath.lower()
+
+    if _is_generated(filepath):
+        return {"file": filepath, "verifiability": "hard_to_verify", "gap_type": "generated",
+                "reason": "generated file; test mirror follows generator convention, not source structure", "confidence": "low"}
+
+    if lower_base in {"__init__", "index", "mod"} or lower_path.endswith(("/__init__.py", "/index.ts", "/mod.rs")):
+        return {"file": filepath, "verifiability": "hard_to_verify", "gap_type": "init_file",
+                "reason": "init files have no structural test mirror; check upstream module tests", "confidence": "low"}
+
+    if any(filepath.endswith(ext) for ext in (".yml", ".yaml", ".json", ".proto", ".sql", ".env", ".cfg")):
+        return {"file": filepath, "verifiability": "unverifiable", "gap_type": "declarative_only",
+                "reason": "declarative file; verify via integration or schema tests, not unit tests", "confidence": "low"}
+
+    if any(v.path == filepath for v in file_vocabs):
+        this_vocab = None
+        for v in file_vocabs:
+            if v.path == filepath:
+                this_vocab = v
+                break
+        if this_vocab:
+            inline_exports = [p for p in this_vocab.vocabulary if len(p) > 4 and p[0].isupper()]
+            exported_elsewhere = 0
+            for v in file_vocabs:
+                if v.path != filepath:
+                    for phrase in inline_exports:
+                        if phrase in v.vocabulary:
+                            exported_elsewhere += 1
+                            break
+        exported_elsewhere = 0
+        for v in file_vocabs:
+            if v.path != filepath:
+                for phrase in inline_exports:
+                    if phrase in v.vocabulary:
+                        exported_elsewhere += 1
+                        break
+        if exported_elsewhere > 0:
+            return {"file": filepath, "verifiability": "verifiable", "gap_type": "cross_package",
+                    "reason": f"identifiers appear in {exported_elsewhere} other packages; run integration suite", "confidence": "mixed"}
+
+    stem = os.path.splitext(os.path.basename(filepath))[0].replace(".", "").lower()
+    if any(stem in v.path.lower().replace(".test", "").replace("_test", "") for v in file_vocabs
+           if "test" in v.path.lower() or "tests/" in v.path.lower()):
+        return {"file": filepath, "verifiability": "verifiable", "gap_type": "well_mirrored",
+                "reason": "stem-matching test file found", "confidence": "high"}
+
+    return {"file": filepath, "verifiability": "verifiable", "gap_type": None,
+            "reason": "verification candidates found by structural scan", "confidence": "mixed"}
+
+
+
+
+def _route_path(path: str, changed: list[str], analysis, task: str | None = None) -> str:
+    """Determine the correct intervention tier for a given change set."""
+    from vocab.scanner import _is_generated
+    decl_exts = {".yml", ".yaml", ".json", ".proto", ".sql", ".env", ".cfg", ".toml", ".ini", ".md", ".txt"}
+
+    has_substance = bool(task and len(task) > 10 and task not in ("fix bug", "cleanup", "refactor", "tidy up", "misc"))
+
+    if all(any(f.endswith(e) for e in decl_exts) for f in changed):
+        return "verify" if has_substance else "none"
+    if len(changed) == 1 and _is_generated(changed[0]):
+        return "verify" if has_substance else "none"
+    # Removed phrase-count gate — tiny files still need verification if task has substance.
+    verify_with = _preflight_verify_files(changed, None, analysis.file_vocabs if analysis else [])
+    if not verify_with:
+        try:
+            matrix = entanglement_matrix(path, lookback_commits=50)
+            entangled = _entangled_candidates_for_changed(changed, matrix)
+            if not entangled:
+                return "human"
+        except Exception:
+            return "human"
+    try:
+        stability_data = compute_stability(path, weeks=12)
+        stable_by_file = {item["file"]: item for item in stability_data}
+        for f in changed:
+            if f in stable_by_file and stable_by_file[f].get("persistence", 0) >= 0.8:
+                return "contract"
+    except Exception:
+        pass
+    return "verify"
+
+
+def _adaptive_route(path: str, changed: list[str], analysis, task: str | None = None) -> dict:
+    """Returns {action, condition, route_reason} with fragment matrix awareness."""
+    default_action = _route_path(path, changed, analysis, task)
+    file_types = [_file_type(f) for f in changed]
+    dom_type = max(set(file_types), key=file_types.count) if file_types else "unknown"
+    repo = os.path.basename(os.path.realpath(path))
+    matrix = _load_fragment_matrix(path)
+    cand_conditions = ["cartridge", "verify_entangle", "verify_scope"]
+    best = {"condition": default_action, "hit_rate": 0, "trials": 0}
+    for cond in cand_conditions:
+        key = (repo, dom_type, cond)
+        entry = matrix.get(key)
+        if entry and entry["trial_count"] >= 3:
+            hit_rate = entry["hit_count"] / entry["trial_count"]
+            if hit_rate > best["hit_rate"]:
+                best = {"condition": cond, "hit_rate": hit_rate, "trials": entry["trial_count"]}
+    if best["hit_rate"] >= 0.8 and best["condition"] != default_action and best["trials"] >= 3:
+        return {"action": "verify", "condition": best["condition"], "route_reason": f"fragment matrix: {repo}/{dom_type} -> {best['condition']} ({best['hit_rate']:.0%}, {best['trials']} trials)"}
+    return {"action": default_action, "condition": default_action, "route_reason": "default rules"}
+
+
+def route_recommendation(path: str, task: str | None = None, files: list[str] | None = None) -> dict:
+    """Decide intervention tier: none / verify / contract / human.
+
+    Routes trivial changes past the LLM, uses cartridge for standard
+    verification, escalates to contract for risky changes, and flags
+    verification deserts for human review.
+    """
+    from vocab.scanner import scan_codebase
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository.", "schema_version": 1}
+    path = os.path.abspath(path)
+    normalized_files = _normalize_preflight_files(path, files or []) if files else []
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception:
+        analysis = None
+
+    if normalized_files:
+        adaptive = _adaptive_route(path, normalized_files, analysis, task)
+        action = adaptive["action"]
+        cond = adaptive.get("condition", action)
+        route_reason = adaptive.get("route_reason", "adaptive")
+    elif task and _task_is_vague(task):
+        action = "none"
+    elif task:
+        action = "verify"
+    else:
+        action = "human"
+
+    reasons: list[str] = []
+    warnings: list[str] = []
+    command: list[str] = []
+
+    if action == "none":
+        command = []
+        reasons.append("change is structurally trivial; no LLM verification needed")
+        fallback = _preflight_verify_files(normalized_files, None, analysis.file_vocabs if analysis else [])
+        if fallback:
+            reasons.append(f"fallback: {len(fallback)} structural candidates available as safety net")
+    elif action == "verify":
+        command = ["vocab", "cartridge", "--path", path]
+        for f in normalized_files[:10]:
+            command.extend(["--files", f])
+        if task:
+            command.extend(["--task", task])
+        reasons.append("file-scoped verification cartridge available")
+    elif action == "contract":
+        command = ["vocab", "contract", "--path", path, "--format", "tool"]
+        for f in normalized_files[:10]:
+            command.extend(["--files", f])
+        if task:
+            command.extend(["--task", task])
+        reasons.append("risky change set; use ID-coded contract")
+    elif action == "human":
+        command = ["vocab", "inspect", path]
+        reasons.append("verification desert or no file scope; human review recommended")
+
+    deserts = verification_deserts(path, max_results=5)
+    if not deserts.get("error"):
+        mirror_ratio = deserts.get("mirror_ratio", 0.0)
+        if mirror_ratio < 0.25 and _is_weird_language(path):
+            warnings.append("verification topology is sparse; treat suggestions as low confidence")
+
+    return {
+        "schema_version": 1,
+        "action": action,
+        "route_reason": reasons[0] if reasons else "unknown",
+        "command": command,
+        "reasons": reasons,
+        "warnings": warnings,
+        "policy": {
+            "intervention_tier": action,
+            "null_route_threshold": "trivial_declarative_generated_changes_get_no_llm",
+            "verify_threshold": "default_file_scoped_guidance",
+            "contract_threshold": "stable_anchor_or_broad_mirror_gap",
+            "human_threshold": "verification_desert_or_no_file_scope",
+        },
+        "confidence": "high" if normalized_files else "mixed",
+    }
+
+
 def build_contract(path: str = ".", files: list[str] | None = None,
                    task: str | None = None) -> dict:
     """Build an ID-coded structural edit contract for LLM plans.
@@ -893,6 +1704,8 @@ def build_contract(path: str = ".", files: list[str] | None = None,
     }
 
 
+
+
 def validate_plan(contract: dict, proposal: dict, allow_paths: bool = False) -> dict:
     """Validate an LLM plan against an ID-coded contract."""
     file_map = contract.get("files", {}) if isinstance(contract.get("files"), dict) else {}
@@ -965,532 +1778,6 @@ def validate_plan(contract: dict, proposal: dict, allow_paths: bool = False) -> 
     }
 
 
-def _contract_id(prefix: str, index: int, path: str) -> str:
-    import hashlib
-    suffix = hashlib.sha256(f"{prefix}:{index}:{path}".encode()).hexdigest()[0]
-    return f"{prefix}{index}{suffix}"
-
-
-def _string_list(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        return [item for item in value if isinstance(item, str)]
-    return []
-
-
-def _expand_scope_ids(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if not isinstance(value, list):
-        return []
-    result: list[str] = []
-    for item in value:
-        if isinstance(item, str):
-            result.append(item)
-        elif isinstance(item, dict) and isinstance(item.get("id"), str):
-            result.append(item["id"])
-    return result
-
-
-def _looks_like_path(value: str) -> bool:
-    return "/" in value or "\\" in value or bool(re.search(r"\.[A-Za-z0-9]{1,8}$", value))
-
-
-def _normalize_preflight_files(repo_path: str, files: list[str]) -> list[str]:
-    normalized = []
-    for item in files:
-        for raw in item.split(","):
-            raw = raw.strip()
-            if not raw:
-                continue
-            full = raw if os.path.isabs(raw) else os.path.join(repo_path, raw)
-            rel = os.path.relpath(full, repo_path) if os.path.isabs(raw) else raw
-            rel = rel.replace("\\", "/").lstrip("./")
-            if rel.startswith("../"):
-                continue
-            normalized.append(rel)
-    return normalized
-
-
-def _preflight_read_first(changed: list[str], bootstrap: dict | None, blast: list[dict]) -> list[str]:
-    reads = list(changed[:3])
-    if bootstrap:
-        for item in bootstrap.get("recommended_next_reads", []):
-            file = item.get("file")
-            if file and file not in reads:
-                reads.append(file)
-        for item in bootstrap.get("related_files_for_task", []):
-            file = item.get("file")
-            if file and item.get("role") != "test" and file not in reads:
-                reads.append(file)
-    for item in blast[:3]:
-        file = item.get("file")
-        if file and file not in reads:
-            reads.append(file)
-    return reads[:3]
-
-
-def _preflight_verify_files(changed: list[str], bootstrap: dict | None, file_vocabs) -> list[str]:
-    verify = []
-    bootstrap_added: set[str] = set()
-    if bootstrap:
-        for item in bootstrap.get("related_files_for_task", []):
-            file = item.get("file")
-            if file and item.get("role") == "test" and file not in verify:
-                verify.append(file)
-                bootstrap_added.add(file)
-    changed_bases = {os.path.splitext(os.path.basename(f))[0].replace(".", "").lower() for f in changed}
-    for fv in file_vocabs:
-        norm = fv.path.lower()
-        if "/test" not in norm and "tests/" not in norm and ".test." not in norm and "_test." not in norm:
-            continue
-        base = os.path.splitext(os.path.basename(fv.path))[0].replace(".test", "").replace("_test", "").lower()
-        if base in changed_bases and fv.path not in verify:
-            verify.append(fv.path)
-    changed_dirs = set()
-    for f in changed:
-        d = os.path.dirname(f)
-        if d:
-            changed_dirs.add(d)
-    verify.sort(key=lambda f: (
-        0 if f in bootstrap_added and os.path.splitext(os.path.basename(f))[0].replace(".test", "").replace("_test", "").lower() in changed_bases else
-        1 if f in bootstrap_added else
-        2 if os.path.dirname(f) in changed_dirs else
-        3,
-        f
-    ))
-    return verify[:5]
-
-
-def _explain_verify_candidates(changed: list[str], bootstrap: dict | None, file_vocabs, verify_with: list[str]) -> list[dict[str, str]]:
-    """Return per-candidate match reason for each verification file."""
-    if not verify_with:
-        return []
-    changed_bases = {os.path.splitext(os.path.basename(f))[0].replace(".", "").lower() for f in changed}
-    changed_dirs = set()
-    for f in changed:
-        parts = f.split("/")
-        if len(parts) > 1:
-            changed_dirs.add("/".join(parts[:-1]))
-    # Collect task-relevant tests
-    task_tests = set()
-    if bootstrap:
-        for item in bootstrap.get("related_files_for_task", []):
-            if item.get("role") == "test" and item.get("file"):
-                task_tests.add(item["file"])
-    details = []
-    for vpath in verify_with:
-        if vpath in task_tests:
-            details.append({"path": vpath, "reason": "task relevance"})
-            continue
-        vbase = os.path.splitext(os.path.basename(vpath))[0].replace(".test", "").replace("_test", "").lower()
-        if vbase in changed_bases:
-            details.append({"path": vpath, "reason": f"stem '{vbase}' matches changed file"})
-            continue
-        vdir = vpath.rsplit("/", 1)[0] if "/" in vpath else ""
-        if vdir in changed_dirs:
-            details.append({"path": vpath, "reason": f"same directory '{vdir}' as changed file"})
-            continue
-        details.append({"path": vpath, "reason": "test discovery convention"})
-    return details[:5]
-
-
-def _preflight_avoid(changed: list[str], stable_touched: list[dict], blast: list[dict], bootstrap: dict | None,
-                     verify_with: list[str] | None = None) -> list[str]:
-    avoid = []
-    excluded = set(changed) | set(verify_with or [])
-    if bootstrap:
-        for item in bootstrap.get("avoid_touching_without_context", []):
-            file = item.get("file")
-            if file and file not in excluded and item.get("persistence", 0) >= 0.8:
-                avoid.append(file)
-    for item in blast:
-        file = item.get("file")
-        if file and file not in excluded:
-            avoid.append(file)
-    return list(dict.fromkeys(avoid))[:5]
-
-
-def _preflight_reasons(changed: list[str], stable_touched: list[dict], blast: list[dict], mirror: dict) -> list[str]:
-    reasons = []
-    if stable_touched:
-        reasons.append(f"touches {len(stable_touched)} stable anchor{'s' if len(stable_touched) != 1 else ''}")
-    if blast:
-        reasons.append(f"reverse blast reaches {min(len(blast), 5)} ranked file{'s' if len(blast) != 1 else ''}")
-    if len(changed) > 3:
-        reasons.append(f"broad edit set ({len(changed)} files)")
-    mirror_ratio = mirror.get("mirror_ratio", 1.0) if mirror else 1.0
-    if mirror and mirror_ratio < 0.5:
-        reasons.append(f"source/test mirror is thin ({mirror_ratio:.0%})")
-    if not reasons:
-        reasons.append("file-scoped local scan")
-    return reasons[:4]
-
-
-def _preflight_risk(changed: list[str], stable_touched: list[dict], blast: list[dict]) -> str:
-    top_shared = blast[0].get("shared_concepts", 0) if blast else 0
-    if stable_touched and (top_shared > 10 or len(blast) > 10):
-        return "high"
-    if len(changed) > 10 or top_shared > 20:
-        return "high"
-    if stable_touched or top_shared > 8 or len(blast) > 5:
-        return "moderate"
-    return "low"
-
-
-def _preflight_confidence(changed: list[str], bootstrap: dict | None, file_vocabs) -> str:
-    existing = {fv.path for fv in file_vocabs}
-    coverage = sum(1 for f in changed if f in existing) / max(len(changed), 1)
-    relevance = bootstrap.get("task_relevance_score", 0.5) if bootstrap else 0.5
-    score = (coverage + relevance) / 2
-    if score >= 0.8:
-        return "high"
-    if score >= 0.5:
-        return "mixed"
-    return "low"
-
-
-def _classify_verifiability(filepath: str, changed: list[str], verify_with: list[str],
-                            file_vocabs, analysis) -> dict:
-    """Classify a single changed file's verifiability class.
-    Returns {file, verifiability, gap_type, reason, confidence}."""
-    from vocab.scanner import _is_generated
-    base = os.path.splitext(os.path.basename(filepath))[0]
-    lower_base = base.lower()
-    lower_path = filepath.lower()
-
-    if _is_generated(filepath):
-        return {"file": filepath, "verifiability": "hard_to_verify", "gap_type": "generated",
-                "reason": "generated file; test mirror follows generator convention, not source structure", "confidence": "low"}
-
-    if lower_base in {"__init__", "index", "mod"} or lower_path.endswith(("/__init__.py", "/index.ts", "/mod.rs")):
-        return {"file": filepath, "verifiability": "hard_to_verify", "gap_type": "init_file",
-                "reason": "init files have no structural test mirror; check upstream module tests", "confidence": "low"}
-
-    if any(filepath.endswith(ext) for ext in (".yml", ".yaml", ".json", ".proto", ".sql", ".env", ".cfg")):
-        return {"file": filepath, "verifiability": "unverifiable", "gap_type": "declarative_only",
-                "reason": "declarative file; verify via integration or schema tests, not unit tests", "confidence": "low"}
-
-    if any(v.path == filepath for v in file_vocabs):
-        this_vocab = None
-        for v in file_vocabs:
-            if v.path == filepath:
-                this_vocab = v
-                break
-        if this_vocab:
-            inline_exports = [p for p in this_vocab.vocabulary if len(p) > 4 and p[0].isupper()]
-            exported_elsewhere = 0
-            for v in file_vocabs:
-                if v.path != filepath:
-                    for phrase in inline_exports:
-                        if phrase in v.vocabulary:
-                            exported_elsewhere += 1
-                            break
-        exported_elsewhere = 0
-        for v in file_vocabs:
-            if v.path != filepath:
-                for phrase in inline_exports:
-                    if phrase in v.vocabulary:
-                        exported_elsewhere += 1
-                        break
-        if exported_elsewhere > 0:
-            return {"file": filepath, "verifiability": "verifiable", "gap_type": "cross_package",
-                    "reason": f"identifiers appear in {exported_elsewhere} other packages; run integration suite", "confidence": "mixed"}
-
-    stem = os.path.splitext(os.path.basename(filepath))[0].replace(".", "").lower()
-    if any(stem in v.path.lower().replace(".test", "").replace("_test", "") for v in file_vocabs
-           if "test" in v.path.lower() or "tests/" in v.path.lower()):
-        return {"file": filepath, "verifiability": "verifiable", "gap_type": "well_mirrored",
-                "reason": "stem-matching test file found", "confidence": "high"}
-
-    return {"file": filepath, "verifiability": "verifiable", "gap_type": None,
-            "reason": "verification candidates found by structural scan", "confidence": "mixed"}
-
-
-def _vaccination_notes(file_classifications: list[dict]) -> list[str]:
-    """Static 'memory cell' patterns injected when gap types are detected."""
-    _GAP_PATTERNS = {
-        "init_file": "Files named __init__*, index*, mod* have weak structural test mirrors. Manually check upstream module tests.",
-        "generated": "Generated files follow generator test conventions, not source structure. Check the generator's test output.",
-        "dead_code": "This file's identifiers appear nowhere else in the codebase. It may be unused or standalone.",
-        "cross_package": "This change's identifiers appear in multiple test packages. Run the full integration suite, not just unit tests.",
-        "declarative_only": "Config/schema files define behavior; verify via integration suite or schema tests.",
-    }
-    seen = set()
-    notes = []
-    for fc in file_classifications:
-        gap = fc.get("gap_type")
-        if gap and gap in _GAP_PATTERNS and gap not in seen:
-            seen.add(gap)
-            notes.append(_GAP_PATTERNS[gap])
-    return notes
-
-
-def _verification_confidence(changed: list[str], verify_with: list[str], mirror: dict | None, file_vocabs) -> dict:
-    existing = {fv.path for fv in file_vocabs}
-    existing_candidates = [path for path in verify_with if path in existing]
-    mirror_ratio = mirror.get("mirror_ratio", 0.0) if mirror else 0.0
-    source_count = len(changed)
-    candidate_count = len(verify_with)
-
-    reasons: list[str] = []
-    if candidate_count == 0:
-        level = "low"
-        reasons.append("no structural verification candidates found")
-    elif len(existing_candidates) < candidate_count:
-        level = "low"
-        reasons.append("some verification candidates were not found in the current scan")
-    elif mirror_ratio >= 0.7 and candidate_count >= 1:
-        level = "high"
-        reasons.append("source/test mirror signal is strong")
-    elif mirror_ratio >= 0.3 or candidate_count >= 1:
-        level = "mixed"
-        reasons.append("some verification candidates found, but mirror signal is thin")
-    else:
-        level = "low"
-        reasons.append("verification topology is sparse")
-
-    return {
-        "level": level,
-        "candidate_count": candidate_count,
-        "existing_candidate_count": len(existing_candidates),
-        "mirror_ratio": round(mirror_ratio, 3),
-        "reasons": reasons[:3],
-        "caveat": "Candidates are structural hints, not proof of test coverage.",
-    }
-
-
-def _edit_sprawl_guard(changed: list[str], avoid_expanding: list[str], stable_touched: list[dict], blast: list[dict]) -> dict:
-    questioned: list[dict] = []
-    blast_by_file = {item.get("file"): item for item in blast}
-    for file in avoid_expanding[:5]:
-        blast_item = blast_by_file.get(file, {})
-        shared = blast_item.get("shared_concepts", 0)
-        level = "high" if shared >= 20 else ("medium" if shared >= 8 else "low")
-        questioned.append({
-            "file": file,
-            "level": level,
-            "reason": f"outside requested edit set; shares {shared} structural concepts" if shared else "outside requested edit set",
-        })
-
-    return {
-        "mode": "report_only",
-        "allow_changed_files": changed[:10],
-        "question_extra_edits": questioned,
-        "stable_anchors_touched": stable_touched[:5],
-        "instruction": "Edit changed_files first. Treat extra edits as questionable unless the task explicitly requires them.",
-        "never_block": True,
-    }
-
-
-# ── Verification deserts ─────────────────────────────────────────
-
-def verification_deserts(path: str, max_results: int = 20) -> dict:
-    """Find source files with weak structural verification mirrors.
-
-    This is not test coverage. It only reports places where source files
-    lack obvious same-name, nearby, or task-convention test mirrors.
-    """
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository.", "schema_version": 1}
-
-    from vocab.scanner import scan_codebase, _is_generated, _is_lock_file, _DEAD_CODE_EXTS
-    from vocab.bootstrap import _task_file_role
-
-    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    if not analysis.file_vocabs:
-        return {"error": "No source files found.", "schema_version": 1}
-
-    all_paths = [fv.path for fv in analysis.file_vocabs]
-    test_paths = [p for p in all_paths if _task_file_role(p) == "test"]
-    test_by_stem: dict[str, list[str]] = defaultdict(list)
-    test_dirs = set()
-    for p in test_paths:
-        stem = _test_stem(p)
-        test_by_stem[stem].append(p)
-        parts = p.split("/")
-        for idx, part in enumerate(parts):
-            if "test" in part.lower():
-                test_dirs.add("/".join(parts[:idx + 1]))
-
-    deserts: list[dict] = []
-    source_count = 0
-    mirrored_count = 0
-    for fv in analysis.file_vocabs:
-        ext = os.path.splitext(fv.path)[1].lower()
-        if (ext not in _DEAD_CODE_EXTS or _task_file_role(fv.path) != "source"
-                or _is_generated(fv.path) or _is_lock_file(fv.path)
-                or fv.path.startswith((".reliary/", ".vocab-cache/"))
-                or os.path.basename(fv.path).startswith(".")):
-            continue
-        source_count += 1
-        stem = _source_stem(fv.path)
-        candidates = _verification_candidates_for_source(fv.path, stem, test_paths, test_by_stem)
-        score = _verification_desert_score(fv.path, candidates, test_dirs)
-        if candidates:
-            mirrored_count += 1
-        if score >= 0.55:
-            deserts.append({
-                "file": fv.path,
-                "score": round(score, 3),
-                "candidate_count": len(candidates),
-                "candidates": candidates[:3],
-                "reason": _verification_desert_reason(score, candidates, test_dirs, fv.path),
-            })
-
-    deserts.sort(key=lambda item: (-item["score"], item["candidate_count"], item["file"]))
-    mirror_ratio = mirrored_count / max(source_count, 1)
-    return {
-        "schema_version": 1,
-        "source_files": source_count,
-        "test_files": len(test_paths),
-        "mirrored_source_files": mirrored_count,
-        "mirror_ratio": round(mirror_ratio, 3),
-        "deserts": deserts[:max_results],
-        "confidence": "mixed — structural mirror only, not coverage" if test_paths else "low — no test files detected",
-        "guardrails": {
-            "mode": "report_only",
-            "not_coverage_proof": True,
-            "caveat": "A desert means no obvious structural test mirror, not that behavior is untested.",
-        },
-    }
-
-
-def _source_stem(path: str) -> str:
-    base = os.path.basename(path).lower()
-    stem = os.path.splitext(base)[0]
-    return stem.replace(".", "").replace("_", "").replace("-", "")
-
-
-def _test_stem(path: str) -> str:
-    base = os.path.basename(path).lower()
-    stem = os.path.splitext(base)[0]
-    for marker in ("test_", "_test", ".test", "spec_", "_spec", ".spec"):
-        stem = stem.replace(marker, "")
-    return stem.replace(".", "").replace("_", "").replace("-", "")
-
-
-def _verification_candidates_for_source(source_path: str, stem: str, test_paths: list[str], test_by_stem: dict[str, list[str]]) -> list[str]:
-    candidates = list(test_by_stem.get(stem, []))
-    source_parts = source_path.split("/")[:-1]
-    source_dir_tokens = {part.lower() for part in source_parts if part}
-    for test in test_paths:
-        if test in candidates:
-            continue
-        test_lower = test.lower()
-        if stem and stem in _test_stem(test):
-            candidates.append(test)
-            continue
-        overlap = source_dir_tokens & {part.lower() for part in test.split("/")[:-1]}
-        if overlap and os.path.basename(source_path).split(".")[0].lower() in test_lower:
-            candidates.append(test)
-    return list(dict.fromkeys(candidates))[:5]
-
-
-def _verification_desert_score(source_path: str, candidates: list[str], test_dirs: set[str]) -> float:
-    if candidates:
-        return 0.0 if len(candidates) >= 2 else 0.25
-    parts = source_path.split("/")
-    has_nearby_test_dir = any(source_path.startswith(prefix.rsplit("/", 1)[0]) for prefix in test_dirs if "/" in prefix)
-    score = 0.75
-    if not test_dirs:
-        score = 1.0
-    elif has_nearby_test_dir:
-        score = 0.55
-    if any(part in {"examples", "scripts", "docs"} for part in parts):
-        score = min(score, 0.45)
-    return score
-
-
-def _verification_desert_reason(score: float, candidates: list[str], test_dirs: set[str], source_path: str) -> str:
-    if candidates:
-        return "only one obvious verification candidate" if len(candidates) == 1 else "has structural test mirror"
-    if not test_dirs:
-        return "no test directories detected in scanned files"
-    if score >= 0.75:
-        return "no same-name or nearby test mirror found"
-    return "nearby test directory exists, but no direct source/test mirror found"
-
-
-# ── Vocab routing policy ─────────────────────────────────────────
-
-def route_recommendation(path: str, task: str | None = None, files: list[str] | None = None) -> dict:
-    """Decide intervention tier: none / verify / contract / human.
-
-    Routes trivial changes past the LLM, uses cartridge for standard
-    verification, escalates to contract for risky changes, and flags
-    verification deserts for human review.
-    """
-    from vocab.scanner import scan_codebase
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository.", "schema_version": 1}
-    path = os.path.abspath(path)
-    normalized_files = _normalize_preflight_files(path, files or []) if files else []
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception:
-        analysis = None
-
-    if normalized_files:
-        action = _route_path(path, normalized_files, analysis, task)
-    elif task and _task_is_vague(task):
-        action = "none"
-    elif task:
-        action = "verify"
-    else:
-        action = "human"
-
-    reasons: list[str] = []
-    warnings: list[str] = []
-    command: list[str] = []
-
-    if action == "none":
-        command = []
-        reasons.append("change is structurally trivial; no LLM verification needed")
-        fallback = _preflight_verify_files(normalized_files, None, analysis.file_vocabs if analysis else [])
-        if fallback:
-            reasons.append(f"fallback: {len(fallback)} structural candidates available as safety net")
-    elif action == "verify":
-        command = ["vocab", "cartridge", "--path", path]
-        for f in normalized_files[:10]:
-            command.extend(["--files", f])
-        if task:
-            command.extend(["--task", task])
-        reasons.append("file-scoped verification cartridge available")
-    elif action == "contract":
-        command = ["vocab", "contract", "--path", path, "--format", "tool"]
-        for f in normalized_files[:10]:
-            command.extend(["--files", f])
-        if task:
-            command.extend(["--task", task])
-        reasons.append("risky change set; use ID-coded contract")
-    elif action == "human":
-        command = ["vocab", "inspect", path]
-        reasons.append("verification desert or no file scope; human review recommended")
-
-    deserts = verification_deserts(path, max_results=5)
-    if not deserts.get("error"):
-        mirror_ratio = deserts.get("mirror_ratio", 0.0)
-        if mirror_ratio < 0.25 and _is_weird_language(path):
-            warnings.append("verification topology is sparse; treat suggestions as low confidence")
-
-    return {
-        "schema_version": 1,
-        "action": action,
-        "route_reason": reasons[0] if reasons else "unknown",
-        "command": command,
-        "reasons": reasons,
-        "warnings": warnings,
-        "policy": {
-            "intervention_tier": action,
-            "null_route_threshold": "trivial_declarative_generated_changes_get_no_llm",
-            "verify_threshold": "default_file_scoped_guidance",
-            "contract_threshold": "stable_anchor_or_broad_mirror_gap",
-            "human_threshold": "verification_desert_or_no_file_scope",
-        },
-        "confidence": "high" if normalized_files else "mixed",
-    }
 
 
 def _task_is_vague(task: str) -> bool:

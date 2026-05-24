@@ -157,6 +157,12 @@ PREFLIGHT_CONDITIONS = (
 
     # Null route (bypass LLM for trivial changes)
     "null_route",
+
+    # Deterministic verify only (unambiguous structural assignment)
+    "deterministic_only",
+
+    # Fragment matrix adaptive route (learns from past outcomes)
+    "fragment_route",
 )
 
 
@@ -649,6 +655,43 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         guidance = ""
     elif condition == "negotiate_simple":
         guidance = preflight_tool_guidance(case, include_sprawl_guard=True)
+    elif condition == "deterministic_only":
+        raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            det = p.get("deterministic_verify")
+            if det:
+                guidance = json.dumps({"deterministic_verify": det, "verification_candidates": p.get("verification_candidates", [])[:2]}, separators=(",",":"))
+            else:
+                ver = {"verification_candidates": p.get("verification_candidates", []), "confidence": p.get("confidence", "low")}
+                guidance = json.dumps(ver, separators=(",",":"))
+        except (json.JSONDecodeError, TypeError):
+            guidance = raw
+    elif condition == "fragment_route":
+        raw = run_vocab(case.path, ["route", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            action = p.get("action", "verify")
+            cond_over = p.get("condition", action)
+            if action == "none":
+                guidance = ""
+            elif cond_over == "verify_entangle":
+                raw2 = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+                try:
+                    p2 = json.loads(raw2) if raw2.strip() else {}
+                    ver = {"verification_candidates": p2.get("verification_candidates", []), "entangled_candidates": p2.get("entangled_candidates", []), "confidence": p2.get("confidence", "low")}
+                    guidance = json.dumps(ver, separators=(",",":"))
+                except (json.JSONDecodeError, TypeError):
+                    guidance = raw2
+            else:
+                cr = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+                try:
+                    cp = json.loads(cr) if cr.strip() else {}
+                    guidance = json.dumps(cp, separators=(",",":")) if cp and not cp.get("error") else ""
+                except (json.JSONDecodeError, TypeError):
+                    guidance = ""
+        except (json.JSONDecodeError, TypeError, Exception):
+            guidance = ""
 
     system = (
         "You are about to edit a candidate file. Decide verification and avoid unnecessary edit sprawl. "
