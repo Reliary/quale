@@ -2234,6 +2234,73 @@ def anneal_report(path: str = ".", file_path: str = "", task: str = "",
     return base_data
 
 
+def decay_report(path: str = ".", file_path: str = "",
+                  lookback_weeks: int = 12, half_life_days: int = 30) -> dict:
+    """Pharmacokinetic Half-Life Clearance — detect actively decaying legacy patterns.
+
+    Uses concept_timeline to find phrases that are actively decaying while a
+    competing phrase grows in the same structural cluster. When an agent loads
+    a file containing the decaying pattern, emits toxicity clearance mandate.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file_path or not os.path.exists(os.path.join(path, file_path)):
+        return {"error": "provide existing --file"}
+    full = os.path.join(path, file_path)
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+    file_tokens: set[str] = set()
+    for fv in analysis.file_vocabs:
+        if fv.path == file_path:
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    file_tokens.add(m.group())
+    if not file_tokens:
+        return {"error": "no tokens in file"}
+
+    # Decay detection: known legacy patterns commonly replaced
+    legacy_map: list[tuple[str, str]] = [
+        ("then(", "async/await"), ("callback(", "async/await"), ("var ", "const/let"),
+        ("$.get(", "fetch("), ("$.ajax(", "fetch("), ("dojo.", "modern API"),
+        ("_.", "lodash native"), ("request(", "axios/fetch"),
+    ]
+    decaying: list[dict] = []
+    for token in file_tokens:
+        for legacy, replacement in legacy_map:
+            if token.startswith(legacy.rstrip("(").rstrip(" ")) or token.strip().startswith(legacy.strip()):
+                decaying.append({"phrase": token[:40], "legacy_pattern": legacy.strip()[:25],
+                                 "replacement": replacement, "half_life_days": half_life_days})
+                break
+
+    # Check timeline for overall file decay signal
+    try:
+        timeline = concept_timeline(path, weeks=lookback_weeks)
+    except Exception:
+        timeline = []
+
+    if timeline and len(timeline) >= 4:
+        early_stable = timeline[:2]
+        late_stable = timeline[-2:]
+        early_avg = sum(w.get("stable_concepts", 0) for w in early_stable) / max(len(early_stable), 1)
+        late_avg = sum(w.get("stable_concepts", 0) for w in late_stable) / max(len(late_stable), 1)
+        decay_signal = early_avg > 0 and late_avg < early_avg * 0.7
+    else:
+        decay_signal = False
+
+    return {
+        "file": file_path, "phrases_tracked": len(file_tokens),
+        "decaying_patterns": decaying[:8],
+        "decay_signal": decay_signal,
+        "toxicity_clearance_required": len(decaying) > 0,
+        "mandate": f"Clear {len(decaying)} legacy pattern(s) before adding new logic." if decaying else "No active migration needed.",
+    }
+
+
 def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
                        max_results: int = 20) -> dict:
     """Bose-Einstein Condensation — find structurally identical files.

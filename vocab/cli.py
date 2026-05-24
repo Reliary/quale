@@ -1520,8 +1520,32 @@ def condensate_cmd(path=".", threshold: float = 0.90, format="compact"):
         typer.echo(json.dumps(data, indent=2)); return
     typer.echo(f'{data.get("files_scanned",0)} files scanned | {data.get("condensate_count",0)} condensate pairs >{threshold:.0%} overlap')
     for c in data.get("condensates", [])[:5]:
-        typer.echo(f'  {c["overlap"]:.0%}: {c["files"][0]}  ↔  {c["files"][1]}')
+        typer.echo(f'  {c["overlap"]:.0%}: {c["files"][0]}  \u2194  {c["files"][1]}')
         typer.echo(f'    shared: {", ".join(c["shared_phrases"][:3])}')
+
+
+@cli.command(name="decay", rich_help_panel="Inspection")
+def decay_cmd(path=".", file="", weeks=12, half_life=30, format="compact"):
+    from vocab.reports import decay_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not file:
+        typer.echo("provide --file", err=True); raise typer.Exit(1)
+    data = decay_report(path=p, file_path=file, lookback_weeks=weeks, half_life_days=half_life)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'{data.get("file","")}: {data.get("phrases_tracked",0)} tokens | {data.get("decaying_count",0)} decaying, {data.get("growing_count",0)} growing')
+    tc = data.get("cluster_competition", [])
+    if tc:
+        typer.echo(f'  {_color("TOXICITY CLEARANCE REQUIRED", "red")}')
+        for t in tc[:3]:
+            typer.echo(f'    {t["decaying"]} \u2192 {t["replacement"]} (similarity {t["similarity"]:.0%})')
+        typer.echo(f'  Mandate: {data.get("mandate","")}')
+    else:
+        typer.echo('  No active migration needed.')
 
 
 @cli.command(name="entropy", rich_help_panel="Inspection")
