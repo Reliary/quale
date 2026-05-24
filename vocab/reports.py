@@ -384,7 +384,7 @@ def entanglement_matrix(path: str = ".", lookback_commits: int = 200) -> dict:
             files = [f.decode("utf-8", errors="replace") for f in out.stdout.split(b"\0") if f]
         except Exception:
             continue
-        files = [f for f in files if f]
+        files = [f for f in files if f and "__pycache__" not in f and ".pyc" not in f]
         for f in files:
             file_counter[f] += 1
         if len(files) >= 2 and len(files) <= 50:
@@ -544,11 +544,7 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
     for e in entangled:
         if e["file"] not in all_candidates:
             all_candidates.append(e["file"])
-    # — Promote co-located files to front so marginal cutoff preserves them
-    for f in reversed(co_located_files):
-        if f in all_candidates:
-            all_candidates.remove(f)
-            all_candidates.insert(0, f)
+    # — Co-located files appended after vocabulary candidates, not promoted to front
     avoid = []
     if bootstrap:
         for item in bootstrap.get("avoid_touching_without_context", []):

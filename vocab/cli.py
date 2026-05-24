@@ -109,7 +109,7 @@ def _validate_refs(path: str, *refs: str) -> None:
         raise ValueError(f"Unknown git ref(s): {', '.join(missing)}")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def analyze(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json, html, quick")] = "terminal",
@@ -144,7 +144,7 @@ def analyze(
         typer.echo(format_terminal(analysis))
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def diff(
     ref_a: Annotated[str, typer.Argument(help="Base git ref")],
     ref_b: Annotated[str, typer.Argument(help="Target git ref")],
@@ -205,7 +205,7 @@ def diff(
             typer.echo(f"  {_color('-', 'red')} {phrase[:60]}")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def search(
     phrase: Annotated[str, typer.Argument(help="Phrase to search for")],
     paths: Annotated[list[str], typer.Argument(help="Repo paths to search")] = ["."],
@@ -260,7 +260,7 @@ def search(
             typer.echo(f"  … and {remaining} more matches")
 
 
-@cli.command()
+@cli.command(rich_help_panel="History")
 def lifecycle(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 24,
@@ -290,7 +290,7 @@ def lifecycle(
         typer.echo(format_lifecycles(data, weeks, show_all=False))
 
 
-@cli.command()
+@cli.command(rich_help_panel="CI")
 def blast(
     ref_a: Annotated[str, typer.Argument(help="Base git ref")],
     ref_b: Annotated[str, typer.Argument(help="Target git ref")],
@@ -328,7 +328,7 @@ def blast(
         typer.echo(format_blast_radius(pr_files, results, ref_a, ref_b))
 
 
-@cli.command()
+@cli.command(rich_help_panel="Agent")
 def preflight(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
@@ -468,7 +468,7 @@ def preflight(
     _print_preflight(data)
 
 
-@cli.command()
+@cli.command(rich_help_panel="Agent")
 def contract(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Allowed edit file(s); repeat or comma-separate")] = None,
@@ -501,7 +501,7 @@ def contract(
     typer.echo(json.dumps(data, separators=(",", ":")))
 
 
-@cli.command(name="check-plan")
+@cli.command(name="check-plan",  rich_help_panel="Agent")
 def check_plan(
     contract_file: Annotated[Path, typer.Option("--contract", "-c", help="Contract JSON file")],
     proposal_file: Annotated[Path | None, typer.Option("--proposal", "-p", help="Proposal JSON file; stdin when omitted")] = None,
@@ -537,7 +537,7 @@ def check_plan(
         typer.echo(json.dumps(result, separators=(",", ":")))
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def crystallography(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -616,7 +616,7 @@ def crystallography(
         typer.echo(c(f"  Caveat: {caveat}", "yellow"))
 
 
-@cli.command()
+@cli.command(rich_help_panel="Verification")
 def verify(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -674,7 +674,7 @@ def verify(
     typer.echo('Return the label of the best candidate (e.g., "A").')
 
 
-@cli.command(name="reverse-verify")
+@cli.command(name="reverse-verify",  rich_help_panel="Verification")
 def reverse_verify(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed test file(s); repeat or comma-separate")] = [],
@@ -707,7 +707,7 @@ def reverse_verify(
         typer.echo(f"  {c['path']}  ({c['reason']})")
 
 
-@cli.command(name="verify-classify")
+@cli.command(name="verify-classify",  rich_help_panel="Verification")
 def verify_classify(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -731,7 +731,7 @@ def verify_classify(
         typer.echo(f"  🧬 {v}")
 
 
-@cli.command(name="verify-bonds")
+@cli.command(name="verify-bonds",  rich_help_panel="Verification")
 def verify_bonds(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -752,7 +752,7 @@ def verify_bonds(
         typer.echo("No bonded test pairs found.")
 
 
-@cli.command(name="verify-drift")
+@cli.command(name="verify-drift",  rich_help_panel="Verification")
 def verify_drift(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     commits: Annotated[int, typer.Option("--commits", "-n", help="Commits to inspect")] = 10,
@@ -776,7 +776,7 @@ def verify_drift(
         typer.echo("  No drift detected.")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Verification")
 def deserts(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -821,7 +821,7 @@ def deserts(
     typer.echo("")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def entangle(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     lookback: Annotated[int, typer.Option("--lookback", "-n", help="Commits to scan")] = 200,
@@ -853,7 +853,7 @@ def entangle(
         typer.echo(f"  {p['file_a']:45s} ↔ {p['file_b']:45s}  count={p['co_change_count']:3d} prob={p['co_change_probability']:.2f}{marker}")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Agent")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -870,15 +870,25 @@ def cartridge(
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    typer.echo(f"Mode: {data['mode']}  |  Confidence: {data['confidence']}  |  Stop-after: {data['stop_after']}")
+    tier = data.get("tier", "unknown")
+    conf = data.get("confidence", "—")
+    stop = data.get("stop_after", "—")
+    if tier == "deterministic":
+        det = data.get("deterministic_verify", {})
+        typer.echo(f"Tier: deterministic  |  Verify: {det.get('file', '?')} (score={det.get('score', 0):.2f})")
+    elif tier == "desert":
+        typer.echo(f"Tier: desert  |  {data.get('desert_note', 'no structural candidates')}")
+    else:
+        typer.echo(f"Tier: {tier}  |  Confidence: {conf}  |  Stop-after: {stop}")
     if data.get("verification_candidates"):
         typer.echo("Verify candidates:")
         for c in data["verification_candidates"]:
             typer.echo(f"  {c}")
     if data.get("entangled_candidates"):
         typer.echo("Entangled candidates:")
-        for e in data["entangled_candidates"]:
-            typer.echo(f"  {e['file']}  (prob={e['score']:.2f})  {e.get('reason', '')}")
+        for e in data.get("entangled_candidates", []):
+            reason = e.get('reason', '') or f"prob={e.get('score',0):.2f}"
+            typer.echo(f"  {e['file']}  ({reason})")
     if data.get("negative_scope"):
         typer.echo("Avoid editing:")
         for f in data["negative_scope"]:
@@ -887,16 +897,18 @@ def cartridge(
         typer.echo(f"Desert: {data.get('desert_note', 'no candidates')}")
 
 
-@cli.command(name="check-diff")
+@cli.command(name="check-diff", rich_help_panel="CI")
 def check_diff(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     diff_ref: Annotated[str, typer.Option("--diff", help="Git ref to diff against (default HEAD~1)")] = "HEAD~1",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    fail_on_defect: Annotated[str | None, typer.Option("--fail-on-defect", help="Fail on given severity (low/moderate/high)")] = None,
 ):
     """Post-proposal defect scan: detect structural violations.
     
     Checks for stable anchor edits, generated file edits, mirror weakening,
-    and large change sets. Report-only — no semantic claims.
+    and large change sets. Report-only by default — use --fail-on-defect
+    to enforce a minimum severity threshold in CI.
     """
     from vocab.reports import check_diff_report
     data = check_diff_report(path=path, diff_ref=diff_ref)
@@ -913,9 +925,16 @@ def check_diff(
         severity = d.get("severity", "low")
         marker = "🔴" if severity == "high" else ("🟡" if severity == "moderate" else "⚪")
         typer.echo(f"  {marker} [{severity}] {d['type']}: {d['file']}  — {d.get('detail', '')}")
+    if fail_on_defect:
+        levels = {"low": 1, "moderate": 2, "high": 3}
+        threshold = levels.get(fail_on_defect, 0)
+        max_sev = data.get("max_severity", "none")
+        if levels.get(max_sev, 0) >= threshold:
+            typer.echo(f"  FAIL: max severity {max_sev} >= threshold {fail_on_defect}", err=True)
+            raise typer.Exit(1)
 
 
-@cli.command()
+@cli.command(rich_help_panel="Agent")
 def route(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     task: Annotated[str | None, typer.Option("--task", "-t", help="Task description")] = None,
@@ -961,7 +980,7 @@ def route(
     typer.echo("")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def clone(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     threshold: Annotated[float, typer.Option("--threshold", "-t", help="Similarity threshold (0-1)")] = 0.85,
@@ -986,7 +1005,7 @@ def clone(
             typer.echo(f"    {f}")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def landmarks(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     limit: Annotated[int, typer.Option("--limit", "-l", help="Max results")] = 10,
@@ -1006,7 +1025,7 @@ def landmarks(
         typer.echo(f"  {lm['uniqueness']:.2f}  {lm['language']:<12}  {lm['path']}  ({lm['unique_phrases']} unique phrases)")
 
 
-@cli.command()
+@cli.command(rich_help_panel="History")
 def timeline(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 12,
@@ -1050,7 +1069,7 @@ def timeline(
         typer.echo(f"  {wk['week']:<10} {wk['commits']:<8} {c(str(new), 'green'):>8} {c(str(retired), 'red'):>8} {wk['stable_concepts']:<8} {wk['total_concepts']:<8} {trend}")
 
 
-@cli.command()
+@cli.command(rich_help_panel="History")
 def stable(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 12,
@@ -1122,7 +1141,7 @@ def stable(
     typer.echo(c(f"\n  {len([x for x in data if x['persistence'] >= 0.8])} stable files, {len([x for x in data if x['persistence'] <= 0.3])} churn hotspots", "gray"))
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def explore(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
@@ -1476,7 +1495,7 @@ def _print_preflight_checklist(data: dict) -> None:
     typer.echo(c("  Report-only. Stop and inspect manually if risk is high or the changed file is unexpected.", "subheader"))
 
 
-@cli.command(name="agent-bootstrap")
+@cli.command(name="agent-bootstrap",  rich_help_panel="Agent")
 def agent_bootstrap(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description to find related files")] = None,
@@ -1658,7 +1677,7 @@ def agent_bootstrap(
         typer.echo("")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Agent")
 def skeleton(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -1695,7 +1714,7 @@ def skeleton(
         typer.echo(c(f"  Skip: tests follow {data['test_convention']} convention — already covered.", "gray"))
 
 
-@cli.command()
+@cli.command(rich_help_panel="History")
 def delta(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -1745,7 +1764,7 @@ def delta(
             typer.echo(f"    {c(a['type'], severity_color)}: {c(str(a.get('delta', '')), 'gray')}")
 
 
-@cli.command(name="ci-report")
+@cli.command(name="ci-report",  rich_help_panel="CI")
 def ci_report_cmd(
     ref_a: Annotated[str, typer.Argument(help="Base git ref (e.g. origin/main)")],
     ref_b: Annotated[str, typer.Argument(help="Target git ref (e.g. HEAD)")],
@@ -1885,7 +1904,7 @@ def ci_report_cmd(
         raise typer.Exit(gate_failures[0][0])
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def inspect(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -2016,7 +2035,7 @@ def inspect(
     typer.echo(c(f"{'━' * 60}", "cyan"))
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def modules(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
@@ -2029,7 +2048,7 @@ def modules(
         typer.echo(format_modules(data))
 
 
-@cli.command(name="help-agent")
+@cli.command(name="help-agent",  rich_help_panel="Utilities")
 def help_agent(task: Annotated[str, typer.Argument(help="Engineering task description")]):
     """Recommend useful vocab commands for an agent task."""
     task_lower = task.lower()
@@ -2093,7 +2112,7 @@ def help_agent(task: Annotated[str, typer.Argument(help="Engineering task descri
     }, indent=2))
 
 
-@cli.command()
+@cli.command(rich_help_panel="Cross-Repo")
 def compare(
     repo_a: Annotated[str, typer.Argument(help="First repo path")],
     repo_b: Annotated[str, typer.Argument(help="Second repo path")],
@@ -2140,7 +2159,7 @@ def compare(
             typer.echo(c(f"  drift {drift:.2f} < {fail_on_drift} PASS", "green"))
 
 
-@cli.command()
+@cli.command(rich_help_panel="History")
 def provenance(
     phrase: Annotated[str, typer.Argument(help="Phrase to trace")],
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
@@ -2160,7 +2179,7 @@ def provenance(
         typer.echo(f"{item['week']} {status} {item.get('file_count', 0)} files")
 
 
-@cli.command(name="fingerprint")
+@cli.command(name="fingerprint",  rich_help_panel="Utilities")
 def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo path")]):
     """Structural fingerprint of a file or entire repo."""
     target = os.path.abspath(target)
@@ -2180,7 +2199,7 @@ def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo pat
     typer.echo(f"Phrases: {vocab.size} unique / {len(seg_result.phrases)} total")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def orphans(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
@@ -2197,7 +2216,7 @@ def orphans(
         typer.echo(f"? {item['phrase']} {item['file']}")
 
 
-@cli.command(name="pr-report")
+@cli.command(name="pr-report",  rich_help_panel="CI")
 def pr_report(
     ref_a: Annotated[str, typer.Argument(help="Base git ref")],
     ref_b: Annotated[str, typer.Argument(help="Target git ref")],
@@ -2223,7 +2242,7 @@ def pr_report(
     typer.echo(format_pr_report_markdown(pr_files, blast_results, [], ref_a, ref_b, pattern_data=pattern_data))
 
 
-@cli.command()
+@cli.command(rich_help_panel="Utilities")
 def init(path: Annotated[str, typer.Argument(help="Path to repo")] = "."):
     """Generate a .vocab.yml config file and cache crystallography scan."""
     target = os.path.join(os.path.abspath(path), ".vocab.yml")
@@ -2293,7 +2312,7 @@ def main():
     cli()
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def lattice(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     base_ref: Annotated[str | None, typer.Option("--base", help="Base git ref (default: HEAD~1)")] = None,
@@ -2364,7 +2383,7 @@ def lattice(
         typer.echo("")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def patterns(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     base_ref: Annotated[str | None, typer.Option("--base", help="Base git ref (default: HEAD~1)")] = None,
@@ -2436,7 +2455,7 @@ def patterns(
         typer.echo("")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Utilities")
 def stop(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     read: Annotated[list[str] | None, typer.Option("--read", help="Files already read; repeat")] = None,
@@ -2493,7 +2512,7 @@ def stop(
     typer.echo("")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Inspection")
 def entropy(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks to analyze")] = 12,
@@ -2540,7 +2559,7 @@ def entropy(
         typer.echo("")
 
 
-@cli.command()
+@cli.command(rich_help_panel="History")
 def genesis(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     top: Annotated[int, typer.Option("--top", "-n", help="Max results per category")] = 20,
@@ -2605,7 +2624,7 @@ def genesis(
         typer.echo("")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Cross-Repo")
 def bond(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     top: Annotated[int, typer.Option("--top", "-n", help="Max results per bond type")] = 30,
@@ -2672,7 +2691,7 @@ def bond(
         typer.echo("")
 
 
-@cli.command(name="diff-structural")
+@cli.command(name="diff-structural",  rich_help_panel="Inspection")
 def diff_structural(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
     ref_a: Annotated[str | None, typer.Option("--before", help="Base ref (default: HEAD~1)")] = None,
@@ -2726,7 +2745,7 @@ def diff_structural(
     typer.echo("")
 
 
-@cli.command()
+@cli.command(rich_help_panel="Utilities")
 def ask(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     question: Annotated[str, typer.Argument(help="Question about the repo")] = "",
@@ -2788,7 +2807,7 @@ def ask(
     typer.echo(c(f"  {cap}", "gray"))
 
 
-@cli.command(name="verify-scope")
+@cli.command(name="verify-scope",  rich_help_panel="Agent")
 def verify_scope(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Expected/contract files; repeat or comma-separate")] = None,
@@ -2875,7 +2894,7 @@ def verify_scope(
     typer.echo(c("  Mode: report-only receipt; identifies scope changes, not correctness.", "gray"))
 
 
-@cli.command()
+@cli.command(rich_help_panel="Utilities")
 def calibration(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
