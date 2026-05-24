@@ -279,6 +279,11 @@ vocab drift-check --file src/billing.ts                   # detect velocity spik
 vocab forecast --files src/billing.ts                     # Doppler radar: forecast regression risk from bugfix history
 vocab mycorrhiza --files src/billing.ts                   # hidden structural dependencies (no imports)
 vocab isolate --task "Update billing" --format json       # structural module bisection (85% edit-in-top-3)
+vocab heisenberg --file worker.ts --diff "$(cat patch)"   # Heisenberg check: detects mixing refactor + feature in one commit
+vocab traffic-control --file UserProfile.tsx --intended-import api_client.ts  # Zoning: blocks direct leaf-to-root imports
+vocab pulsar --file core/worker.ts                        # Pulsar timing: detects deletion of stable structural anchors
+vocab decay --file billing.ts --metabolism                # Pharmacokinetics: detects actively decaying legacy patterns
+vocab condensate --threshold 0.90                         # Bose-Einstein condensation: structurally identical files across dirs
 ```
 
 ## Measured Effect (LLM Agent Harness)
