@@ -2457,6 +2457,116 @@ def decay_report(path: str = ".", file_path: str = "",
     }
 
 
+def heisenberg_check(path: str = ".", file_path: str = "",
+                      proposed_diff: str = "") -> dict:
+    """Heisenberg Uncertainty Principle of Refactoring.
+
+    Separates a proposed diff into 'new signal' (net-new tokens) and
+    'historical anchors' (stable tokens being modified/deleted).
+    If both appear in the same diff on the same file, the uncertainty
+    principle is violated — forces atomic commit split.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file_path or not proposed_diff:
+        return {"error": "provide --file and --diff"}
+    full = os.path.join(path, file_path)
+    if not os.path.exists(full):
+        return {"error": f"file not found: {file_path}"}
+
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+
+    # Current file tokens (the 'position' / historical anchors)
+    with open(full) as f:
+        current_text = f.read()
+    current_tokens = set(token_re.findall(current_text))
+
+    # Diff tokens (the 'velocity')
+    diff_tokens = set(token_re.findall(proposed_diff))
+
+    # Anchors: tokens present in the file that are modified in the diff
+    file_in_diff = current_tokens & diff_tokens
+
+    # New signal: tokens in the diff that DON'T exist in the current file
+    new_signal = diff_tokens - current_tokens
+
+    # Deleted anchors: anchors that are in the diff as removals
+    removed_markers = {"-", "removed", "deleted", "removal"}
+    removed_lines = [l for l in proposed_diff.split("\n") if l.startswith("-") and not l.startswith("---")]
+    removed_tokens: set[str] = set()
+    for l in removed_lines:
+        removed_tokens |= set(token_re.findall(l))
+    deleted_anchors = removed_tokens & current_tokens
+
+    has_new_signal = len(new_signal) >= 3
+    has_deleted_anchors = len(deleted_anchors) >= 1
+
+    return {
+        "file": file_path,
+        "current_tokens_current": len(current_tokens),
+        "new_signal_tokens": sorted(new_signal)[:8],
+        "deleted_anchors": sorted(deleted_anchors)[:8],
+        "uncertainty_violated": has_new_signal and has_deleted_anchors,
+        "heisenberg_check_pass": not (has_new_signal and has_deleted_anchors),
+        "mandate": "Split this diff: Commit 1 = refactor ONLY (move/rename anchors), Commit 2 = feature ONLY (add new signal)." if has_new_signal and has_deleted_anchors else "Uncertainty principle respected.",
+    }
+
+
+def traffic_control_report(path: str = ".", file_path: str = "",
+                            intended_import: str = "") -> dict:
+    """Zoning Variances — detect illegal Highway-to-Residential imports.
+
+    Uses graph centrality to classify files as Commercial (high centrality)
+    or Residential (low centrality). Blocks direct leaf-to-root imports,
+    requiring a Collector Road (intermediate service layer).
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file_path or not intended_import:
+        return {"error": "provide --file and --intended-import"}
+
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    file_centrality: dict[str, int] = {}
+    # Centrality = how many other files share vocabulary with this one
+    for fv in analysis.file_vocabs:
+        ft = set(m.group() for p in fv.vocabulary for m in token_re.finditer(p))
+        centrality = 0
+        for fv2 in analysis.file_vocabs:
+            if fv2.path != fv.path:
+                ft2 = set(m.group() for p in fv2.vocabulary for m in token_re.finditer(p))
+                if ft & ft2:
+                    centrality += 1
+        file_centrality[fv.path] = centrality
+
+    src_cent = file_centrality.get(file_path, 0)
+    dst_cent = file_centrality.get(intended_import, 0)
+    total = len(analysis.file_vocabs)
+    src_zone = "Residential" if src_cent < total * 0.1 else ("Collector" if src_cent < total * 0.3 else "Commercial")
+    dst_zone = "Residential" if dst_cent < total * 0.1 else ("Collector" if dst_cent < total * 0.3 else "Commercial")
+
+    violation = src_zone in ("Residential", "Collector") and dst_zone == "Commercial" and src_cent < dst_cent * 0.5
+
+    return {
+        "source_file": file_path,
+        "source_zone": src_zone,
+        "source_centrality": src_cent,
+        "intended_import": intended_import,
+        "import_zone": dst_zone,
+        "import_centrality": dst_cent,
+        "zoning_violation": violation,
+        "collector_suggestion": f"Route through a middle-layer service (Collector Road) in {'/services/' if '/' in file_path else ''}",
+        "mandate": "ZONING VIOLATION: Direct Residential-to-Commercial import blocked. Create or use an intermediate service layer." if violation else "Import route clear.",
+    }
+
+
 def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
                        max_results: int = 20) -> dict:
     """Bose-Einstein Condensation — find structurally identical files.

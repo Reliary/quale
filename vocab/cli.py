@@ -1428,6 +1428,51 @@ def pulsar_cmd(path=".", file="", format="compact"):
         typer.echo(f'  Pulsar rhythm stable.')
 
 
+@cli.command(name="heisenberg", rich_help_panel="Inspection")
+def heisenberg_cmd(path=".", file="", diff="", format="compact"):
+    from vocab.reports import heisenberg_check
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not file or not diff:
+        typer.echo("provide --file and --diff", err=True); raise typer.Exit(1)
+    data = heisenberg_check(path=p, file_path=file, proposed_diff=diff)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    if data.get("uncertainty_violated"):
+        typer.echo(f'  {_color("HEISENBERG VIOLATION", "red")}')
+        typer.echo(f'  New signal: {", ".join(data.get("new_signal_tokens", [])[:3])}')
+        typer.echo(f'  Deleted anchors: {", ".join(data.get("deleted_anchors", [])[:3])}')
+        typer.echo(f'  {data.get("mandate","")}')
+    else:
+        typer.echo(f'  Heisenberg principle respected.')
+
+
+@cli.command(name="traffic-control", rich_help_panel="Inspection")
+def traffic_control_cmd(path=".", file="", intended_import="", format="compact"):
+    from vocab.reports import traffic_control_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not file or not intended_import:
+        typer.echo("provide --file and --intended-import", err=True); raise typer.Exit(1)
+    data = traffic_control_report(path=p, file_path=file, intended_import=intended_import)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    src = data.get("source_zone", "?")
+    dst = data.get("import_zone", "?")
+    if data.get("zoning_violation"):
+        typer.echo(f'  {_color("ZONING VIOLATION", "red")}')
+        typer.echo(f'  {data.get("source_file","")} ({src}) -> {data.get("intended_import","")} ({dst})')
+        typer.echo(f'  {data.get("mandate","")}')
+    else:
+        typer.echo(f'  Import route clear. ({src} -> {dst})')
+
+
 @cli.command(name="decay", rich_help_panel="Inspection")
 def decay_cmd(path=".", file="", weeks=12, half_life=30,
               metabolism: Annotated[bool, typer.Option("--metabolism", help="Active Metabolism: verify pattern declining repo-wide")] = False,
