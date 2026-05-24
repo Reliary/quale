@@ -8,18 +8,18 @@ It is an orientation and drift tool. It reports evidence; it does not claim sema
 
 ```bash
 vocab help-agent "fix upload"          # discoverability: which command for which task
-vocab preflight --files src/spool.ts --format tool   # primary LLM surface: verifiation + scope control
+vocab edit-context --files src/spool.ts --format tool   # primary LLM surface: verification + scope control
 vocab inspect .                                        # human overview: structure, health, modules
 vocab ci-report origin/main HEAD --summary            # CI: blast radius + mirror gap
 ```
 
 ## Workflow 1: Agent Edits Code
 
-Use `preflight --format tool` when editing a known file. It constrains verification targets and prevents scope creep. The strongest measured surface is `verify_scope` — a stripped-down verification-only variant — at 83% verify hit with zero sprawl.
+Use `edit-context --format tool` when editing a known file. It constrains verification targets and prevents scope creep. The strongest measured surface is `verify_scope` — a stripped-down verification-only variant — at 83% verify hit with zero sprawl.
 
 ```bash
-vocab preflight --files src/spool.ts --task "change upload" --format tool   # per-task scope control
-vocab preflight --diff HEAD~1 --task "change upload" --format tool           # diff-scoped
+vocab edit-context --files src/spool.ts --task "change upload" --format tool   # per-task scope control
+vocab edit-context --diff HEAD~1 --task "change upload" --format tool           # diff-scoped
 ```
 
 Harness results (12-repo, 3-trial, `deepseek-v4-flash`):
@@ -27,16 +27,16 @@ Harness results (12-repo, 3-trial, `deepseek-v4-flash`):
 | Condition | Verify hit | Sprawl | Tokens | Efficiency |
 |-----------|-----------|--------|--------|------------|
 | baseline (no vocab) | 17% | 0.5 | 1,060 | 0.83 |
-| `preflight --format tool` (full) | **75%** | **0.0** | 1,658 | 1.60 |
-| `diff_preflight` (diff-scoped) | **75%** | **0.0** | 1,621 | 1.63 |
+| `edit-context --format tool` (full) | **75%** | **0.0** | 1,658 | 1.60 |
+| `diff_edit-context` (diff-scoped) | **75%** | **0.0** | 1,621 | 1.63 |
 | `verify_scope` (verification-only) | **83%** | **0.0** | 1,233 | **2.29** |
 
-`verify_scope` (available as `--format tool` on preflight) strips down to verification candidates and confidence only — no edit decisions. Removing the edit decision reduces cognitive load and improves verification accuracy. Use it when you only need test-file selection.
+`verify_scope` (available as `--format tool` on edit-context) strips down to verification candidates and confidence only — no edit decisions. Removing the edit decision reduces cognitive load and improves verification accuracy. Use it when you only need test-file selection.
 
-For initial repo orientation (not per-task), use `crystallography`:
+For initial repo orientation (not per-task), use `repo-map`:
 
 ```bash
-vocab crystallography --path . --format json   # ~100 token repo skeleton
+vocab repo-map --path . --format json   # ~100 token repo skeleton
 ```
 
 For weak models (or when a step-by-step protocol is needed):
@@ -49,28 +49,28 @@ Do not treat `agent-bootstrap` as proof that a strong model will find files bett
 
 ## Workflow 2: Human Reviews A PR
 
-Use `preflight` when you already know the file or diff being edited:
+Use `edit-context` when you already know the file or diff being edited:
 
 ```bash
-vocab preflight --files src/spool.ts --task "change upload behavior"
-vocab preflight --files src/spool.ts --format tool
-vocab preflight --diff origin/main --format checklist
-vocab preflight --diff HEAD~1 --format json
+vocab edit-context --files src/spool.ts --task "change upload behavior"
+vocab edit-context --files src/spool.ts --format tool
+vocab edit-context --diff origin/main --format checklist
+vocab edit-context --diff HEAD~1 --format json
 ```
 
-`preflight` is intentionally file-scoped. It reports capped structural evidence: changed files, read-first context, verification candidates, stable anchors, reverse blast, risk, confidence, and a local-only privacy receipt. It does not claim semantic correctness.
+`edit-context` is intentionally file-scoped. It reports capped structural evidence: changed files, read-first context, verification candidates, stable anchors, reverse blast, risk, confidence, and a local-only privacy receipt. It does not claim semantic correctness.
 
 The strongest measured uses are verification selection and scope control:
 
 | Condition | Verify hit | Sprawl | Tokens | Efficiency |
 |-----------|-----------|--------|--------|------------|
 | baseline (no vocab) | 17% | 0.5 | 1,060 | 0.83 |
-| `preflight --format tool` (oneline) | **75%** | **0.0** | 1,658 | 1.60 |
-| `diff_preflight` (diff-scoped) | **75%** | **0.0** | 1,621 | 1.63 |
+| `edit-context --format tool` (oneline) | **75%** | **0.0** | 1,658 | 1.60 |
+| `diff_edit-context` (diff-scoped) | **75%** | **0.0** | 1,621 | 1.63 |
 | `verify_scope` (verification-only) | **83%** | **0.0** | 1,233 | **2.29** |
 | contract --format tool | TBD (experimental) | 0.25 | ~1,800 | TBD |
 
-The effect is strongest on private/unseen TypeScript/Python-ish repos and weak on weird-language public repos where test discovery is structurally poor. Treat `preflight` as a local review/edit scaffold, not as an oracle.
+The effect is strongest on private/unseen TypeScript/Python-ish repos and weak on weird-language public repos where test discovery is structurally poor. Treat `edit-context` as a local review/edit scaffold, not as an oracle.
 
 Preflight guardrails:
 
@@ -79,22 +79,22 @@ Preflight guardrails:
 - `verification_confidence` explains whether structural test mirrors are strong, mixed, or weak.
 - `edit_sprawl_guard` asks agents to question extra edits outside the requested file set.
 - output is report-only and must not be used as an automatic prompt-injection or blocking policy.
-- every preflight JSON payload includes `guardrails.mode = "report_only"` and `guardrails.caveat = "May be wrong; inspect before acting."`
+- every edit-context JSON payload includes `guardrails.mode = "report_only"` and `guardrails.caveat = "May be wrong; inspect before acting."`
 
 If you are not sure whether `vocab` should be used, ask the router:
 
 ```bash
 vocab route --task "fix upload"                         # often says no_vocab / skeleton only
-vocab route --files src/spool.ts --task "fix upload"     # routes to preflight_tool
+vocab route --files src/spool.ts --task "fix upload"     # routes to edit-context_tool
 ```
 
-The router encodes measured behavior: task-only bootstrap can hurt strong-model discovery, while file-scoped preflight reduces sprawl and helps verification.
+The router encodes measured behavior: task-only bootstrap can hurt strong-model discovery, while file-scoped edit-context reduces sprawl and helps verification.
 
 LLM UI rule of thumb:
 
 - unknown files + vague task: **do not add vocab**; search normally
 - unknown files + scoped task: use `vocab skeleton` only
-- known files or diff: use `vocab preflight --format tool`
+- known files or diff: use `vocab edit-context --format tool`
 - high-risk edit: include the `edit_sprawl_guard` and verification confidence fields
 
 Experimental deterministic contracts:
@@ -105,7 +105,7 @@ vocab contract --files src/spool.ts --format prompt
 vocab check-plan --contract contract.json --proposal proposal.json --format json
 ```
 
-`contract` converts paths into bounded IDs: `F*` for allowed edits, `T*` for verification choices, and `B*` for boundary/context files. `check-plan` validates the LLM's returned IDs and rejects unknown IDs, raw paths, edits outside the allowed scope, and boundary edits that did not request `expand_scope`. In the first focused harness, contracts eliminated raw-path hallucination and invalid IDs, but did not beat `preflight --format tool` on sprawl; keep this path experimental for now.
+`contract` converts paths into bounded IDs: `F*` for allowed edits, `T*` for verification choices, and `B*` for boundary/context files. `check-plan` validates the LLM's returned IDs and rejects unknown IDs, raw paths, edits outside the allowed scope, and boundary edits that did not request `expand_scope`. In the first focused harness, contracts eliminated raw-path hallucination and invalid IDs, but did not beat `edit-context --format tool` on sprawl; keep this path experimental for now.
 
 Use `ci-report` locally to see structural impact before review:
 
@@ -153,16 +153,16 @@ Use the harness when changing agent-facing output:
 
 ```bash
 python scripts/evaluate_vocab_effect.py --dry-run --max-cases 2
-python scripts/evaluate_vocab_effect.py --suite preflight --trials 3
-python scripts/analyze_effect_failures.py /tmp/vocab-effect-preflight-3trial.json
+python scripts/evaluate_vocab_effect.py --suite edit-context --trials 3
+python scripts/analyze_effect_failures.py /tmp/vocab-effect-edit-context-3trial.json
 ```
 
-The harness compares baseline prompts against `candidate_baseline`, `preflight --format tool`, `diff_preflight`, `route_policy`, `verify_scope`, `ask`, `negotiate_simple`, and other conditions across likely-seen public repos, weird-language public repos, and private/unseen repos. It records parse/error rates, verification hits, edit sprawl, and token cost.
+The harness compares baseline prompts against `candidate_baseline`, `edit-context --format tool`, `diff_edit-context`, `route_policy`, `verify_scope`, `ask`, `negotiate_simple`, and other conditions across likely-seen public repos, weird-language public repos, and private/unseen repos. It records parse/error rates, verification hits, edit sprawl, and token cost.
 
 Decision rule:
 
-- keep `preflight --format tool` as the primary LLM surface: 75% verify, 0 sprawl
-- keep `diff_preflight` for PR/diff workflows: 100% verify, 0 sprawl
+- keep `edit-context --format tool` as the primary LLM surface: 75% verify, 0 sprawl
+- keep `diff_edit-context` for PR/diff workflows: 100% verify, 0 sprawl
 - kill `ask`: 0% verify (worse than baseline)
 - `contract` path: experimental, needs more harness trials
 - do not add automatic prompt injection unless a harness shows a clear behavioral win
@@ -186,16 +186,16 @@ For now, `vocab` is intended to stand on its own as the public trust artifact. R
 
 ## LLM Channel
 
-These commands are designed to be injected into LLM system prompts or used as tool calls. The primary proven surface is `verify_scope` (83% verify, 0 sprawl — the verification-only subset of preflight). The full `preflight --format tool` (75% verify, 0 sprawl) adds edit-scope guardrails.
+These commands are designed to be injected into LLM system prompts or used as tool calls. The primary proven surface is `verify_scope` (83% verify, 0 sprawl — the verification-only subset of edit-context). The full `edit-context --format tool` (75% verify, 0 sprawl) adds edit-scope guardrails.
 
 ```bash
-vocab preflight --files src/spool.ts --format tool   # LLM-tool preflight (proven)
-vocab crystallography --path .                        # ~100 token repo skeleton (orientation)
-vocab preflight --diff HEAD~1 --format tool            # diff-scoped preflight (75% verify)
+vocab edit-context --files src/spool.ts --format tool   # LLM-tool edit-context (proven)
+vocab repo-map --path .                        # ~100 token repo skeleton (orientation)
+vocab edit-context --diff HEAD~1 --format tool            # diff-scoped edit-context (75% verify)
 vocab contract --files src/spool.ts --format tool      # ID-coded scope (experimental)
 ```
 
-`preflight --format tool` returns a compact 12-field JSON payload designed for LLM tool-parsing. The verification-only subset (extracting `verification_mc` and `verification_confidence` fields) achieves the highest measured efficiency (2.29) by removing the edit-decision overhead.
+`edit-context --format tool` returns a compact 12-field JSON payload designed for LLM tool-parsing. The verification-only subset (extracting `verification_mc` and `verification_confidence` fields) achieves the highest measured efficiency (2.29) by removing the edit-decision overhead.
 
 Key fields:
 
@@ -206,7 +206,7 @@ Key fields:
 
 The compact oneline format (`separators=(",", ":")`) saves ~120 tokens over pretty-printed JSON with no measurable accuracy loss.
 
-`contract --format tool` converts paths into bounded IDs (`F*` edit, `T*` verify, `B*` boundary) for hallucination-resistant scope control. Requires paired `check-plan` validation. Experimental — harness shows 0 invalid IDs but slightly higher sprawl than preflight alone.
+`contract --format tool` converts paths into bounded IDs (`F*` edit, `T*` verify, `B*` boundary) for hallucination-resistant scope control. Requires paired `check-plan` validation. Experimental — harness shows 0 invalid IDs but slightly higher sprawl than edit-context alone.
 
 All payloads include `guardrails.mode: "report_only"`, `guardrails.caveat: "May be wrong; inspect before acting."`, and `schema_version` for downstream handling.
 
@@ -214,16 +214,16 @@ All payloads include `guardrails.mode: "report_only"`, `guardrails.caveat: "May 
 
 ### Agent: Scope Control (Proven)
 ```bash
-vocab preflight --files src/spool.ts --task "..." --format tool  # 75% verify, 0 sprawl
-vocab preflight --diff HEAD~1 --task "..." --format tool           # 75% verify (diff-scoped)
-vocab preflight --files src/spool.ts --task "..." --format verify  # 83% verify (verification-only)
+vocab edit-context --files src/spool.ts --task "..." --format tool  # 75% verify, 0 sprawl
+vocab edit-context --diff HEAD~1 --task "..." --format tool           # 75% verify (diff-scoped)
+vocab edit-context --files src/spool.ts --task "..." --format verify  # 83% verify (verification-only)
 vocab contract --files src/spool.ts --task "..." --format tool     # ID-coded scope (experimental)
 vocab check-plan --contract c.json --proposal p.json               # validate LLM proposal
 ```
 
 ### Agent: Orientation (Secondary)
 ```bash
-vocab crystallography --path . --format json         # ~100 token repo skeleton
+vocab repo-map --path . --format json         # ~100 token repo skeleton
 vocab agent-bootstrap . --task "..." --format checklist  # weak-model step-by-step
 vocab help-agent "debug upload"                     # discoverability: which command?
 ```
@@ -233,14 +233,14 @@ vocab help-agent "debug upload"                     # discoverability: which com
 vocab inspect .                         # comprehensive overview + health score
 vocab explore . --themes                # onboarding map and themes
 vocab modules .                         # parser-free module boundaries
-vocab deserts --path .                  # source files with weak test mirrors
-vocab stop --path . --read file1.ts     # exploration entropy gauge
+vocab test-gaps --path .                  # source files with weak test mirrors
+    vocab stop --path . --read file1.ts     # exploration entropy gauge
 ```
 
 ### Human: Preflight & Guardrails
 ```bash
-vocab preflight --files src/spool.ts --task "..."   # file-scoped risk card (human)
-vocab preflight --diff origin/main                   # diff-scoped risk card (human)
+vocab edit-context --files src/spool.ts --task "..."   # file-scoped risk card (human)
+vocab edit-context --diff origin/main                   # diff-scoped risk card (human)
 vocab verify --files src/spool.ts                    # multiple-choice verification
 vocab route --files src/spool.ts --task "..."         # decide whether/how to use vocab
 ```
@@ -248,19 +248,19 @@ vocab route --files src/spool.ts --task "..."         # decide whether/how to us
 ### CI / PR Tools
 ```bash
 vocab ci-report origin/main HEAD --summary           # blast radius + mirror gap
-vocab lattice --path . --base main --head HEAD        # crystallographic defect detection
+vocab anomalies --path . --base main --head HEAD        # crystallographic defect detection
 vocab patterns --path . --base HEAD~1                 # refactoring pattern recognition
 vocab pr-report origin/main HEAD                      # consolidated markdown report
 ```
 
 ### History & Evolution
 ```bash
-vocab entropy --path . --weeks 12                    # vocabulary entropy velocity
+vocab vocabulary-trend --path . --weeks 12                    # vocabulary vocabulary-trend velocity
 vocab lifecycle . --weeks 24                         # phrase lifecycle (stable/decaying/etc)
 vocab stable .                                       # stable anchors and churn hotspots
 vocab provenance "SpoolManager" .                    # phrase history through git
 vocab timeline . --weeks 4                           # concept entry/exit timeline
-vocab genesis --path .                               # concept origin tracing (endogenous vs imported)
+vocab origins --path .                               # concept origin tracing (endogenous vs imported)
 ```
 
 ### Cross-Repo & Analysis
@@ -269,7 +269,7 @@ vocab compare ../repo-a ../repo-b --contract-only    # contract-surface drift
 vocab search SpoolManager ../repo-a ../repo-b        # cross-repo phrase search
 vocab skeleton --path .                              # prompt decompression: ~100-token skip directives
 vocab fingerprint .                                  # repo structural identity
-vocab bond --path .                                  # concept bond classification (covalent/ionic/metallic)
+vocab coupling --path .                              # concept coupling classification (tight/loose/independent)
 vocab diff --ref HEAD~10                             # vocabulary changes across git history
 vocab landmarks .                                    # characteristic phrases
 vocab delta --path .                                 # dead reckoning: structural changes since `vocab init`

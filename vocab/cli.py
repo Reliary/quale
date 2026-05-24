@@ -41,12 +41,12 @@ cli = typer.Typer(
     Orients you, catches hidden dependencies, and reveals architecture without parsers.
 
     Workflow groups (common uses):
-      ORIENTATION    agent-bootstrap, explore, modules, crystallography, inspect
-      PREFLIGHT      preflight, contract, check-plan, verify-scope, diff-structural, route, negotiate
-      HISTORY        timeline, lifecycle, stable, provenance, genesis
-      CROSS-REPO     compare, search, bond, lattice
+      ORIENTATION    agent-bootstrap, explore, modules, repo-map, inspect
+      PREFLIGHT      edit-context, contract, check-plan, verify-scope, diff-structural, route, negotiate
+      HISTORY        timeline, lifecycle, stable, provenance, origins
+      CROSS-REPO     compare, search, coupling, anomalies
       CI/GATES       ci-report, pr-report, gate
-      UTILITIES      analyze, diff, fingerprints, entropy, patterns, stop, help-agent, ask, calibration
+      UTILITIES      analyze, diff, fingerprints, vocabulary-trend, patterns, stop, help-agent, ask, calibration
     """
 )
 
@@ -328,7 +328,7 @@ def blast(
         typer.echo(format_blast_radius(pr_files, results, ref_a, ref_b))
 
 
-@cli.command(rich_help_panel="Agent")
+@cli.command(name="edit-context",  rich_help_panel="Agent")
 def preflight(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
@@ -337,12 +337,12 @@ def preflight(
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), verify, json, checklist, compact, llm, full")] = "tool",
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Show math-heavy signals (SNR, expansion risk details)")] = False,
 ):
-    """File-scoped pre-edit/review risk card.
+    """File-scoped edit context and risk card.
 
     Examples:
-      vocab preflight --files src/spool.ts --task "change upload behavior"
-      vocab preflight --diff HEAD~1 --format json
-      vocab preflight --files src/spool.ts --format tool
+      vocab edit-context --files src/spool.ts --task "change upload behavior"
+      vocab edit-context --diff HEAD~1 --format json
+      vocab edit-context --files src/spool.ts --format tool
     """
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -537,7 +537,7 @@ def check_plan(
         typer.echo(json.dumps(result, separators=(",", ":")))
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(name="repo-map",  rich_help_panel="Inspection")
 def crystallography(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -776,13 +776,13 @@ def verify_drift(
         typer.echo("  No drift detected.")
 
 
-@cli.command(rich_help_panel="Verification")
+@cli.command(name="test-gaps",  rich_help_panel="Verification")
 def deserts(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     top: Annotated[int, typer.Option("--top", "-n", help="Max desert rows")] = 20,
 ):
-    """Verification desert map: source files with weak test mirrors.
+    """Test gap map: source files with weak test mirrors.
 
     This is structural mirror analysis, not coverage proof.
     """
@@ -821,14 +821,14 @@ def deserts(
     typer.echo("")
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(name="co-change",  rich_help_panel="Inspection")
 def entangle(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     lookback: Annotated[int, typer.Option("--lookback", "-n", help="Commits to scan")] = 200,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     target: Annotated[str | None, typer.Option("--target", help="Show only pairs involving this file")] = None,
 ):
-    """Show file co-change entanglement from git history.
+    """Show file co-change pairs from git history.
 
     Entangled files share no vocabulary but are frequently committed together.
     Bridges the structural gap where phrase-matching fails.
@@ -853,7 +853,7 @@ def entangle(
         typer.echo(f"  {p['file_a']:45s} ↔ {p['file_b']:45s}  count={p['co_change_count']:3d} prob={p['co_change_probability']:.2f}{marker}")
 
 
-@cli.command(rich_help_panel="Agent")
+@cli.command(name="verify-packet",  rich_help_panel="Agent")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -861,7 +861,7 @@ def cartridge(
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
-    """Compressed context packet — smallest useful scope for LLM verification."""
+    """Verification packet — compressed scope for LLM verification."""
     from vocab.reports import cartridge_report
     data = cartridge_report(path=path, files=files or None, diff_ref=diff, task=task)
     if "error" in data:
@@ -943,9 +943,9 @@ def route(
 ):
     """Route intervention tier: none / verify / contract / human.
 
-    Routes trivial changes past the LLM, uses cartridge for standard
+    Routes trivial changes past the LLM, uses verify-packet for standard
     verification, escalates to contract for risky changes, and flags
-    verification deserts for human review.
+    test gaps for human review.
     """
     from vocab.reports import route_recommendation
 
@@ -1721,7 +1721,7 @@ def delta(
 ):
     """Dead reckoning: show structural changes since last vocab init scan.
 
-    Requires a cached scan from `vocab init` or `vocab crystallography --save`.
+    Requires a cached scan from `vocab init` or `vocab repo-map --save`.
     """
     from vocab.reports import repo_delta
 
@@ -2055,7 +2055,7 @@ def help_agent(task: Annotated[str, typer.Argument(help="Engineering task descri
     commands: list[tuple[str, str, bool]] = []
 
     # Primary agent surface — proven by harness
-    commands.append(("vocab preflight --path . --files <file> --task \"<task>\" --format tool",
+    commands.append(("vocab edit-context --path . --files <file> --task \"<task>\" --format tool",
                      "Verify candidates and stay in scope for a candidate edit file.", True))
     commands.append(("vocab contract --path . --files <file> --task \"<task>\" --format tool",
                      "Bounded ID-coded scope contract (experimental).", True))
@@ -2064,13 +2064,13 @@ def help_agent(task: Annotated[str, typer.Argument(help="Engineering task descri
 
     # Task-specific secondary
     if any(word in task_lower for word in ("pr", "review", "change", "refactor", "edit", "feature", "fix")):
-        commands.append(("vocab preflight --path . --diff HEAD~1 --task \"<task>\" --format tool",
-                         "Diff-scoped preflight for PR review (100% verify in testing).", True))
+        commands.append(("vocab edit-context --path . --diff HEAD~1 --task \"<task>\" --format tool",
+                         "Diff-scoped edit-context for PR review (100% verify in testing).", True))
         commands.append(("vocab ci-report origin/main HEAD --format json",
                          "Check structural impact before PR (human/CI tool).", False))
 
     # Orientation
-    commands.append(("vocab crystallography --path . --format json",
+    commands.append(("vocab repo-map --path . --format json",
                      "Compact repo skeleton for initial orientation (not per-task).", False))
     commands.append(("vocab agent-bootstrap . --task \"<task>\" --format checklist",
                      "Weak-model orientation: step-by-step protocol (not for strong models).", True))
@@ -2244,7 +2244,7 @@ def pr_report(
 
 @cli.command(rich_help_panel="Utilities")
 def init(path: Annotated[str, typer.Argument(help="Path to repo")] = "."):
-    """Generate a .vocab.yml config file and cache crystallography scan."""
+    """Generate a .vocab.yml config file and cache repo-map scan."""
     target = os.path.join(os.path.abspath(path), ".vocab.yml")
     if not os.path.exists(target):
         os.makedirs(os.path.abspath(path), exist_ok=True)
@@ -2271,7 +2271,7 @@ search:
         data = crystallography(path_abs)
         if "error" not in data:
             _save_cached(path_abs, data)
-            typer.echo(f"Cached crystallography scan for delta tracking.")
+            typer.echo(f"Cached repo-map scan for delta tracking.")
     else:
         typer.echo("Not a git repository; skipping cache.")
 
@@ -2292,10 +2292,10 @@ def main():
         typer.echo("  vocab pr-report origin/main HEAD")
         typer.echo("")
         typer.echo("History / structure:")
-        typer.echo("  vocab crystallography .               one-time repo summary (LLM)")
-        typer.echo("  vocab entropy --path .                entropy velocity over history")
+        typer.echo("  vocab repo-map .               one-time repo summary (LLM)")
+        typer.echo("  vocab vocabulary-trend --path .                vocabulary diversity over history")
         typer.echo("  vocab patterns --path .               refactoring pattern hints")
-        typer.echo("  vocab lattice --path .                structural defect summary")
+        typer.echo("  vocab anomalies --path .                structural defect summary")
         typer.echo("  vocab stable .")
         typer.echo("  vocab timeline . --format json")
         typer.echo("  vocab provenance SpoolManager . --format json")
@@ -2306,13 +2306,13 @@ def main():
         typer.echo("  vocab search SpoolManager ../repo-a ../repo-b")
         typer.echo("  vocab compare ../repo-a ../repo-b --format json")
         typer.echo("")
-        typer.echo("Other commands: analyze, diff, lifecycle, explore, clone, landmarks, orphans, init, bond, genesis, stop")
+        typer.echo("Other commands: analyze, diff, lifecycle, explore, clone, landmarks, orphans, init, coupling, origins, stop")
         typer.echo("Tip: most agent-facing commands support --format json.")
         return
     cli()
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(name="anomalies",  rich_help_panel="Inspection")
 def lattice(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     base_ref: Annotated[str | None, typer.Option("--base", help="Base git ref (default: HEAD~1)")] = None,
@@ -2320,7 +2320,7 @@ def lattice(
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     verbose: Annotated[bool, typer.Option("--verbose", help="Show example concepts instead of summary only")] = False,
 ):
-    """Crystallographic defect detection on vocabulary lattice.
+    """Detect structural anomalies and outliers in vocabulary.
 
     Compares vocabulary changes against the repo's co-occurrence
     structure, finding vacancies, interstitials, and substitutions.
@@ -2461,7 +2461,7 @@ def stop(
     read: Annotated[list[str] | None, typer.Option("--read", help="Files already read; repeat")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
-    """Agent exploration entropy: should you keep reading?
+    """Agent exploration: should you keep reading?
 
     Tracks concept coverage as you read files and signals
     when further exploration has diminishing returns.
@@ -2512,7 +2512,7 @@ def stop(
     typer.echo("")
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(name="vocabulary-trend",  rich_help_panel="Inspection")
 def entropy(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks to analyze")] = 12,
@@ -2553,20 +2553,20 @@ def entropy(
     typer.echo("")
 
     for snap in data.get("intervals", []):
-        bar_len = min(int(snap["entropy"] * 10), 40)
+        bar_len = min(int(snap["diversity"] * 10), 40)
         bar = "\u2588" * bar_len + "\u2591" * max(0, 40 - bar_len)
         typer.echo(f"  {c(str(snap['age_weeks']), 'gray'):>4}w ago  {bar}  {snap['entropy']:.4f}  ({snap['unique_phrases']} unique)")
         typer.echo("")
 
 
-@cli.command(rich_help_panel="History")
+@cli.command(name="origins",  rich_help_panel="History")
 def genesis(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     top: Annotated[int, typer.Option("--top", "-n", help="Max results per category")] = 20,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     verbose: Annotated[bool, typer.Option("--verbose", help="Show more example concepts")] = False,
 ):
-    """Concept origin tracing: which concepts are native vs imported?
+    """Concept origin: which concepts are native vs imported?
 
     Endogenous: exists only in one file.
     Imported: appears in 2-5 files — may be a shared dependency.
@@ -2624,14 +2624,14 @@ def genesis(
         typer.echo("")
 
 
-@cli.command(rich_help_panel="Cross-Repo")
+@cli.command(name="coupling",  rich_help_panel="Cross-Repo")
 def bond(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     top: Annotated[int, typer.Option("--top", "-n", help="Max results per bond type")] = 30,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     verbose: Annotated[bool, typer.Option("--verbose", help="Show more bond examples")] = False,
 ):
-    """Concept bond classification: covalent, ionic, metallic.
+    """Concept coupling classification: tightly bound, loosely bound, independent.
 
     Covalent: concepts that always appear together (Jaccard >= 0.9).
     Ionic: concepts that bridge exactly 2 files.
@@ -2701,7 +2701,7 @@ def diff_structural(
     """Structural fingerprint diff between two git refs.
 
     Compares repo fingerprints, detects lattice defects,
-    measures entropy acceleration, and lists changed files.
+    measures diversity acceleration, and lists changed files.
     All from grammar-free structural signals.
     """
     from vocab.reports import structural_diff
@@ -2726,10 +2726,10 @@ def diff_structural(
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(f"  Fingerprint changed: {c(str(data.get('fingerprint_changed', '?')), 'yellow')}")
     typer.echo(f"  Changed files: {c(str(data.get('changed_file_count', 0)), 'cyan')}")
-    if data.get("entropy_acceleration") is not None:
-        trend = data.get("entropy_trend", "stable")
+    if data.get("diversity_acceleration") is not None:
+        trend = data.get("diversity_trend", "stable")
         tc = "red" if trend == "accelerating" else "green"
-        typer.echo(f"  Entropy: {c(trend, tc)} ({data['entropy_acceleration']})")
+        typer.echo(f"  Entropy: {c(trend, tc)} ({data['diversity_acceleration']})")
     defects = data.get("defects", {})
     if defects:
         total = sum(len(v) for v in defects.values())
@@ -2817,7 +2817,7 @@ def verify_scope(
 ):
     """Post-edit scope verification: compare actual diff against expected contract.
 
-    Run after editing to verify scope matched the preflight commitment.
+    Run after editing to verify scope matched the edit-context commitment.
     Reports scope violations, unexpected stable anchor touches, and
     produces a structural receipt.
     """

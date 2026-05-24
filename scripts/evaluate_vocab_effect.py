@@ -162,7 +162,7 @@ CASES: tuple[Case, ...] = (
 )
 
 
-DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", "crystallography", "route_policy")
+DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", "repo-map", "route_policy")
 PREFLIGHT_CONDITIONS = (
     "candidate_baseline", "preflight_compact", "preflight_checklist", "verify_mcq",
     "preflight_tool", "preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy",
@@ -346,8 +346,12 @@ def score_preflight(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
                 if fp and fp != case.edit_file and fp not in extra_edits:
                     extra_edits.append(fp)
     semantic_sprawl = _semantic_sprawl_score(extra_edits, case.edit_file, case.task)
+    if not case.verify_files:
+        verify_hit = len(verify) == 0
+    else:
+        verify_hit = any(file in verify for file in case.verify_files)
     result = {
-        "verify_hit": any(file in verify for file in case.verify_files),
+        "verify_hit": verify_hit,
         "verify_hit_count": sum(1 for file in case.verify_files if file in verify),
         "extra_edit_count": len(extra_edits),
         "extra_edits": extra_edits[:5],
@@ -419,8 +423,8 @@ def discovery_messages(case: Case, condition: str, files: list[str]) -> list[dic
         guidance = run_vocab(case.path, ["agent-bootstrap", case.path, "--task", case.task, "--summary"])
     elif condition == "bootstrap_checklist":
         guidance = run_vocab(case.path, ["agent-bootstrap", case.path, "--task", case.task, "--format", "checklist"])
-    elif condition == "crystallography":
-        raw = run_vocab(case.path, ["crystallography", "--path", case.path, "--format", "json"])
+    elif condition == "repo-map":
+        raw = run_vocab(case.path, ["repo-map", "--path", case.path, "--format", "json"])
         try:
             parsed = json.loads(raw)
             crystallography = parsed.get("skeleton", raw)
@@ -491,9 +495,9 @@ def _decode_cartridge(p: dict) -> dict:
 def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dict[str, str]]:
     guidance = ""
     if condition == "preflight_compact":
-        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "compact"])
+        guidance = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "compact"])
     elif condition == "preflight_checklist":
-        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "checklist"])
+        guidance = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "checklist"])
     elif condition == "verify_mcq":
         guidance = run_vocab(case.path, ["verify", "--path", case.path, "--files", case.edit_file, "--task", case.task])
     elif condition == "preflight_tool":
@@ -503,11 +507,11 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
     elif condition == "desert_aware_preflight":
         guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
     elif condition == "preflight_tool_llm":
-        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "llm"])
+        guidance = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "llm"])
     elif condition == "preflight_tool_full":
-        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "full"])
+        guidance = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "full"])
     elif condition == "preflight_tool_calibrated":
-        guidance = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+        guidance = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
     elif condition == "negotiate":
         raw = run_vocab(case.path, ["negotiate", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
@@ -550,7 +554,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         guidance = run_vocab(case.path, ["contract", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", fmt])
     elif condition.startswith("knock_"):
         knock = condition.replace("knock_baseline_", "")
-        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+        raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
         try:
             p = json.loads(raw)
             baseline_keys = {"schema_version", "risk", "confidence", "reason",
@@ -574,7 +578,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             guidance = raw
     elif condition.startswith("fmt_"):
         style = condition.replace("fmt_baseline_", "")
-        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+        raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
         try:
             p = json.loads(raw)
             baseline_keys = {"schema_version", "risk", "confidence", "reason",
@@ -615,7 +619,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             guidance = raw
     elif condition.startswith("preflight_tool_abl_"):
         ablation = condition.replace("preflight_tool_abl_", "")
-        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+        raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
         try:
             parsed = json.loads(raw)
             if ablation == "no_cochange":
@@ -647,7 +651,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         preflight_guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
         guidance = f"Discovery overview:\n{discovery_guidance}\n\nEdit preflight:\n{preflight_guidance}"
     elif condition == "diff_preflight":
-        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--diff", "HEAD~0", "--task", case.task, "--format", "tool"])
+        raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--diff", "HEAD~0", "--task", case.task, "--format", "tool"])
         if "error" in raw.lower() or not raw.strip():
             raw = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
         else:
@@ -663,25 +667,25 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             except (json.JSONDecodeError, TypeError):
                 guidance = raw if raw else preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
     elif condition == "verify_classify":
-        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "verify"])
+        raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "verify"])
         guidance = raw
     elif condition == "cartridge":
-        raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        raw = run_vocab(case.path, ["verify-packet", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
             p = json.loads(raw) if raw.strip() else {}
             if p.get("desert"):
-                guidance = '{"desert":true}'
+                guidance = '{"desert":true,"desert_note":"no structural verification candidates exist — return empty verify array"}'
             else:
                 p = _decode_cartridge(p)
                 guidance = json.dumps(p, separators=(",", ":")) if p else "no cartridge output"
         except (json.JSONDecodeError, TypeError):
             guidance = raw
     elif condition == "verify_entangle":
-        raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        raw = run_vocab(case.path, ["verify-packet", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
             p = json.loads(raw) if raw.strip() else {}
             if p.get("desert"):
-                guidance = '{"desert":true}'
+                guidance = '{"desert":true,"desert_note":"no structural verification candidates exist — return empty verify array"}'
             else:
                 p = _decode_cartridge(p)
                 ver = {
@@ -698,7 +702,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             p = json.loads(raw) if raw.strip() else {}
             action = p.get("action", "verify")
             if action == "none":
-                cr = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+                cr = run_vocab(case.path, ["verify-packet", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
                 try:
                     cp = json.loads(cr) if cr.strip() else {}
                     cp = _decode_cartridge(cp)
@@ -710,7 +714,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 except (json.JSONDecodeError, TypeError):
                     guidance = ""
             elif action in ("verify", "human", "contract"):
-                cr = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+                cr = run_vocab(case.path, ["verify-packet", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
                 try:
                     cp = json.loads(cr) if cr.strip() else {}
                     cp = _decode_cartridge(cp)
@@ -725,7 +729,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         except (json.JSONDecodeError, TypeError, Exception):
             guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
     elif condition == "verify_scope":
-        raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+        raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
         try:
             p = json.loads(raw)
             ver = {"verification_mc": p.get("verification_mc", {}), "verification_confidence": p.get("verification_confidence", {})}
@@ -737,7 +741,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
     elif condition == "negotiate_simple":
         guidance = preflight_tool_guidance(case, include_sprawl_guard=True)
     elif condition == "deterministic_only":
-        raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        raw = run_vocab(case.path, ["verify-packet", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
             p = json.loads(raw) if raw.strip() else {}
             p = _decode_cartridge(p)
@@ -758,7 +762,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             if action == "none":
                 guidance = ""
             elif cond_over == "verify_entangle":
-                raw2 = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+                raw2 = run_vocab(case.path, ["verify-packet", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
                 try:
                     p2 = json.loads(raw2) if raw2.strip() else {}
                     p2 = _decode_cartridge(p2)
@@ -767,7 +771,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 except (json.JSONDecodeError, TypeError):
                     guidance = raw2
             else:
-                cr = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+                cr = run_vocab(case.path, ["verify-packet", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
                 try:
                     cp = json.loads(cr) if cr.strip() else {}
                     cp = _decode_cartridge(cp)
@@ -855,7 +859,7 @@ def run_route(case: Case, files: list[str] | None) -> dict[str, Any]:
 
 
 def preflight_tool_guidance(case: Case, include_sprawl_guard: bool = False, desert_aware: bool = False) -> str:
-    raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
+    raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
     try:
         parsed = json.loads(raw)
     except Exception:

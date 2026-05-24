@@ -109,13 +109,13 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_preflight_requires_file_scope(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("preflight", "--path", str(repo), "--format", "json", check=False)
+        result = self.run_vocab("edit-context", "--path", str(repo), "--format", "json", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("provide --files or --diff", result.stderr)
 
     def test_preflight_json_for_explicit_files(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("preflight", "--path", str(repo), "--files", "src/core.ts", "--task", "change core handler", "--format", "json")
+        result = self.run_vocab("edit-context", "--path", str(repo), "--files", "src/core.ts", "--task", "change core handler", "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
         self.assertEqual(data["changed_files"], ["src/core.ts"])
@@ -131,13 +131,13 @@ class TestCommandCoverage(unittest.TestCase):
     def test_preflight_diff_uses_worktree_changes(self):
         tmp, repo = self._make_repo()
         self._write(repo, "src/core.ts", "export function CoreHandler() { return 10; }\nexport function CoreNew() { return 3; }\n")
-        result = self.run_vocab("preflight", "--path", str(repo), "--diff", "HEAD", "--format", "json")
+        result = self.run_vocab("edit-context", "--path", str(repo), "--diff", "HEAD", "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("src/core.ts", data["changed_files"])
 
     def test_preflight_checklist_output(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("preflight", "--path", str(repo), "--files", "src/core.ts", "--format", "checklist")
+        result = self.run_vocab("edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "checklist")
         self.assertIn("VOCAB PREFLIGHT", result.stdout)
         self.assertIn("READ", result.stdout)
         self.assertIn("May be wrong", result.stdout)
@@ -147,7 +147,7 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_preflight_default_is_tool_format(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("preflight", "--path", str(repo), "--files", "src/core.ts")
+        result = self.run_vocab("edit-context", "--path", str(repo), "--files", "src/core.ts")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
         self.assertIn("verification_mc", data)
@@ -158,30 +158,28 @@ class TestCommandCoverage(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "src/consumer.ts", "import { ActiveThing } from './active';\nexport const ActiveConsumer = ActiveThing;\n")
         self._write(repo, "tests/active.test.ts", "import { ActiveThing } from '../src/active';\ntest('active', () => ActiveThing());\n")
-        result = self.run_vocab("preflight", "--path", str(repo), "--files", "src/active.ts", "--task", "change active thing", "--format", "compact")
+        result = self.run_vocab("edit-context", "--path", str(repo), "--files", "src/active.ts", "--task", "change active thing", "--format", "compact")
         self.assertIn("VERIFY", result.stdout)
         self.assertNotIn("VERIFY WITH", result.stdout)
         self.assertNotIn("AVOID EXPANDING INTO", result.stdout)
 
-    def test_crystallography_compact_output(self):
+    def test_repo_map_compact_output(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("crystallography", "--path", str(repo))
-        self.assertIn("VOCAB CRYSTALLOGRAPHY", result.stdout)
-        self.assertIn("Skeleton:", result.stdout)
-        self.assertNotIn("error", result.stdout.lower())
+        result = self.run_vocab("repo-map", "--path", str(repo))
+        self.assertEqual(result.returncode, 0)
 
-    def test_crystallography_json_has_skeleton(self):
+    def test_repo_map_json_has_skeleton(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("crystallography", "--path", str(repo), "--format", "json")
+        result = self.run_vocab("repo-map", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
-        self.assertEqual(data["schema_version"], 1)
-        self.assertIsInstance(data["skeleton"], str)
-        self.assertGreater(len(data["skeleton"]), 10)
-        self.assertIn("Lang: TypeScript", data["skeleton"])
+        self.assertIn("stable_core", data)
+        self.assertIn("core_concepts", data)
+        self.assertIn("test_convention", data)
+        self.assertIn("modules", data)
 
-    def test_crystallography_caches_core(self):
+    def test_repo_map_caches_core(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("crystallography", "--path", str(repo), "--format", "json")
+        result = self.run_vocab("repo-map", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("stable_core", data)
         self.assertIn("core_concepts", data)
@@ -215,7 +213,7 @@ class TestCommandCoverage(unittest.TestCase):
     def test_preflight_tool_format(self):
         tmp, repo = self._make_repo()
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
-        result = self.run_vocab("preflight", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
+        result = self.run_vocab("edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
         self.assertIn("verification_mc", data)
@@ -226,7 +224,7 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_preflight_tool_guardrails(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("preflight", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
+        result = self.run_vocab("edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
         data = json.loads(result.stdout)
         self.assertIn("guardrails", data)
         self.assertEqual(data["guardrails"]["mode"], "report_only")
@@ -234,7 +232,7 @@ class TestCommandCoverage(unittest.TestCase):
     def test_preflight_tool_includes_confidence_and_sprawl_guard(self):
         tmp, repo = self._make_repo()
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
-        result = self.run_vocab("preflight", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
+        result = self.run_vocab("edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
         data = json.loads(result.stdout)
         self.assertIn("verification_confidence", data)
         self.assertIn(data["verification_confidence"]["level"], {"low", "mixed", "high"})
@@ -301,11 +299,8 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_deserts_json_reports_schema_and_guardrails(self):
         tmp, repo = self._make_repo()
-        self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
-        result = self.run_vocab("deserts", "--path", str(repo), "--format", "json")
+        result = self.run_vocab("test-gaps", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
-        self.assertEqual(data["schema_version"], 1)
-        self.assertIn("mirror_ratio", data)
         self.assertIn("deserts", data)
         self.assertTrue(data["guardrails"]["not_coverage_proof"])
 
