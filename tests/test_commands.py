@@ -364,23 +364,22 @@ class TestCommandCoverage(unittest.TestCase):
 class TestStructuralDetection(unittest.TestCase):
     """Structural detection: desert, co-location, same-package prefix."""
 
-    def test_has_code_case_pascal_case(self):
-        from vocab.reports import _has_code_case
-        self.assertTrue(_has_code_case("JanitorService"))
-        self.assertTrue(_has_code_case("RetentionCutoff"))
+    def test_has_code_phrase_code_chars(self):
+        from vocab.reports import _has_code_phrase
+        self.assertTrue(_has_code_phrase("if err != nil {"))
+        self.assertTrue(_has_code_phrase("return fiber.NewError(...)"))
+        self.assertTrue(_has_code_phrase("JanitorService{}"))
+        self.assertTrue(_has_code_phrase("workspaceID := middleware.GetWorkspaceID(c)"))
+        self.assertTrue(_has_code_phrase("func (s *Service) Start() {"))
 
-    def test_has_code_case_camel_case(self):
-        from vocab.reports import _has_code_case
-        self.assertTrue(_has_code_case("retentionCutoff"))
-        self.assertTrue(_has_code_case("cleanupOldData"))
-
-    def test_has_code_case_declarative(self):
-        from vocab.reports import _has_code_case
-        self.assertFalse(_has_code_case("features"))
-        self.assertFalse(_has_code_case("enabled"))
-        self.assertFalse(_has_code_case("true"))
-        self.assertFalse(_has_code_case("false"))
-        self.assertFalse(_has_code_case("retention_days"))
+    def test_has_code_phrase_declarative(self):
+        from vocab.reports import _has_code_phrase
+        self.assertFalse(_has_code_phrase("features"))
+        self.assertFalse(_has_code_phrase("enabled"))
+        self.assertFalse(_has_code_phrase("true"))
+        self.assertFalse(_has_code_phrase("retention_days"))
+        self.assertFalse(_has_code_phrase('description: "Advanced analytics"'))
+        self.assertFalse(_has_code_phrase("http://example.com"))
 
     def test_is_declarative_changed_config(self):
         from vocab.reports import _is_declarative_changed
@@ -394,7 +393,7 @@ class TestStructuralDetection(unittest.TestCase):
         from vocab.reports import _is_declarative_changed
         from vocab.analyze import FileVocab
         fv = FileVocab(path="src/worker.go", language="Go",
-                       vocabulary={"JanitorService": 1, "cleanup": 2, "true": 1},
+                       vocabulary={"func (s *Service) Start() {": 1, "return fiber.NewError(...)": 2, "true": 1},
                        total_phrases=3)
         self.assertFalse(_is_declarative_changed(["src/worker.go"], [fv]))
 

@@ -141,7 +141,7 @@ CASES: tuple[Case, ...] = (
          "add MCP tool registration for a new server recovery tool",
          "packages/mcp/src/index.ts",
          ("packages/mcp/src/index.ts", "packages/core/src/types.ts", "packages/opencode/src/plugin.ts"),
-         ("packages/core/tests/events.test.ts",)),
+         ("packages/mcp/tests/index.test.ts",)),
 
     Case("private_unseen", "agent-multi-file", "/home/user/src/autopsylab-agent",
          "add retry with backoff to spool upload and redact errors in transit",
@@ -149,17 +149,16 @@ CASES: tuple[Case, ...] = (
          ("packages/core/src/spool.ts", "packages/core/src/redaction.ts", "packages/core/src/api-transport.ts"),
          ("packages/core/tests/spool.test.ts", "packages/core/tests/redaction.test.ts")),
 
+    Case("hard_language", "opencode-index", "/home/user/src/opencode",
+         "add plugin lifecycle hook for post-install configuration",
+         "packages/opencode/src/index.ts",
+         ("packages/opencode/src/index.ts", "packages/opencode/src/plugin.ts"),
+         ("packages/opencode/test/config/plugin.test.ts",)),
     Case("hard_language", "llama-cpp", "/home/user/src/llama.cpp",
          "add a grammar-guided sampling path with temperature scheduling",
          "src/llama.cpp",
          ("src/llama.cpp", "src/llama.h", "ggml.h"),
          ("tests/test-llama-grammar.cpp",)),
-
-    Case("hard_language", "opencode-index", "/home/user/src/opencode",
-         "add plugin lifecycle hook for post-install configuration",
-         "packages/opencode/src/index.ts",
-         ("packages/opencode/src/index.ts", "packages/opencode/src/plugin.ts"),
-         ("packages/opencode/test/plugin.test.ts",)),
 )
 
 

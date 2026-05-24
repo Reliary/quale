@@ -948,13 +948,18 @@ def _save_fragment_matrix(path: str, entries: list[dict]):
         json.dump({"schema_version": 1, "entries": entries}, f, indent=2, default=str)
 
 
-def _has_code_case(token: str) -> bool:
-    """True if token looks like a code identifier (mixed case)."""
-    if len(token) < 3:
-        return False
-    if token[0].isupper() and any(c.islower() for c in token[1:]):
+def _has_code_phrase(token: str) -> bool:
+    """True if token contains code-specific characters (braces, parens, operators)."""
+    for ch in "{()=;":
+        if ch in token:
+            return True
+    if ":=" in token:
         return True
-    if token[0].islower() and any(c.isupper() for c in token[1:]):
+    if "==" in token:
+        return True
+    if "!=" in token:
+        return True
+    if "[" in token and "]" in token:
         return True
     return False
 
@@ -965,7 +970,7 @@ def _is_declarative_changed(changed: list[str], file_vocabs) -> bool:
         for fv in file_vocabs:
             if fv.path == f:
                 for phrase in fv.vocabulary or {}:
-                    if _has_code_case(phrase):
+                    if _has_code_phrase(phrase):
                         return False
                 break
     return True
