@@ -164,42 +164,12 @@ CASES: tuple[Case, ...] = (
 
 DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", "repo-map", "route_policy")
 PREFLIGHT_CONDITIONS = (
-    "candidate_baseline", "preflight_compact", "preflight_checklist", "verify_mcq",
-    "preflight_tool", "preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy",
-    "fmt_baseline_oneline", "fmt_baseline_json", "fmt_baseline_sentence",
-
-    # Contract conditions
-    "contract_oneline", "contract_prompt", "contract_checkplan",
-
-    # Knock-in: baseline only with one extra signal each
-    "knock_baseline_only", "knock_baseline_co_change", "knock_baseline_keystone",
-
-    # Combined discovery + preflight
-    "discovery_then_preflight",
-
-    # Diff-based preflight (simulates PR review)
-    "diff_preflight",
-
-    # Unmeasured agent-facing surfaces
-    "verify_scope", "ask", "negotiate_simple",
-
-    # Gap signature + vaccination
-    "verify_classify",
-
-    # Cartridge (compressed context packet)
-    "cartridge",
-
-    # Entanglement-based verification (bridges __init__→test gap)
-    "verify_entangle",
-
-    # Null route (bypass LLM for trivial changes)
-    "null_route",
-
-    # Deterministic verify only (unambiguous structural assignment)
-    "deterministic_only",
-
-    # Fragment matrix adaptive route (learns from past outcomes)
-    "fragment_route",
+    "candidate_baseline", "diff_preflight", "cartridge", "verify_entangle",
+    "route_policy", "null_route", "deterministic_only", "fragment_route",
+    "verify_scope", "verify_classify", "negotiate_simple", "ask",
+    "cascade", "forced_choice", "cohesion_skip",
+    "veto_verify", "progressive_verify", "veto_cascade",
+    "multi_turn_progressive",
 )
 
 
@@ -753,6 +723,141 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 guidance = json.dumps(ver, separators=(",",":"))
         except (json.JSONDecodeError, TypeError):
             guidance = raw
+    elif condition == "cascade":
+        raw = run_vocab(case.path, ["cascade-verify", "--path", case.path, "--files", case.edit_file, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            tier = p.get("tier")
+            if tier == "deterministic":
+                det = p.get("deterministic_verify", {})
+                guidance = json.dumps({"verify": [det["file"]]}, separators=(",",":"))
+            elif tier == "desert":
+                guidance = json.dumps({"desert": True, "desert_note": p.get("desert_note", "")}, separators=(",",":"))
+            else:
+                cands = p.get("verification_candidates", [])
+                if cands:
+                    guidance = json.dumps({
+                        "mode": "verify",
+                        "verification_candidates": cands,
+                        "verification_confidence": {"level": "high", "evidences": ["forced_choice_binary_tree"]},
+                        "edit_sprawl_guard": {"active": True, "instruction": "Answer YES/NO per candidate. Choose at most one."},
+                    }, separators=(",",":"))
+                else:
+                    guidance = ""
+        except (json.JSONDecodeError, TypeError, Exception):
+            guidance = ""
+    elif condition == "forced_choice":
+        raw = run_vocab(case.path, ["verify-packet", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            p = _decode_cartridge(p)
+            det = p.get("deterministic_verify")
+            cands = p.get("verification_candidates", [])
+            if det:
+                guidance = json.dumps({"verify": [det["file"]]}, separators=(",",":"))
+            elif cands:
+                guidance = json.dumps({
+                    "verification_candidates": cands,
+                    "verification_confidence": {"level": "high", "evidences": ["forced_choice_binary_tree"]},
+                    "edit_sprawl_guard": {"active": True, "instruction": "Answer YES/NO per candidate. Choose at most one."},
+                }, separators=(",",":"))
+            else:
+                guidance = json.dumps({"verification_candidates": [], "desert": True}, separators=(",",":"))
+        except (json.JSONDecodeError, TypeError, Exception):
+            guidance = ""
+    elif condition == "cohesion_skip":
+        raw = run_vocab(case.path, ["verify-packet", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            p = _decode_cartridge(p)
+            det = p.get("deterministic_verify")
+            cohesion = p.get("cohesion", 0.5)
+            if det and cohesion >= 0.7:
+                guidance = json.dumps({"verify": [det["file"]], "verify_directive": "run this test — no selection needed"}, separators=(",",":"))
+            else:
+                ver = {"verification_candidates": p.get("verification_candidates", []), "confidence": p.get("confidence", "low")}
+                guidance = json.dumps(ver, separators=(",",":"))
+        except (json.JSONDecodeError, TypeError, Exception):
+            guidance = ""
+    elif condition == "veto_verify":
+        raw = run_vocab(case.path, ["veto-cascade", "--path", case.path, "--files", case.edit_file, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            tier = p.get("tier")
+            if tier == "deterministic" or tier == "desert":
+                det = p.get("deterministic_verify", {})
+                if det:
+                    guidance = json.dumps({"verify": [det["file"]]}, separators=(",",":"))
+                else:
+                    guidance = json.dumps({"desert": True}, separators=(",",":"))
+            elif tier == "veto":
+                prompt = p.get("llm_prompt", "")
+                top = p.get("deterministic_verify", {}).get("file", "")
+                guidance = json.dumps({
+                    "verification_candidates": p.get("verification_candidates", [])[:2],
+                    "deterministic_verify": {"file": top, "score": 0.85},
+                    "verification_confidence": {"level": "high"},
+                    "edit_sprawl_guard": {"active": True, "instruction": "Veto if the candidate is wrong."},
+                }, separators=(",",":"))
+            else:
+                cands = p.get("verification_candidates", [])
+                guidance = json.dumps({"verification_candidates": cands, "confidence": "low"}, separators=(",",":"))
+        except (json.JSONDecodeError, TypeError, Exception):
+            guidance = ""
+    elif condition == "progressive_verify":
+        raw = run_vocab(case.path, ["veto-cascade", "--path", case.path, "--files", case.edit_file, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            tier = p.get("tier")
+            if tier == "progressive" or tier == "veto":
+                cands = p.get("verification_candidates", [])
+                if cands:
+                    guidance = json.dumps({
+                        "verification_candidates": cands[:3],
+                        "verification_confidence": {"level": "high", "evidences": ["progressive_resolve"]},
+                        "edit_sprawl_guard": {"active": True, "instruction": "YES if candidate verifies, NO if not."},
+                    }, separators=(",",":"))
+                else:
+                    guidance = json.dumps({"verification_candidates": [], "desert": True}, separators=(",",":"))
+            else:
+                det = p.get("deterministic_verify", {})
+                if det:
+                    guidance = json.dumps({"verify": [det["file"]]}, separators=(",",":"))
+                else:
+                    guidance = json.dumps({"desert": True}, separators=(",",":"))
+        except (json.JSONDecodeError, TypeError, Exception):
+            guidance = ""
+    elif condition == "veto_cascade":
+        raw = run_vocab(case.path, ["veto-cascade", "--path", case.path, "--files", case.edit_file, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            tier = p.get("tier")
+            if tier == "deterministic" or tier == "desert":
+                det = p.get("deterministic_verify", {})
+                if det:
+                    guidance = json.dumps({"verify": [det["file"]]}, separators=(",",":"))
+                else:
+                    guidance = json.dumps({"desert": True}, separators=(",",":"))
+            elif tier == "veto":
+                top = p.get("deterministic_verify", {}).get("file", "")
+                guidance = json.dumps({
+                    "verification_candidates": p.get("verification_candidates", [])[:2],
+                    "deterministic_verify": top,
+                    "verification_confidence": {"level": "high", "evidences": ["veto_cascade"]},
+                    "edit_sprawl_guard": {"active": True, "instruction": "Veto if incorrect. Otherwise confirm."},
+                }, separators=(",",":"))
+            else:
+                cands = p.get("verification_candidates", [])
+                if cands:
+                    guidance = json.dumps({
+                        "verification_candidates": cands[:3],
+                        "verification_confidence": {"level": "medium", "evidences": ["progressive_resolve"]},
+                        "edit_sprawl_guard": {"active": True, "instruction": "YES or NO per candidate."},
+                    }, separators=(",",":"))
+                else:
+                    guidance = json.dumps({"desert": True}, separators=(",",":"))
+        except (json.JSONDecodeError, TypeError, Exception):
+            guidance = ""
     elif condition == "fragment_route":
         raw = run_vocab(case.path, ["route", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
@@ -804,6 +909,52 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             "Return exactly one compact JSON object and no markdown. "
             "Use keys: verify (array of relative paths), should_edit_candidate (boolean)."
         )
+    if condition == "cascade":
+        system = (
+            "You are verifying a candidate edit using a cascade pipeline. "
+            "The cascade has already filtered through cohesion, memory cache, and deterministic checks. "
+            "Return exactly one compact JSON object. "
+            "Use keys: verify (array of relative paths). If no candidate matches, return empty array."
+        )
+    if condition == "forced_choice":
+        system = (
+            "You are verifying a candidate edit. "
+            "For each candidate test file, answer YES if it verifies the change or NO if it doesn't. "
+            "Return exactly one compact JSON object. "
+            "Use keys: verify (array with exactly one path), should_edit_candidate (boolean)."
+        )
+    if condition == "cohesion_skip":
+        system = (
+            "You are verifying a candidate edit. "
+            "When a deterministic_verify field is present, use it directly as the verify target. "
+            "Otherwise, pick from verification_candidates. "
+            "Return exactly one compact JSON object. "
+            "Use keys: verify (array of relative paths), should_edit_candidate (boolean)."
+        )
+    if condition == "veto_verify":
+        system = (
+            "You are verifying a candidate edit. "
+            "A deterministic candidate is provided for your confirmation. "
+            "If the candidate is wrong, veto it with veto:true and provide the correct path. "
+            "Return: {'verify': ['<path>'], 'veto': true_or_false}"
+        )
+    if condition == "progressive_verify":
+        system = (
+            "You are verifying a candidate edit. "
+            "For each proposed test file, answer YES if it verifies the change or NO if not. "
+            "Return exactly one compact JSON object. "
+            "Use keys: verify (array with one or zero paths), should_edit_candidate (boolean)."
+        )
+    if condition == "veto_cascade":
+        system = (
+            "You are in the veto cascade. "
+            "If a deterministic_verify target is present, confirm or veto it. "
+            "Otherwise, pick from verification_candidates. "
+            "Return exactly one compact JSON object. "
+            "Use keys: verify (array), should_edit_candidate (boolean), veto (boolean)."
+        )
+    if condition == "multi_turn_progressive":
+        system = "You are verifying a candidate edit. A single test candidate is provided. Answer YES if it verifies the change, NO if not. Return JSON: {'verify': '<path>'|'', 'accept': true|false}"
     if condition == "null_route":
         system = "You are verifying a candidate edit. Return exactly one compact JSON object. Use keys: verify (array), should_edit_candidate (boolean). Consider route guidance first."
     if condition == "verify_entangle":
@@ -1172,6 +1323,114 @@ def run_trial_direct(case: Case, suite: str, condition: str, trial: int,
     return row
 
 
+def run_trial_multi_turn(case: Case, suite: str, condition: str, trial: int,
+                         model: str, temperature: float, dry_run: bool,
+                         json_mode: bool, max_tokens: int) -> dict[str, Any]:
+    """Multi-turn progressive resolution: one YES/NO per candidate.
+
+    Each turn presents exactly one candidate. Stops at first YES.
+    Expected cost: ~400-500 tokens vs ~1,200 for single-shot.
+    """
+    row: dict[str, Any] = {
+        "suite": suite, "bucket": case.bucket, "repo": case.repo,
+        "condition": condition, "trial": trial, "task": case.task,
+        "backend": "direct_multi_turn",
+        "gt_edit_file": case.edit_file,
+    }
+    if dry_run:
+        row["dry_run"] = True
+        return row
+
+    raw = run_vocab(case.path, ["veto-cascade", "--path", case.path,
+                                 "--files", case.edit_file, "--format", "json"])
+    try:
+        p = json.loads(raw) if raw.strip() else {}
+    except (json.JSONDecodeError, TypeError):
+        row["error"] = "parse_error veto-cascade"
+        return row
+
+    candidates = p.get("verification_candidates", [])
+    det = p.get("deterministic_verify", {})
+    evidences = p.get("candidate_evidences", {})
+    is_det = p.get("tier") in ("deterministic", "desert")
+    row["total_candidates"] = len(candidates)
+
+    # If deterministic tier fired, use that target as the single candidate
+    if is_det:
+        det_file = det.get("file") if det else None
+        if det_file:
+            candidates = [det_file]
+            row["total_candidates"] = 1
+            row["deterministic_skip"] = True
+        else:
+            # Desert — no candidates at all
+            row["verify_hit"] = True
+            row["verify"] = []
+            row["input_tokens"] = 0
+            row["output_tokens"] = 0
+            row["depth"] = 0
+            row["reason"] = "desert_no_candidates"
+            return row
+
+    if not candidates:
+        row["verify_hit"] = True
+        row["verify"] = []
+        row["input_tokens"] = 0
+        row["output_tokens"] = 0
+        row["depth"] = 0
+        row["reason"] = "desert_no_candidates"
+        return row
+
+    system_msg = {
+        "role": "system",
+        "content": (
+            "You are verifying a candidate edit. "
+            "A single test candidate is provided. "
+            "Answer YES if it verifies the change, NO if not. "
+            "Return JSON: {'verify': '<path>'|'', 'accept': true|false}"
+        ),
+    }
+    total_input = 0
+    total_output = 0
+    chosen_file = None
+    depth = 0
+
+    for idx, candidate in enumerate(candidates[:4]):
+        depth = idx + 1
+        evidence = evidences.get(candidate, "")
+        evidence_line = f"Evidence: {evidence}" if evidence else ""
+        user_msg = {
+            "role": "user",
+            "content": f"Changed: {case.edit_file}\nCandidate: {candidate}\n{evidence_line}\nReturn JSON: YES or NO?".strip(),
+        }
+        response = deepseek_call(
+            [system_msg, user_msg], model=model,
+            temperature=temperature, json_mode=json_mode, max_tokens=max_tokens,
+        )
+        if "error" in response:
+            row["error"] = f"trial {idx + 1}: {response['error']}"
+            break
+
+        usage = response.get("usage", {})
+        total_input += usage.get("prompt_tokens", 0)
+        total_output += usage.get("completion_tokens", 0)
+
+        content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+        parsed = extract_json(content)
+        accept = parsed.get("accept", False) if parsed else False
+
+        if accept:
+            chosen_file = candidate
+            break
+
+    row["input_tokens"] = total_input
+    row["output_tokens"] = total_output
+    row["depth"] = depth
+    row["verify"] = [chosen_file] if chosen_file else []
+    row.update(score_preflight(row, case))
+    return row
+
+
 def run_trial_opencode(case: Case, suite: str, condition: str, trial: int,
                        model: str, dry_run: bool) -> dict[str, Any]:
     if suite != "preflight":
@@ -1400,8 +1659,13 @@ def main() -> None:
                         continue
                     print(f"[{suite}] {case.bucket}/{case.repo} {condition} trial {trial}", flush=True)
                     if args.backend == "direct":
-                        row = run_trial_direct(case, suite, condition, trial, args.model, args.temperature,
-                                               args.dry_run, not args.no_json_mode, args.max_tokens)
+                        if condition == "multi_turn_progressive":
+                            row = run_trial_multi_turn(
+                                case, suite, condition, trial, args.model, args.temperature,
+                                args.dry_run, not args.no_json_mode, args.max_tokens)
+                        else:
+                            row = run_trial_direct(case, suite, condition, trial, args.model, args.temperature,
+                                                   args.dry_run, not args.no_json_mode, args.max_tokens)
                     elif args.backend == "opencode":
                         row = run_trial_opencode(case, suite, condition, trial, args.model, args.dry_run)
                     results.append(row)

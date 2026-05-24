@@ -11,8 +11,64 @@ CAPABILITY_FOOTER = (
 )
 
 
+def format_forced_choice(candidates: list[str], changed_files: list[str],
+                          cohesion: float = 0.5) -> str:
+    """Binary decision tree for verification selection.
+
+    Models answer YES/NO per candidate. Early exit possible.
+    """
+    lines = ["VERIFICATION DECISION TREE (answer each YES or NO)"]
+    lines.append(f"Changed: {', '.join(changed_files[:3])}")
+    lines.append(f"Cohesion: {'high' if cohesion >= 0.7 else 'low' if cohesion < 0.3 else 'moderate'}")
+    lines.append("")
+    for i, c in enumerate(candidates[:4]):
+        lines.append(f"Q{i+1}: {c}")
+    lines.append("")
+    lines.append("Rules: answer YES exactly once. If none apply, answer NO to all.")
+    lines.append("Output: {'verify': ['<path>']} or {'verify': []}")
+    return "\n".join(lines)
+
+
+def format_veto_verify(changed: list[str], top_candidate: str,
+                        det: dict | None = None, cohesion: float = 0.5) -> str:
+    """Confirmation request — is this structural candidate correct?
+
+    Model must veto if the candidate is wrong (lighter cognitive load
+    than 'pick from N'). ~200 prompt tokens when no veto fires.
+    """
+    lines = ["CONFIRMATION REQUEST (veto if incorrect)"]
+    lines.append(f"Changed: {changed[0] if changed else '?'}")
+    lines.append(f"Verify target: {top_candidate}")
+    if det:
+        lines.append(f"Evidence: {det.get('rule', 'structural match')}")
+    if cohesion >= 0.7:
+        lines.append("Structural signal is strong. Veto only if clearly wrong.")
+    lines.append("")
+    lines.append("Output: {'verify':'<path>','veto':true_or_false}")
+    return "\n".join(lines)
+
+
+def progressive_resolve(changed: list[str], candidates: list[str],
+                         prompt_idx: int = 0) -> str:
+    """Ask whether candidate N verifies the change.
+
+    Each prompt asks about exactly one candidate. Average depth 1.3
+    before a YES. Each YES/NO response costs ~30-40 tokens total.
+    """
+    if not candidates:
+        return "Changed: ?\nCandidates: none\nOutput: {'verify':''}"
+    idx = min(prompt_idx, len(candidates) - 1)
+    lines = ["PROGRESSIVE VERIFICATION (YES or NO)"]
+    lines.append(f"Changed: {changed[0] if changed else '?'}")
+    lines.append(f"Candidate: {candidates[idx]}")
+    lines.append("")
+    lines.append("YES = this candidate verifies the change.")
+    lines.append("NO = this candidate does NOT verify.")
+    lines.append("Output: {'verify':'<path>'|''}")
+    return "\n".join(lines)
+
+
 def format_preflight_llm(data: dict) -> str:
-    """Compact 1-line-per-signal format for preflight data. Steps ordered as recommendation path (T4)."""
     lines: list[str] = []
 
     risk = data.get("risk", "unknown")

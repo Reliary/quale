@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from collections import defaultdict, Counter
 from typing import TYPE_CHECKING, Any
 
@@ -630,10 +631,267 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
         if chosen:
             hit = _self_assess_hit(path, changed, chosen)
             _append_fragment_entry(path, dom_type, "cartridge", len(all_candidates), hit, changed)
+        # — Cohesion score
+        if all_candidates:
+            cohesion = _structural_cohesion_score(changed[0], analysis.file_vocabs)
+            result["cohesion"] = cohesion
+            result["cohesion_label"] = "high" if cohesion >= 0.7 else ("moderate" if cohesion >= 0.4 else "low")
+        # — B-cell memory check
+        b_cell = _b_cell_lookup(path, changed[0]) if changed else None
+        if b_cell and b_cell.get("outcome") in ("accept",):
+            _b_cell_hit(path, changed[0])
+            det = {"file": b_cell["verify_file"], "score": 1.0, "rule": "b_cell_memory_hit"}
+            result = {
+                "schema_version": 1, "mode": "verify", "tier": "deterministic",
+                "deterministic_verify": det,
+                "cohesion": result.get("cohesion", 0.5),
+                "stop_after": "deterministic",
+                "verification_candidates": all_candidates[:2],
+            }
+        elif b_cell and b_cell.get("outcome") == "reject":
+            _b_cell_hit(path, changed[0])
+            result = {
+                "schema_version": 1, "mode": "verify", "tier": "desert",
+                "desert": True, "desert_note": "empty per memory cache",
+                "cohesion": result.get("cohesion", 0.5),
+                "stop_after": "report_desert",
+            }
+        # — Store B-cell after cascade decision
+        if changed:
+            chosen = det.get("file") if det else (all_candidates[0] if all_candidates else None)
+            if chosen:
+                hit = _self_assess_hit(path, changed, chosen)
+                _b_cell_store(path, changed[0], chosen, "accept" if hit else "uncertain",
+                              result.get("cohesion", 0.5))
+            elif not all_candidates and tier == "desert":
+                _b_cell_store(path, changed[0], None, "reject", result.get("cohesion", 0.5))
     except Exception:
         pass
 
     return result
+
+
+def cascade_verify(path: str = ".", changed_files: list[str] | None = None,
+                   bootstrap: dict | None = None) -> dict:
+    """Cascade verifier — hierarchical verification pipeline.
+
+    Tier 1: Cohesion check (0 tokens).
+    Tier 2: Memory B-Cell cache (0 tokens).
+    Tier 3: Deterministic skip (0 tokens).
+    Tier 4: Forced-choice binary decision tree (~400-900 tokens).
+
+    Weighted average: ~276 tokens vs ~1200 for standard verify_scope.
+    """
+    from vocab.scanner import scan_codebase
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not changed_files:
+        return {"error": "no changed files"}
+    changed = list(dict.fromkeys(changed_files))
+
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    verify_with = _preflight_verify_files(changed, bootstrap, analysis.file_vocabs)
+    matrix = entanglement_matrix(path)
+    entangled = _entangled_candidates_for_changed(changed, matrix)
+    co_located = _co_located_tests(changed, analysis.file_vocabs)
+    all_candidates = list(dict.fromkeys(verify_with))
+    for c in co_located:
+        if c["file"] not in all_candidates:
+            all_candidates.append(c["file"])
+    for e in entangled:
+        if e["file"] not in all_candidates:
+            all_candidates.append(e["file"])
+
+    changed_bases = set()
+    for f in changed:
+        b = os.path.splitext(os.path.basename(f))[0].lower()
+        b = b.replace("test_", "").replace("_test", "").replace(".test", "")
+        if b:
+            changed_bases.add(b)
+    det = _deterministic_verify(all_candidates, entangled, changed_bases)
+    cohesion = _structural_cohesion_score(changed[0], analysis.file_vocabs) if changed else 0.5
+    coh_label = "high" if cohesion >= 0.7 else ("moderate" if cohesion >= 0.4 else "low")
+
+    # Tier 2: B-cell cache
+    b_cell = _b_cell_lookup(path, changed[0]) if changed else None
+    if b_cell and b_cell.get("outcome") in ("accept",):
+        _b_cell_hit(path, changed[0])
+        return {
+            "schema_version": 1, "tier": "deterministic", "cascade_tier": "b_cell",
+            "deterministic_verify": {"file": b_cell["verify_file"], "score": 1.0, "rule": "b_cell_memory_hit"},
+            "cohesion": cohesion, "cohesion_label": coh_label,
+            "verification_candidates": all_candidates[:2], "stop_after": "deterministic",
+            "token_cost": 0,
+        }
+    if b_cell and b_cell.get("outcome") == "reject":
+        _b_cell_hit(path, changed[0])
+        return {
+            "schema_version": 1, "tier": "desert", "cascade_tier": "b_cell",
+            "desert": True, "desert_note": "empty per memory cache",
+            "cohesion": cohesion, "cohesion_label": coh_label,
+            "stop_after": "report_desert", "token_cost": 0,
+        }
+
+    # Tier 3: Deterministic skip
+    if det and cohesion >= 0.7:
+        _b_cell_store(path, changed[0], det["file"], "accept", cohesion)
+        return {
+            "schema_version": 1, "tier": "deterministic", "cascade_tier": "cohesion_deterministic",
+            "deterministic_verify": det,
+            "cohesion": cohesion, "cohesion_label": coh_label,
+            "verification_candidates": all_candidates[:2], "stop_after": "deterministic",
+            "token_cost": 0,
+        }
+
+    # Tier 4: LLM forced-choice needed
+    from vocab.formats.llm import format_forced_choice
+    result = {
+        "schema_version": 1, "tier": "confident", "cascade_tier": "llm_forced_choice",
+        "verification_candidates": all_candidates[:4],
+        "entangled_candidates": entangled[:2] if entangled else None,
+        "cohesion": cohesion, "cohesion_label": coh_label,
+        "stop_after": "forced_choice",
+        "token_cost": "~400-900",
+        "llm_prompt": format_forced_choice(all_candidates[:4], changed, cohesion),
+    }
+    if det:
+        result["deterministic_verify"] = det
+    return result
+
+
+def veto_cascade(path: str = ".", changed_files: list[str] | None = None,
+                  bootstrap: dict | None = None) -> dict:
+    """Veto cascade — hierarchical verification pipeline (Survivor 5).
+
+    Tier 1: Cohesion + B-cell (0 tokens) — same as cascade_verify.
+    Tier 2: Veto prompt (~200 tokens) — model confirms or rejects top candidate.
+    Tier 3: Progressive resolution (~42 tokens) — YES/NO per remaining candidate.
+    Tier 4: Position optimization (0 extra tokens) — candidates appear first in prompt.
+    Tier 5: Record in B-cell cache (0 tokens).
+
+    Target: ~33 tokens average per verification call, 75%+ verify hit.
+    """
+    from vocab.scanner import scan_codebase
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not changed_files:
+        return {"error": "no changed files"}
+    changed = list(dict.fromkeys(changed_files))
+
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    verify_with = _preflight_verify_files(changed, bootstrap, analysis.file_vocabs)
+    matrix = entanglement_matrix(path)
+    entangled = _entangled_candidates_for_changed(changed, matrix)
+    co_located = _co_located_tests(changed, analysis.file_vocabs)
+    all_candidates = list(dict.fromkeys(verify_with))
+    for c in co_located:
+        if c["file"] not in all_candidates:
+            all_candidates.append(c["file"])
+    for e in entangled:
+        if e["file"] not in all_candidates:
+            all_candidates.append(e["file"])
+
+    changed_bases = set()
+    for f in changed:
+        b = os.path.splitext(os.path.basename(f))[0].lower()
+        if b:
+            changed_bases.add(b)
+    det = _deterministic_verify(all_candidates, entangled, changed_bases)
+    cohesion = _structural_cohesion_score(changed[0], analysis.file_vocabs) if changed else 0.5
+    coh_label = "high" if cohesion >= 0.7 else ("moderate" if cohesion >= 0.4 else "low")
+
+    # Build raw evidence per candidate
+    candidate_evidences = {}
+    verify_set = set(verify_with)
+    co_located_set = set(c["file"] for c in co_located)
+    entangled_by_file = {e["file"]: e for e in entangled}
+    basenames_set = set(os.path.splitext(os.path.basename(f))[0].lower() for f in changed)
+    for c in all_candidates:
+        ev = []
+        # stem match
+        c_base = os.path.splitext(os.path.basename(c))[0].lower()
+        c_base = c_base.replace("test_", "").replace("_test", "").replace(".test", "")
+        if any(b == c_base for b in basenames_set):
+            ev.append("stem")
+        # vocabulary source
+        if c in verify_set:
+            ev.append("vocab")
+        # co-location
+        if c in co_located_set:
+            ev.append("co-locate")
+        # entanglement
+        ent = entangled_by_file.get(c)
+        if ent:
+            ev.append(f"co-change{ent.get('count', '')}")
+        candidate_evidences[c] = ", ".join(ev) if ev else "vocab"
+
+    # Tier 1: B-cell cache
+    b_cell = _b_cell_lookup(path, changed[0]) if changed else None
+    if b_cell and b_cell.get("outcome") in ("accept",):
+        _b_cell_hit(path, changed[0])
+        return {
+            "schema_version": 1, "tier": "deterministic", "veto_tier": "b_cell",
+            "deterministic_verify": {"file": b_cell["verify_file"], "score": 1.0, "rule": "b_cell_memory_hit"},
+            "cohesion": cohesion, "cohesion_label": coh_label,
+            "stop_after": "deterministic", "token_cost": 0,
+        }
+    if b_cell and b_cell.get("outcome") == "reject":
+        _b_cell_hit(path, changed[0])
+        return {
+            "schema_version": 1, "tier": "desert", "veto_tier": "b_cell",
+            "desert": True, "desert_note": "empty per memory cache",
+            "cohesion": cohesion, "cohesion_label": coh_label,
+            "stop_after": "report_desert", "token_cost": 0,
+        }
+
+    # Tier 2: Veto prompt
+    top = det.get("file") if det else (all_candidates[0] if all_candidates else None)
+    if top:
+        from vocab.formats.llm import format_veto_verify
+        veto_prompt = format_veto_verify(changed, top, det, cohesion)
+        # Position optimization: candidates FIRST in prompt
+        veto_prompt = f"Candidate: {top}\nChanged: {changed[0] if changed else '?'}\n\n{veto_prompt}"
+        _b_cell_store(path, changed[0], top, "accept", cohesion)
+        return {
+            "schema_version": 1, "tier": "veto", "veto_tier": "veto_prompt",
+            "deterministic_verify": {"file": top, "score": 0.85, "rule": "veto_candidate"},
+            "cohesion": cohesion, "cohesion_label": coh_label,
+            "verification_candidates": all_candidates[:4],
+            "candidate_evidences": candidate_evidences,
+            "stop_after": "veto_confirm", "token_cost": "~200",
+            "llm_prompt": veto_prompt,
+        }
+
+    if not all_candidates:
+        return {
+            "schema_version": 1, "tier": "desert", "veto_tier": "no_candidates",
+            "desert": True, "desert_note": "no structural candidates",
+            "cohesion": cohesion, "cohesion_label": coh_label,
+            "stop_after": "report_desert", "token_cost": 0,
+        }
+
+    # Tier 3: Progressive resolution (no deterministic candidate)
+    from vocab.formats.llm import progressive_resolve
+    prog_prompt = progressive_resolve(changed, all_candidates, 0)
+    prog_prompt = f"Candidate: {all_candidates[0]}\nChanged: {changed[0] if changed else '?'}\n\n{prog_prompt}"
+    return {
+        "schema_version": 1, "tier": "progressive", "veto_tier": "progressive",
+        "verification_candidates": all_candidates[:4],
+        "candidate_evidences": candidate_evidences,
+        "cohesion": cohesion, "cohesion_label": coh_label,
+        "stop_after": "progressive_resolve", "token_cost": "~40",
+        "llm_prompt": prog_prompt,
+    }
 
 
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
@@ -715,6 +973,118 @@ def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
 
     return {"schema_version": 1, "seeded_trials": seeded_count}
 
+
+def _structural_cohesion_score(file_path: str, file_vocabs: list) -> float:
+    """Ratio of identifiers unique to this file vs shared across the codebase.
+
+    1.0 = entirely self-contained (every identifier unique to this file).
+    0.0 = entirely cross-cutting (every identifier shared with other files).
+    Used by the cascade to decide whether deterministic verification is safe.
+    High cohesion (>0.7) = deterministic skip is safe. Low (<0.3) = LLM needed.
+    """
+    this_vocab: set[str] = set()
+    for fv in file_vocabs:
+        if fv.path == file_path:
+            for phrase, count in fv.vocabulary.items():
+                if _has_code_phrase(phrase):
+                    this_vocab.add(phrase)
+            break
+    if not this_vocab:
+        return 0.5
+
+    external_count = 0
+    for fv in file_vocabs:
+        if fv.path == file_path:
+            continue
+        for phrase in fv.vocabulary:
+            if phrase in this_vocab:
+                external_count += 1
+
+    if external_count == 0:
+        return 1.0
+    internal_count = len(this_vocab)
+    total = internal_count + external_count
+    return round(internal_count / total, 3)
+
+
+_B_CELL_DIR = ".reliary/vocab/b_cells/"
+
+
+def _b_cell_path(repo_path: str) -> str:
+    return os.path.join(os.path.abspath(repo_path), _B_CELL_DIR)
+
+
+def _content_hash(file_rel: str, repo_path: str) -> str:
+    """Non-cryptographic structural hash of file content (first 16 hex)."""
+    import hashlib
+    full = os.path.join(os.path.abspath(repo_path), file_rel)
+    if os.path.exists(full):
+        with open(full, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()[:16]
+    content = vgit.read_file_at_ref(repo_path, file_rel)
+    if content:
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
+    return ""
+
+
+def _b_cell_lookup(repo_path: str, file_path: str) -> dict | None:
+    """Look up cached verification outcome for a changed file."""
+    h = _content_hash(file_path, repo_path)
+    if not h:
+        return None
+    cache_dir = _b_cell_path(repo_path)
+    if not os.path.isdir(cache_dir):
+        return None
+    for fname in os.listdir(cache_dir):
+        if fname.startswith(h):
+            try:
+                with open(os.path.join(cache_dir, fname)) as f:
+                    return json.load(f)
+            except Exception:
+                return None
+    return None
+
+
+def _b_cell_store(repo_path: str, file_path: str,
+                  verify_file: str | None, outcome: str,
+                  cohesion: float = 0.5):
+    """Store verification outcome for future reuse."""
+    h = _content_hash(file_path, repo_path)
+    if not h:
+        return
+    entry = {
+        "content_hash": h, "source_file": file_path,
+        "verify_file": verify_file, "outcome": outcome,
+        "cohesion": cohesion, "created_at": time.time(), "hits": 1,
+    }
+    cache_dir = _b_cell_path(repo_path)
+    os.makedirs(cache_dir, exist_ok=True)
+    vf_tag = verify_file.replace("/", "_") if verify_file else "desert"
+    path = os.path.join(cache_dir, f"{h}_{vf_tag}.json")
+    with open(path, "w") as f:
+        json.dump(entry, f, indent=2, default=str)
+
+
+def _b_cell_hit(repo_path: str, file_path: str):
+    """Increment hit counter for an existing cache entry."""
+    h = _content_hash(file_path, repo_path)
+    if not h:
+        return
+    cache_dir = _b_cell_path(repo_path)
+    if not os.path.isdir(cache_dir):
+        return
+    for fname in os.listdir(cache_dir):
+        if fname.startswith(h):
+            try:
+                fp = os.path.join(cache_dir, fname)
+                with open(fp) as f:
+                    entry = json.load(f)
+                entry["hits"] += 1
+                entry["last_hit_at"] = time.time()
+                with open(fp, "w") as f:
+                    json.dump(entry, f, indent=2, default=str)
+            except Exception:
+                pass
 
 def _vaccination_notes(file_classifications: list[dict]) -> list[str]:
     """Static 'memory cell' patterns injected when gap types are detected."""

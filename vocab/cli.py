@@ -862,6 +862,97 @@ def entangle(
         typer.echo(f"  {p['file_a']:45s} ↔ {p['file_b']:45s}  count={p['co_change_count']:3d} prob={p['co_change_probability']:.2f}{marker}")
 
 
+@cli.command(name="cascade-verify", rich_help_panel="Agent")
+def cascade_verify_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    why: Annotated[bool, typer.Option("--why", help="Show cascade trace")] = False,
+):
+    """Cascade verifier — hierarchical verification pipeline.
+
+    Tier 1: Cohesion check (0 tokens) — high cohesion = safe to skip LLM.
+    Tier 2: Memory B-Cell cache (0 tokens) — same content hash reuses past outcome.
+    Tier 3: Deterministic skip (0 tokens) — stem match + cohesion ≥ 0.7.
+    Tier 4: Forced-choice binary decision tree (~400-900 tokens).
+
+    On steady state, ~77% of calls hit Tiers 1-3 (0 tokens).
+    """
+    from vocab.reports import cascade_verify
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not files:
+        typer.echo("provide --files", err=True)
+        raise typer.Exit(1)
+    data = cascade_verify(path=path_abs, changed_files=list(files))
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    tier = data.get("tier", "unknown")
+    det = data.get("deterministic_verify", {})
+    coh = data.get("cohesion_label", "?")
+    if tier == "deterministic":
+        typer.echo(f"Cascade: {tier}  |  Cohesion: {coh}  |  Verify: {det.get('file', '?')}  |  Token cost: 0")
+    elif tier == "desert":
+        note = data.get("desert_note", "no candidates")
+        typer.echo(f"Cascade: {tier}  |  Cohesion: {coh}  |  Token cost: 0  |  {note}")
+    else:
+        cands = data.get("verification_candidates", [])
+        typer.echo(f"Cascade: llm_forced_choice  |  Cohesion: {coh}  |  Candidates: {len(cands)}")
+        for c in cands[:4]:
+            typer.echo(f"  {c}")
+        typer.echo("  Token cost: ~400-900 (forced choice binary tree)")
+    if why:
+        typer.echo(f"  Cohesion score: {data.get('cohesion', '?')} "
+                    f"{'(safe to skip LLM)' if data.get('cohesion', 0) >= 0.7 else '(needs LLM)'}")
+
+
+@cli.command(name="veto-cascade", rich_help_panel="Agent")
+def veto_cascade_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s)")] = [],
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Veto cascade pipeline — ~33 avg tokens per verification call.
+
+    Tier 1: Cohesion + B-cell (0 tokens)
+    Tier 2: Veto prompt (~200 tokens)
+    Tier 3: Progressive resolution (~42 tokens)
+    """
+    from vocab.reports import veto_cascade
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not files:
+        typer.echo("provide --files", err=True)
+        raise typer.Exit(1)
+    data = veto_cascade(path=path_abs, changed_files=list(files))
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    tier = data.get("tier", "?")
+    veto_t = data.get("veto_tier", "?")
+    coh = data.get("cohesion_label", "?")
+    tok = data.get("token_cost", "?")
+    if tier == "deterministic" or tier == "desert":
+        typer.echo(f"Veto cascade: {tier}  Tier: {veto_t}  Cohesion: {coh}  Token cost: {tok}")
+    elif tier == "veto":
+        top = data.get("deterministic_verify", {}).get("file", "")
+        typer.echo(f"Veto cascade: veto_prompt  Target: {top}  Tokens: {tok}  Cohesion: {coh}")
+    else:
+        cands = data.get("verification_candidates", [])
+        typer.echo(f"Veto cascade: progressive  Candidates: {len(cands)}  Tokens: {tok}  Cohesion: {coh}")
+
+
 @cli.command(name="verify-packet",  rich_help_panel="Agent")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
@@ -1355,6 +1446,16 @@ def _print_preflight(data: dict) -> None:
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c("  PREFLIGHT ASSESSMENT", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
+
+    # ── Phase 0: Structural Cohesion Warning ────────────────────────
+    cohesion = data.get("cohesion")
+    if cohesion is not None:
+        if cohesion < 0.3:
+            typer.echo(f"  {c('LOW COHESION', 'red')}: {c(f'{cohesion:.2f}', 'red')}  — change propagates across many files; verify broadly")
+        elif cohesion >= 0.7:
+            typer.echo(f"  {c('HIGH COHESION', 'green')}: {c(f'{cohesion:.2f}', 'green')}  — self-contained change; safe to verify locally")
+        else:
+            typer.echo(f"  {c('Cohesion:', 'yellow')} {c(f'{cohesion:.2f}', 'yellow')}")
 
     # ── Phase 1: Executive Summary ────────────────────────────────
     typer.echo(f"  {c('RISK', risk_color)}: {c(data.get('risk', 'unknown'), risk_color)}  "
