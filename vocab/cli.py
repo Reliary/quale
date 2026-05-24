@@ -1359,6 +1359,128 @@ def epidemiology_cmd(
         typer.echo(f"All stable. {data['total_tracked']} phrases tracked.")
 
 
+@cli.command(name="orient", rich_help_panel="Agent")
+def orient_cmd(path=".", task="", format="compact"):
+    from vocab.reports import pipeline_orient
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not task:
+        typer.echo("provide --task", err=True); raise typer.Exit(1)
+    data = pipeline_orient(path=p, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f"Cipher keys: {', '.join(data.get('cipher_keys', [])[:5])}")
+    typer.echo(f"Anchor: {', '.join(data.get('anchor', []))}")
+    for m in data.get("recommended_modules", [])[:2]:
+        typer.echo(f'  Module: {", ".join(m.get("exemplars",[])[:3])} ({m.get("match_score",0):.0%})')
+    typer.echo(f'  {data.get("total_files_in_scope",0)} files in scope')
+
+
+@cli.command(name="health", rich_help_panel="CI")
+def health_cmd(path=".", format="compact"):
+    from vocab.reports import structural_health_score
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = structural_health_score(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    h = data.get("health", "?")
+    c = "green" if h == "good" else ("yellow" if h == "moderate" else "red")
+    typer.echo(f"Health: {_color(h.upper(), c)} (debt: {data.get('debt_acceleration',0):.3f})")
+
+
+@cli.command(name="squeeze", rich_help_panel="Agent")
+def squeeze_cmd(path=".", file="", task="", format="compact"):
+    from vocab.reports import pipeline_squeeze
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not file or not task:
+        typer.echo("provide --file and --task", err=True); raise typer.Exit(1)
+    data = pipeline_squeeze(path=p, file=file, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'{file}: ~{data.get("visible_lines",0)} visible | {data.get("lagrange_points",0)} L-points')
+
+
+@cli.command(name="certify", rich_help_panel="CI")
+def certify_cmd(path=".", files=[], schema="", code="", format="compact"):
+    from vocab.reports import pipeline_certify
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = pipeline_certify(path=p, changed_files=list(files) if files else None, generated_code=code, schema_file=schema)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    s = data.get("summary", "")
+    typer.echo(f"Certification: {s}")
+    for n, c in data.get("certificates", {}).items():
+        p2 = c.get("passed", True)
+        typer.echo(f'  {n}: {_color("PASS" if p2 else "FAIL", "green" if p2 else "red")}')
+
+
+@cli.command(name="migrate", rich_help_panel="CI")
+def migrate_cmd(repo_a="", repo_b="", format="compact"):
+    from vocab.reports import migrate_report
+    if not repo_a or not repo_b:
+        typer.echo("provide --from and --to", err=True); raise typer.Exit(1)
+    data = migrate_report(path_a=repo_a, path_b=repo_b)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(data.get("migration_summary", ""))
+    for s in data.get("substitutions", [])[:5]:
+        typer.echo(f"  {s}")
+
+
+@cli.command(name="debt", rich_help_panel="CI")
+def debt_cmd(path=".", files=[], format="compact"):
+    from vocab.reports import compound_debt_index
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = compound_debt_index(path=p, files=list(files) if files else None)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'Overall debt: {data.get("overall_debt_index",0):.3f}')
+    for r in data.get("files", [])[:5]:
+        clr = "red" if r["debt_level"] == "critical" else ("yellow" if r["debt_level"] == "high" else "green")
+        typer.echo(f'  {r["file"]}: {_color(r["debt_level"].upper(), clr)} ({r["compound_debt"]:.3f})')
+
+
+@cli.command(name="guard", rich_help_panel="Agent")
+def guard_cmd(path=".", files=[], task="", format="compact"):
+    from vocab.reports import guard_pipeline
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not files or not task:
+        typer.echo("provide --files and --task", err=True); raise typer.Exit(1)
+    data = guard_pipeline(path=p, files=list(files), task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    v = data.get("verification", {}) or {}
+    s = data.get("scope", {}) or {}
+    c = data.get("contract", {}) or {}
+    verv = v.get("verification_candidates") or []
+    typer.echo(f'Guard: tier={v.get("cascade_tier","?")} | candidates={len(verv)} | blast={len(s.get("blast_radius",[]) or [])} | contract={(c.get("contract_id","") or "")[:8]}')
+
+
 @cli.command(name="entropy", rich_help_panel="Inspection")
 def entropy_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",

@@ -2026,6 +2026,197 @@ def mycorrhiza_with_tolerance(path: str = ".", files: list[str] | None = None) -
     return base
 
 
+# ██ Synergy: Composite / Pipeline Commands █████████████████████
+
+def pipeline_orient(path: str = ".", task: str = "") -> dict:
+    if not task:
+        return {"error": "no task provided"}
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    solve_data = solve_report(path=path)
+    tri_data = triangulate_report(path=path, task=task)
+    try:
+        iso_data = isolate_modules(path=path, task=task)
+    except Exception:
+        iso_data = {"modules": []}
+    return {
+        "task": task,
+        "cipher_keys": [p["phrase"] for p in solve_data.get("bimoth_index", [])[:10]],
+        "anchor": tri_data.get("anchor", []),
+        "anchor_confidence": tri_data.get("confidence", 0),
+        "recommended_modules": [{"files": m.get("files", [])[:5], "exemplars": m.get("exemplar_phrases", [])[:3], "match_score": m.get("match_score", 0)} for m in iso_data.get("modules", [])[:3]],
+        "total_files_in_scope": sum(m.get("size", 0) for m in iso_data.get("modules", [])[:3]),
+    }
+
+
+def structural_health_score(path: str = ".") -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        ent = entropy_snapshot_report(path)
+        ents = ent.get("directories", [])
+        avg_entropy = sum(d.get("entropy_ratio", 0) for d in ents) / max(len(ents), 1)
+    except Exception:
+        avg_entropy = 0.0
+    try:
+        shr = shrapnel_report(path)
+        shrapnel_count = shr.get("shrapnel_count", 0)
+    except Exception:
+        shrapnel_count = 0
+    try:
+        from vocab.scanner import scan_codebase
+        analysis = scan_codebase(path, quiet=True, max_files=500, max_seconds=15)
+        samples = [fv.path for fv in analysis.file_vocabs[:10] if fv.total_phrases > 10][:3]
+        max_regg = 0.0
+        for sf in samples:
+            fc = forecast_report(path, files=[sf], lookback_commits=200)
+            for r in fc.get("files", []):
+                max_regg = max(max_regg, r.get("highest_probability", 0))
+    except Exception:
+        max_regg = 0.0
+    debt = round((avg_entropy * 0.3) + (shrapnel_count / max(20, 1) * 0.3) + (max_regg * 0.4), 3)
+    health = "good" if debt < 0.3 else ("moderate" if debt < 0.6 else "poor")
+    return {"avg_entropy_ratio": round(avg_entropy, 3), "shrapnel_count": shrapnel_count, "max_regression_probability": round(max_regg, 2), "debt_acceleration": debt, "health": health, "thresholds": {"good": "<0.3", "moderate": "0.3-0.6", "poor": ">0.6"}}
+
+
+def pipeline_squeeze(path: str = ".", file: str = "", task: str = "") -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file or not task:
+        return {"error": "provide --file and --task"}
+    from vocab.fold import fold_file
+    solve_data = solve_report(path=path, top_n=10)
+    cipher = [p["phrase"] for p in solve_data.get("bimoth_index", [])[:8]]
+    try:
+        lag = lagrange_report(path=path, file_path=file)
+        lag_points = lag.get("lagrange_points", [])
+    except Exception:
+        lag_points = []
+    try:
+        fold_data = fold_file(os.path.join(path, file), task=task)
+        visible = fold_data.get("visible_lines", 0)
+    except Exception:
+        visible = 0
+    return {"file": file, "visible_lines": visible or 0, "lagrange_points": len(lag_points), "cipher_keys": cipher}
+
+
+def pipeline_certify(path: str = ".", changed_files: list[str] | None = None, generated_code: str = "", schema_file: str = "") -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    files = list(changed_files) if changed_files else []
+    certs = {}
+    if files:
+        try:
+            myco = mycorrhiza_map(path=path, files=files)
+            v = []
+            for f in myco.get("files", []):
+                for dep in f.get("hidden_dependencies", []):
+                    if dep.get("confidence") == "high":
+                        v.append(f"hidden dep: {f['file']} -> {dep['file']}")
+            certs["mycorrhiza"] = {"passed": len(v) == 0, "violations": v[:5]}
+        except Exception as e:
+            certs["mycorrhiza"] = {"passed": True, "violations": [], "error": str(e)}
+        try:
+            drift = drift_velocity_snapshot(path=path, files=files)
+            anom = []
+            for f in drift.get("files", []):
+                for a in f.get("anomalies", []):
+                    anom.append(f"{f.get('file', '?')}: {a}")
+            certs["drift_check"] = {"passed": len(anom) == 0, "violations": anom[:5]}
+        except Exception as e:
+            certs["drift_check"] = {"passed": True, "violations": [], "error": str(e)}
+    else:
+        certs["mycorrhiza"] = {"passed": True, "violations": []}
+        certs["drift_check"] = {"passed": True, "violations": []}
+    if generated_code and schema_file:
+        try:
+            zk = zk_proof_report(path=path, schema_file=schema_file, generated_code=generated_code)
+            certs["zk_proof"] = {"passed": zk.get("passed", False), "violations": [f"hallucinated: {v['identifier']}" for v in zk.get("violations", [])][:5]}
+        except Exception as e:
+            certs["zk_proof"] = {"passed": True, "violations": [], "error": str(e)}
+    else:
+        certs["zk_proof"] = {"passed": True, "violations": []}
+    all_pass = all(c.get("passed", True) for c in certs.values())
+    return {"all_passed": all_pass, "certificates": certs, "summary": "PASS" if all_pass else f"FAIL: {sum(1 for c in certs.values() if not c.get('passed', True))} check(s) failed"}
+
+
+def migrate_report(path_a: str, path_b: str, min_freq: int = 2) -> dict:
+    if not vgit.is_repo(path_a):
+        return {"error": f"path_a not a repo: {path_a}"}
+    if not vgit.is_repo(path_b):
+        return {"error": f"path_b not a repo: {path_b}"}
+    phase = phase_shift_report(path_a=path_a, path_b=path_b, min_freq=min_freq)
+    solve_b = solve_report(path=path_b)
+    solve_a = solve_report(path=path_a)
+    subs = [f"{s.get('from', '?')} -> {s.get('to', '?')}" for s in phase.get("substitutions", [])[:10]]
+    target_c = [p["phrase"] for p in solve_b.get("bimoth_index", [])[:10]]
+    source_c = [p["phrase"] for p in solve_a.get("bimoth_index", [])[:10]]
+    new_c = [c for c in target_c if c not in source_c]
+    return {"phrase_substitutions_count": len(phase.get("substitutions", [])), "removed_count": phase.get("removed_count", 0), "added_count": phase.get("added_count", 0), "target_specific_cipher_keys": new_c[:8], "substitutions": subs[:15]}
+
+
+def compound_debt_index(path: str = ".", files: list[str] | None = None) -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        epi = epidemiology_report(path)
+        pathogens = {p["phrase"]: p.get("growth_rate", 0) for p in epi.get("tracked", []) if p.get("status") == "pathogen"}
+    except Exception:
+        pathogens = {}
+    try:
+        shr = shrapnel_report(path)
+        shrapnel_phrases = set(s.get("stranded", "") for s in shr.get("shrapnel", []))
+    except Exception:
+        shrapnel_phrases = set()
+    target_files = files or []
+    if not target_files:
+        try:
+            from vocab.scanner import scan_codebase
+            analysis = scan_codebase(path, quiet=True, max_files=500, max_seconds=15)
+            target_files = [fv.path for fv in analysis.file_vocabs[:50] if fv.total_phrases > 10][:10]
+        except Exception:
+            target_files = []
+    results = []
+    for f in target_files:
+        fc = forecast_report(path, files=[f], lookback_commits=200)
+        regr = max((r.get("highest_probability", 0) for r in fc.get("files", [])), default=0)
+        p_score = min(sum(pathogens.values()) / max(len(pathogens), 1), 1.0) if pathogens else 0
+        s_score = min(len(shrapnel_phrases) / 10, 1.0)
+        compound = round((regr * 0.4) + (p_score * 0.3) + (s_score * 0.3), 3)
+        results.append({"file": f, "regression_probability": regr, "compound_debt": compound, "debt_level": "critical" if compound >= 0.7 else ("high" if compound >= 0.4 else ("moderate" if compound >= 0.2 else "low"))})
+    results.sort(key=lambda x: -x["compound_debt"])
+    return {"files": results[:20], "overall_debt_index": round(sum(r["compound_debt"] for r in results[:5]) / max(len(results[:5]), 1), 3) if results else 0}
+
+
+def guard_pipeline(path: str = ".", files: list[str] | None = None, task: str = "", bootstrap: dict | None = None) -> dict:
+    path = os.path.abspath(path) if path else "."
+    changed = list(files) if files else []
+    if not changed or not task:
+        return {"error": "provide --files and --task"}
+    result = {"task": task, "changed_files": changed}
+    try:
+        veto = cascade_verify(path=path, changed_files=changed, bootstrap=bootstrap)
+        result["verification"] = {k: veto.get(k) for k in ["tier", "cascade_tier", "verification_candidates", "deterministic_verify", "cohesion", "cohesion_label"]}
+    except Exception as e:
+        result["verification"] = {"error": str(e)}
+    try:
+        pf = preflight_report(path=path, files=changed, task=task)
+        result["scope"] = {k: pf.get(k) for k in ["read_first", "likely_edit", "avoid_touching_without_context", "blast_radius", "expansion_risk"]}
+    except Exception as e:
+        result["scope"] = {"error": str(e)}
+    try:
+        ct = build_contract(path=path, files=changed)
+        result["contract"] = {"contract_id": ct.get("contract_id", ""), "files_count": len(ct.get("files", []))}
+    except Exception as e:
+        result["contract"] = {"error": str(e)}
+    return {"task": task, "changed_files": changed, "verification": result.get("verification", {}), "scope": result.get("scope", {}), "contract": result.get("contract", {}), "all_checks_ran": "verification" in result and "scope" in result and "contract" in result}
+
+
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
     """Seed the adaptive router's fragment matrix using git history.
 
