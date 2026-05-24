@@ -1154,35 +1154,50 @@ def mycorrhiza_cmd(
 def solve_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     top_n: Annotated[int, typer.Option("--top", help="Number of cipher keys to extract")] = 20,
+    focus: Annotated[str, typer.Option("--focus", help="Gravitational Lensing: filter cipher keys to those orbiting a specific concept")] = "",
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Frequency Analysis Code-Breaking (Bimoth Index).
-
-    Filters global phrase frequencies against a standard English dictionary.
-    Extracts the top N highest-frequency non-dictionary identifiers —
-    the 'structural cipher keys' of an alien/obfuscated codebase.
-
-    Output is a 50-token decryption key for architecture onboarding.
-    Use when dropped into an unfamiliar codebase.
-
-    Example:
-      vocab solve --path /path/to/alien/codebase
-    """
     from vocab.reports import solve_report
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
-        typer.echo("Not a git repository.", err=True)
-        raise typer.Exit(1)
-    data = solve_report(path=path_abs, top_n=top_n)
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = solve_report(path=path_abs, top_n=top_n, focus=focus)
     if "error" in data:
-        typer.echo(data["error"], err=True)
-        raise typer.Exit(1)
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
-        return
-    typer.echo(data["summary"])
-    for i, p in enumerate(data.get("bimoth_index", [])[:8]):
+        typer.echo(json.dumps(data, indent=2)); return
+    if focus:
+        typer.echo(f'Lens: {focus} — {len(data.get("bimoth_index",[]))} orbiting keys, {len(data.get("orbiting_files",[]))} files')
+    else:
+        typer.echo(data["summary"])
+    for i, p in enumerate(data.get("bimoth_index", [])[:5]):
         typer.echo(f"  {i+1}. {p['phrase']} (freq={p['frequency']}) — {', '.join(p['top_files'][:2])}")
+
+
+@cli.command(name="deflate", rich_help_panel="Inspection")
+def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact"):
+    from vocab.reports import deflate_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not file or not diff:
+        typer.echo("provide --file and --diff", err=True); raise typer.Exit(1)
+    data = deflate_report(path=p, file_path=file, proposed_diff=diff, budget=int(budget))
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    used = data.get("net_new_count", 0)
+    bud = data.get("budget", 5)
+    if data.get("over_budget"):
+        typer.echo(f'  {_color("INFLATION DETECTED", "red")}')
+        typer.echo(f'  Budget: {bud}, Used: {used}, Over by: {used - bud}')
+        typer.echo(f'  Violations: {", ".join(data.get("net_new_identifiers",[])[:bud+3])}')
+    else:
+        typer.echo(f'  Gold Standard OK — {used}/{bud} net-new identifiers used.')
+
+
+@cli.command(name="forecast", rich_help_panel="CI")
 
 
 @cli.command(name="forecast", rich_help_panel="CI")

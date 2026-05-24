@@ -1717,14 +1717,12 @@ def _load_wordlist() -> set[str]:
     return _WORDLIST
 
 
-def solve_report(path: str = ".", top_n: int = 20) -> dict:
+def solve_report(path: str = ".", top_n: int = 20, focus: str = "") -> dict:
     """Frequency Analysis Code-Breaking (The Bimoth Index).
 
-    Filters global phrase frequencies against standard English dictionary.
-    Extracts top N highest-frequency non-dictionary identifiers — the
-    'structural cipher keys' of an alien/obfuscated codebase.
-
-    Output is a 50-token decryption key for architecture onboarding.
+    With --focus, filters cipher keys to only those orbiting a specific
+    concept (Gravitational Lensing). 50-token summary instead of 10K tokens
+    of source code.
     """
     from vocab.scanner import scan_codebase
     if not vgit.is_repo(path):
@@ -1735,7 +1733,6 @@ def solve_report(path: str = ".", top_n: int = 20) -> dict:
     except Exception as e:
         return {"error": f"scan failed: {e}"}
 
-    # Build global frequency map
     token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
     freq: Counter[str] = Counter()
     for fv in analysis.file_vocabs:
@@ -1746,7 +1743,6 @@ def solve_report(path: str = ".", top_n: int = 20) -> dict:
     wordlist = _load_wordlist()
     has_wordlist = len(wordlist) > 0
 
-    # Filter: exclude dictionary words and common programming terms
     common_prog = frozenset({
         "this", "that", "with", "from", "into", "than", "then", "else", "more",
         "some", "when", "what", "which", "where", "while", "after", "before",
@@ -1755,6 +1751,8 @@ def solve_report(path: str = ".", top_n: int = 20) -> dict:
         "string", "number", "boolean", "array", "object", "error", "promise",
     })
     filtered: list[tuple[str, int]] = []
+    focus_lower = focus.lower() if focus else ""
+
     for phrase, count in freq.most_common(500):
         lower = phrase.lower()
         if has_wordlist and lower in wordlist:
@@ -1765,10 +1763,23 @@ def solve_report(path: str = ".", top_n: int = 20) -> dict:
             continue
         if phrase[0].isdigit():
             continue
+        # Gravitational Lensing: only keep identifiers orbiting the focus concept
+        if focus_lower and focus_lower not in lower:
+            # Check if the phrase co-occurs with focus in any file
+            found_focus = False
+            for fv in analysis.file_vocabs:
+                if phrase in fv.vocabulary or any(phrase in p for p in fv.vocabulary):
+                    for p2 in fv.vocabulary:
+                        if focus_lower in p2.lower():
+                            found_focus = True
+                            break
+                if found_focus:
+                    break
+            if not found_focus:
+                continue
         filtered.append((phrase, count))
 
     top = filtered[:top_n]
-    # Map each top identifier to its top-3 file locations
     file_map: dict[str, list[str]] = {}
     for phrase, _ in top:
         locations: list[tuple[str, int]] = []
@@ -1778,13 +1789,29 @@ def solve_report(path: str = ".", top_n: int = 20) -> dict:
         locations.sort(key=lambda x: -x[1])
         file_map[phrase] = [loc[0] for loc in locations[:3]]
 
-    return {
+    # Gravitational Lensing: orbiting files for the focus concept
+    orbiting_files: list[str] = []
+    if focus_lower and analysis.file_vocabs:
+        focus_token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+        for fv in analysis.file_vocabs:
+            for phrase in fv.vocabulary:
+                if focus_lower in phrase.lower():
+                    orbiting_files.append(fv.path)
+                    break
+        orbiting_files = list(dict.fromkeys(orbiting_files))[:5]
+
+    result = {
         "schema_version": 1,
         "total_phrases": len(freq),
         "has_wordlist": has_wordlist,
+        "focus": focus_lower or None,
         "bimoth_index": [{"phrase": p, "frequency": c, "top_files": file_map.get(p, [])} for p, c in top],
         "summary": f"{len(freq)} total phrases → {len(filtered)} non-dictionary identifiers → top {len(top)} structural cipher keys.",
     }
+    if focus:
+        result["orbiting_files"] = orbiting_files
+        result["lens_summary"] = f"Lens focus: {focus} — {len(top)} orbiting cipher keys, {len(orbiting_files)} orbiting files."
+    return result
 
 
 def mycorrhiza_map(path: str = ".", files: list[str] | None = None,
@@ -2177,6 +2204,36 @@ def migrate_report(path_a: str, path_b: str, min_freq: int = 2) -> dict:
     source_c = [p["phrase"] for p in solve_a.get("bimoth_index", [])[:10]]
     new_c = [c for c in target_c if c not in source_c]
     return {"phrase_substitutions_count": len(phase.get("substitutions", [])), "removed_count": phase.get("removed_count", 0), "added_count": phase.get("added_count", 0), "target_specific_cipher_keys": new_c[:8], "substitutions": subs[:15]}
+
+
+def deflate_report(path: str = ".", file_path: str = "",
+                    proposed_diff: str = "", budget: int = 5) -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file_path or not proposed_diff:
+        return {"error": "provide --file and --diff"}
+    full = os.path.join(path, file_path)
+    if not os.path.exists(full):
+        return {"error": f"file not found: {file_path}"}
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+    existing_tokens: set[str] = set()
+    for fv in analysis.file_vocabs:
+        if fv.path == file_path:
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    existing_tokens.add(m.group())
+    diff_tokens = set(token_re.findall(proposed_diff))
+    net_new = diff_tokens - existing_tokens
+    builtins = {"const","let","var","func","function","return","if","else","for","while","async","await","import","export","class","new","throw","try","catch","finally","this","true","false","null","undefined","string","number","boolean","any","void"}
+    net_new_f = [t for t in net_new if t not in builtins and len(t) >= 3]
+    over = len(net_new_f) > budget
+    return {"file": file_path, "budget": budget, "net_new_identifiers": net_new_f[:budget+5], "net_new_count": len(net_new_f), "over_budget": over, "deflate_check_pass": not over, "mandate": f"Gold Standard: budget {budget}, used {len(net_new_f)}. Reduce by {len(net_new_f)-budget}." if over else "Gold Standard respected.", "existing_reserve": sorted(existing_tokens)[:8]}
 
 
 def compound_debt_index(path: str = ".", files: list[str] | None = None) -> dict:
