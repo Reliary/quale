@@ -1176,6 +1176,85 @@ def forecast_cmd(
             typer.echo(f"    -> {n['file']}  [{_color(f'{prob:.0%}', clr)}] ({n['co_bugfix_count']}×)")
 
 
+@cli.command(name="strata", rich_help_panel="Inspection")
+def strata_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to analyze")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Tectonic Fault Lines — carbon-date phrase epochs.
+
+    Maps file content by phrase entry age. Emits fault lines where
+    epochs of different ages collide — the most brittle code boundaries.
+
+    Example:
+      vocab strata --file src/billing.ts
+    """
+    from vocab.reports import strata_report
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not file:
+        typer.echo("provide --file", err=True)
+        raise typer.Exit(1)
+    data = strata_report(path=path_abs, file_path=file)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    labels = data.get("epoch_labels", [])
+    for e in data.get("epochs", []):
+        bucket = e.get("epoch_bucket", 0)
+        label = labels[bucket] if bucket < len(labels) else f"epoch_{bucket}"
+        typer.echo(f"  Lines {e['start']}-{e['end']}: {label} ({e['age_weeks']}w, {e['lines']} lines)")
+    for fl in data.get("fault_lines", [])[:3]:
+        gap = fl.get("gap", 0)
+        typer.echo(f"  FAULT: lines {fl['older_epoch_start']}/{fl['newer_epoch_start']} gap={gap}w  [{_color('brittle', 'red') if gap > 10 else 'ok'}]")
+    if not data.get("epochs"):
+        typer.echo(f"  {data.get('note', 'no datable content')}")
+
+
+@cli.command(name="epidemiology", rich_help_panel="Inspection")
+def epidemiology_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    weeks: Annotated[int, typer.Option("--weeks", help="History lookback")] = 12,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Viral R0 Contact Tracing — track phrase spread and displacement.
+
+    Computes R0 for each phrase. Classifies as antigen (displacing debt),
+    pathogen (spreading without displacement), or endemic (stable).
+
+    Example:
+      vocab epidemiology --weeks 12
+    """
+    from vocab.reports import epidemiology_report
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = epidemiology_report(path=path_abs, lookback_weeks=weeks)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2, default=str))
+        return
+    if data.get("pathogen_count", 0) > 0:
+        typer.echo(f"Pathogens: {data['pathogen_count']}  Antigens: {data['antigen_count']}  Total tracked: {data['total_tracked']}")
+        for p in data.get("phrases", [])[:5]:
+            cls = p.get("class", "?")
+            r0 = p.get("r0", 0)
+            clr = "red" if cls == "pathogen" else ("green" if cls == "antigen" else "white")
+            label = p.get('phrase', '?')[:50]
+            typer.echo(f"  [{_color(cls.upper(), clr)}] R0={r0:+.2f}  {label}")
+    else:
+        typer.echo(f"All stable. {data['total_tracked']} phrases tracked.")
+
+
 @cli.command(name="verify-packet",  rich_help_panel="Agent")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",

@@ -1046,245 +1046,215 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
     return {"schema_version": 1, "files": results, "total_files": len(results)}
 
 
-_IMPORT_PATTERN = re.compile(
-    r'(import\s|require\(|from\s|include\s|using\s|#include|load\s|@import|use\s|extern\s(crate\s)?mod)',
-    re.IGNORECASE
-)
+def strata_report(path: str = ".", file_path: str = "") -> dict:
+    """Tectonic Fault Lines — date lines by git blame and find epoch boundaries.
 
-
-def _has_direct_import(file_path: str, target_path: str) -> bool:
-    """Check if file_path has a direct import/require/include of target_path."""
-    try:
-        with open(file_path, encoding="utf-8", errors="replace") as f:
-            text = f.read()
-    except Exception:
-        return False
-    # Get the stem of target path for matching
-    target_stem = os.path.splitext(os.path.basename(target_path))[0].lower()
-    target_lines = target_path.replace("\\", "/").lower().split("/")
-    lines = text.split("\n")
-    for line in lines:
-        lower = line.lower()
-        if not _IMPORT_PATTERN.search(lower):
-            continue
-        if target_stem in lower:
-            return True
-        # Check path segments
-        if any(seg in lower for seg in target_lines if len(seg) > 3):
-            return True
-    return False
-
-
-def mycorrhiza_map(path: str = ".", files: list[str] | None = None) -> dict:
-    """Detect hidden structural dependencies between files.
-
-    Identifies files that share rare vocabulary AND co-change in git
-    history despite having zero direct import/require/include relationships.
+    Uses git blame to find the last-modification date for each line.
+    Groups contiguous lines with similar ages into epochs.
+    Fault lines occur where epochs of different ages collide.
     """
-    from vocab.scanner import scan_codebase
-
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    if not files:
-        return {"error": "no files provided"}
-
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-
-    # Build file→identifiers and track language
-    file_to_ids: dict[str, set[str]] = {}
-    for fv in analysis.file_vocabs:
-        file_to_ids[fv.path] = set(fv.vocabulary.keys())
-
-    matrix = entanglement_matrix(path, lookback_commits=100)
-    co_change_pairs: dict[str, set[str]] = {}
-    for pair in matrix.get("pairs", []):
-        a, b = pair["file_a"], pair["file_b"]
-        co_change_pairs.setdefault(a, set()).add(b)
-        co_change_pairs.setdefault(b, set()).add(a)
-
-    # Rare threshold: identifiers in < 5% of files
-    total_files = len(file_to_ids)
-    rare_threshold = max(3, total_files // 20)
-
-    id_df: Counter[str] = Counter()
-    for ids in file_to_ids.values():
-        id_df.update(ids)
-    rare_ids = {idf for idf, cnt in id_df.items() if cnt <= rare_threshold}
-
-    results: list[dict] = []
-    seen_pairs: set[tuple[str, str]] = set()
-
-    for target in files:
-        target_ids = file_to_ids.get(target, set())
-        target_rare = target_ids & rare_ids
-        if not target_rare:
-            results.append({
-                "file": target,
-                "hidden_dependencies": [],
-                "note": "no rare identifiers to match",
-            })
-            continue
-
-        hidden: list[dict] = []
-        for other_path, other_ids in file_to_ids.items():
-            if other_path == target:
-                continue
-
-            # Check for rare vocabulary overlap
-            shared_rare = target_rare & (other_ids & rare_ids)
-            if len(shared_rare) < 2:
-                continue
-
-            # Check for direct import
-            full_target = os.path.join(path, target) if not os.path.isabs(target) else target
-            full_other = os.path.join(path, other_path) if not os.path.isabs(other_path) else other_path
-            has_direct = _has_direct_import(full_other, target) or _has_direct_import(full_target, other_path)
-            if has_direct:
-                continue
-
-            # Check co-change evidence
-            co_changed = other_path in co_change_pairs.get(target, set())
-
-            hidden.append({
-                "file": other_path,
-                "shared_rare_terms": sorted(shared_rare)[:5],
-                "co_change": co_changed,
-                "confidence": "high" if (co_changed and len(shared_rare) >= 3) else "moderate",
-            })
-
-        hidden.sort(key=lambda x: -len(x["shared_rare_terms"]))
-        results.append({
-            "file": target,
-            "hidden_dependencies": hidden[:10],
-            "count": len(hidden),
-        })
-
-    return {
-        "schema_version": 1,
-        "files": results,
-        "total_files": len(results),
-        "any_hidden": any(r["count"] > 0 for r in results),
-    }
-
-
-_BUGFIX_PATTERN = re.compile(r'\b(fix|bug|hotfix|regression|defect|patch|repair)\b', re.IGNORECASE)
-
-
-def forecast_report(path: str = ".", files: list[str] | None = None,
-                     lookback_commits: int = 500) -> dict:
-    """Doppler Defect Radar — forecast regression risk from structural shifts.
-
-    Scans git history for bugfix commits. For each pair of files that
-    co-changed in a bugfix, records the correlation. Given a changed
-    file, emits historically bug-prone neighbors with regression probability.
-
-    Zero token cost. All computation from git history.
-    """
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    if not files:
-        return {"error": "no files provided"}
-
-    log = vgit.ref_log(path, count=lookback_commits * 2)
-    if not log:
-        return {"error": "insufficient git history", "files": []}
-
-    # Phase 1: Scan for bugfix commits and build co-change correlation
-    pair_counts: dict[tuple[str, str], int] = {}
-    file_bugfix_count: dict[str, int] = {}
-    total_bugfix = 0
-
-    for ref in log:
-        sha = ref.sha
-        try:
-            msg = _git_log_message(path, sha)
-        except Exception:
-            continue
-        if not msg or not _BUGFIX_PATTERN.search(msg):
-            continue
-
-        try:
-            diffs = vgit.diff_refs(path, f"{sha}^", sha)
-        except Exception:
-            continue
-
-        if len(diffs) < 2 or len(diffs) > 50:
-            continue  # skip trivial or merge commits
-
-        total_bugfix += 1
-        for f in diffs:
-            file_bugfix_count[f] = file_bugfix_count.get(f, 0) + 1
-
-        for i in range(len(diffs)):
-            for j in range(i + 1, len(diffs)):
-                a, b = (diffs[i], diffs[j]) if diffs[i] < diffs[j] else (diffs[j], diffs[i])
-                pair_counts[(a, b)] = pair_counts.get((a, b), 0) + 1
-
-    if total_bugfix < 3:
-        return {
-            "error": f"only {total_bugfix} bugfix commits found (need at least 3)",
-            "files": [],
-        }
-
-    # Phase 2: For each input file, find correlated bugfix neighbors
-    results: list[dict] = []
-    for target in files:
-        target_fixes = file_bugfix_count.get(target, 0)
-        if target_fixes < 2:
-            results.append({"file": target, "bugfix_count": target_fixes, "neighbors": [],
-                            "note": "insufficient bugfix history for this file"})
-            continue
-
-        neighbors: list[dict] = []
-        for (a, b), count in pair_counts.items():
-            neighbor = None
-            if a == target:
-                neighbor = b
-            elif b == target:
-                neighbor = a
-            if neighbor is None:
-                continue
-
-            prob = round(count / target_fixes, 2)
-            if prob >= 0.1:  # at least 10% correlation
-                neighbors.append({
-                    "file": neighbor,
-                    "co_bugfix_count": count,
-                    "probability": prob,
-                })
-
-        neighbors.sort(key=lambda x: -x["probability"])
-        results.append({
-            "file": target,
-            "bugfix_count": target_fixes,
-            "total_bugfix_commits": total_bugfix,
-            "neighbors": neighbors[:10],
-            "highest_probability": neighbors[0]["probability"] if neighbors else 0,
-        })
-
-    return {
-        "schema_version": 1,
-        "files": results,
-        "total_files": len(results),
-    }
-
-
-def _git_log_message(path: str, sha: str) -> str:
-    """Get commit message for a given sha."""
     import subprocess
+
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file_path:
+        return {"error": "no file provided"}
+
+    # Use git blame --date=short to get per-line dates
     try:
-        out = subprocess.run(
-            ["git", "log", "--format=%s%n%b", "-1", sha],
-            capture_output=True, cwd=path, timeout=10,
+        result = subprocess.run(
+            ["git", "blame", "--line-porcelain", file_path],
+            capture_output=True, cwd=path, timeout=60, text=True, errors="replace",
         )
-        return out.stdout.decode("utf-8", errors="replace").strip()
-    except Exception:
-        return ""
+    except subprocess.TimeoutExpired:
+        return {"error": "git blame timed out"}
+    except Exception as e:
+        return {"error": f"git blame failed: {e}"}
+
+    # Parse blame output to extract dates per line
+    dates: list[str | None] = []
+    current_date = None
+    for line in result.stdout.split("\n"):
+        if line.startswith("author-time "):
+            ts = line.split(" ", 1)[1] if " " in line else ""
+            import datetime
+            try:
+                dt = datetime.datetime.fromtimestamp(int(ts), tz=datetime.timezone.utc)
+                current_date = dt.strftime("%Y-%m-%d")
+            except (ValueError, OSError):
+                current_date = None
+        elif line.startswith("\t"):
+            # Content line — record the date for this line
+            dates.append(current_date)
+
+    if len(dates) < 3:
+        return {"file_path": file_path, "epochs": [], "fault_lines": [],
+                "note": "insufficient lines"}
+
+    # Convert dates to week positions for bucketing
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
+    line_ages: list[int | None] = []
+    all_ages: list[int] = []
+    for ds in dates:
+        if ds is None:
+            line_ages.append(None)
+            continue
+        try:
+            dt = datetime.datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc)
+            weeks_ago = max(0, int((now - dt).days / 7))
+            line_ages.append(weeks_ago)
+            all_ages.append(weeks_ago)
+        except ValueError:
+            line_ages.append(None)
+
+    if len(all_ages) < 3:
+        return {"file_path": file_path, "epochs": [], "fault_lines": [],
+                "note": "insufficient datable lines"}
+
+    # Group contiguous lines with similar ages into epochs (5 buckets)
+    max_age = max(all_ages)
+    min_age = min(all_ages)
+    age_span = max(max_age - min_age, 1)
+    epochs: list[dict] = []
+    fault_lines: list[dict] = []
+    current_start = 0
+    current_bucket = None
+
+    for i, age in enumerate(line_ages):
+        if age is None:
+            continue
+        bucket = round((age - min_age) / age_span * 4)
+        if current_bucket is None:
+            current_bucket = bucket
+            current_start = i
+        if bucket != current_bucket:
+            epochs.append({
+                "start": current_start,
+                "end": i - 1,
+                "epoch_bucket": current_bucket,
+                "age_weeks": line_ages[current_start] or 0,
+                "lines": i - current_start,
+            })
+            fault_lines.append({
+                "older_epoch_start": current_start,
+                "newer_epoch_start": i,
+                "older_bucket": current_bucket,
+                "newer_bucket": bucket,
+                "gap": abs((line_ages[i] or 0) - (line_ages[current_start] or 0)),
+            })
+            current_bucket = bucket
+            current_start = i
+
+    if current_bucket is not None:
+        epochs.append({
+            "start": current_start,
+            "end": len(dates) - 1,
+            "epoch_bucket": current_bucket,
+            "age_weeks": line_ages[current_start] or 0,
+            "lines": len(dates) - current_start,
+        })
+
+    fault_lines.sort(key=lambda x: -x["gap"])
+    return {
+        "schema_version": 1,
+        "file_path": file_path,
+        "total_lines": len(dates),
+        "datable_lines": len(all_ages),
+        "epochs": epochs[:10],
+        "epoch_labels": ["newest", "young", "middle-aged", "old", "oldest"],
+        "fault_lines": fault_lines[:5],
+        "major_fault_count": sum(1 for f in fault_lines if f["gap"] > 4),
+    }
+
+
+def epidemiology_report(path: str = ".", lookback_weeks: int = 12) -> dict:
+    """Viral R0 Contact Tracing — track phrase spread and displacement.
+
+    Computes R0 (reproduction rate) for each phrase based on frequency
+    change over time. For rapidly spreading phrases, measures whether
+    they displace older phrases (antigen/cure) or just add bloat (pathogen).
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+
+    week_data = vgit.weekly_commits(path, weeks=lookback_weeks)
+    if not week_data or len(week_data) < 3:
+        return {"error": "insufficient git history", "phrases": []}
+
+    # For each week, scan repo and extract phrase frequencies
+    phrase_history: dict[str, list[float]] = {}
+    from vocab.scanner import scan_codebase, _is_lock_file, _is_generated
+    from collections import defaultdict
+
+    for wk in week_data:
+        shas = wk.get("shas", [])
+        if not shas:
+            continue
+        try:
+            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=1500, max_seconds=20)
+        except Exception:
+            continue
+
+        week_phrases: Counter[str] = Counter()
+        for fv in analysis.file_vocabs:
+            ext = os.path.splitext(fv.path)[1].lower()
+            if ext not in {".go", ".ts", ".py", ".js", ".rs", ".c", ".cpp", ".h", ".hpp", ".java", ".rb", ".ex", ".exs", ".zig", ".jl", ".nix", ".clj", ".cljc", ".scala"}:
+                continue
+            for p in fv.vocabulary:
+                if len(p) > 2 and not p.startswith(("//", "/*", "#")):
+                    week_phrases[p] += fv.vocabulary[p]
+
+        for phrase, count in week_phrases.items():
+            phrase_history.setdefault(phrase, []).append(float(count))
+        # Pad all history entries to same length
+        max_len = max(len(v) for v in phrase_history.values())
+        for v in phrase_history.values():
+            while len(v) < max_len:
+                v.insert(0, 0.0)
+
+    # Compute R0 for each phrase
+    results: list[dict] = []
+    for phrase, counts in phrase_history.items():
+        if len(counts) < 3:
+            continue
+        max_count = max(counts)
+        if max_count < 3:
+            continue
+        r0 = round((counts[-1] - counts[-3]) / max(max(counts[:3]), 1), 2)
+
+        # Displacement: check if any top phrases declined while this grew
+        displaced: list[str] = []
+        for other, other_counts in phrase_history.items():
+            if other == phrase:
+                continue
+            if len(other_counts) < 3:
+                continue
+            other_decline = other_counts[-3] - other_counts[-1]
+            my_growth = counts[-1] - counts[-3]
+            if my_growth > 2 and other_decline > 2:
+                displaced.append(other)
+
+        results.append({
+            "phrase": phrase[:60],
+            "r0": r0,
+            "trend": "growing" if r0 > 0 else ("declining" if r0 < 0 else "stable"),
+            "current_count": int(counts[-1]),
+            "history": [int(c) for c in counts],
+            "displacing": displaced[:5] if displaced else None,
+            "class": "antigen" if displaced else ("pathogen" if r0 > 2 else "endemic"),
+        })
+
+    results.sort(key=lambda x: -abs(x["r0"]))
+    return {
+        "schema_version": 1,
+        "phrases": results[:30],
+        "total_tracked": len(results),
+        "antigen_count": sum(1 for r in results if r["class"] == "antigen"),
+        "pathogen_count": sum(1 for r in results if r["class"] == "pathogen"),
+    }
 
 
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
