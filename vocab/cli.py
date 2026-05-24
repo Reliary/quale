@@ -1149,6 +1149,7 @@ def forecast_cmd(
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s) to forecast risk for")] = [],
     commits: Annotated[int, typer.Option("--commits", help="Git history lookback")] = 500,
     active_days: Annotated[int, typer.Option("--active-days", help="Only analyze files modified in N days (active gene pool)")] = 0,
+    seismic: Annotated[bool, typer.Option("--seismic", help="S-Wave mode: exclude P-wave files, isolate latent regression risks")] = False,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
     """Doppler Defect Radar — forecast regression risk from structural shifts.
@@ -1174,7 +1175,7 @@ def forecast_cmd(
         if not files:
             typer.echo("No files in active gene pool. Try --active-days 0 or increase the window.", err=True)
             raise typer.Exit(1)
-    data = forecast_report(path=path_abs, files=list(files), lookback_commits=commits)
+    data = forecast_report(path=path_abs, files=list(files), lookback_commits=commits, seismic=seismic)
     if "error" in data:
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
@@ -1194,6 +1195,47 @@ def forecast_cmd(
             prob = n.get("probability", 0)
             clr = "red" if prob >= 0.5 else "yellow"
             typer.echo(f"    -> {n['file']}  [{_color(f'{prob:.0%}', clr)}] ({n['co_bugfix_count']}×)")
+    if seismic:
+        typer.echo(_color("  Seismic mode: P-wave files excluded. Only S-wave risks shown.", "yellow"))
+
+
+@cli.command(name="triangulate", rich_help_panel="Agent")
+def triangulate_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    task: Annotated[str, typer.Option("--task", "-t", help="Task description")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Byzantine Triangulation — intersect 3 structural probes for target anchor.
+
+    Runs 3 structural views (repo-map, recent diffs, distinctive identifiers)
+    without reading source code. Collects 5 phrases per view. Computes
+    overlap anchor. No source code sent to LLM.
+
+    Example:
+      vocab triangulate --task 'fix billing proration'
+    """
+    from vocab.reports import triangulate_report
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not task:
+        typer.echo("provide --task", err=True)
+        raise typer.Exit(1)
+    data = triangulate_report(path=path_abs, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2, default=str))
+        return
+    anchor = data.get("anchor", [])
+    conf = data.get("confidence", 1)
+    conf_label = _color("HIGH", "green") if conf >= 3 else (_color("MEDIUM", "yellow") if conf >= 2 else _color("LOW", "red"))
+    typer.echo(f"Target anchor: {', '.join(anchor)}  [{conf_label} confidence]")
+    typer.echo(f"  Probe A (repo-map): {', '.join(data.get('probe_a', []))}")
+    typer.echo(f"  Probe B (recent diffs): {', '.join(data.get('probe_b', []))}")
+    typer.echo(f"  Probe C (distinctive ids): {', '.join(data.get('probe_c', []))}")
 
 
 @cli.command(name="strata", rich_help_panel="Inspection")

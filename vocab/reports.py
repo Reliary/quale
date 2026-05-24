@@ -1554,156 +1554,203 @@ def lagrange_report(path: str = ".", file_path: str = "") -> dict:
     }
 
 
-def phase_shift_report(path_a: str, path_b: str, min_freq: int = 2) -> dict:
-    """Phase-Vocoder Differential Mask — extract deterministic substitution pairs.
-
-    Scans two repos (pre/post migration) and extracts the exact phrase-level
-    delta. Output is a list of {from: str, to: str} substitutions that
-    define the migration. Zero-token replacement task for LLMs.
-    """
-    from vocab.scanner import scan_codebase
-
-    for label, p in [("repo_a", path_a), ("repo_b", path_b)]:
-        if not vgit.is_repo(p):
-            return {"error": f"{label} is not a git repository: {p}"}
-
-    try:
-        analysis_a = scan_codebase(path_a, quiet=True, max_files=2500, max_seconds=30)
-        analysis_b = scan_codebase(path_b, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-
-    # Build phrase→frequency maps
-    freq_a: dict[str, int] = {}
-    freq_b: dict[str, int] = {}
-    for fv in analysis_a.file_vocabs:
-        for phrase, count in fv.vocabulary.items():
-            freq_a[phrase] = freq_a.get(phrase, 0) + count
-    for fv in analysis_b.file_vocabs:
-        for phrase, count in fv.vocabulary.items():
-            freq_b[phrase] = freq_b.get(phrase, 0) + count
-
-    set_a = set(freq_a.keys())
-    set_b = set(freq_b.keys())
-
-    # Phrases in A but not B (removed)
-    removed = [p for p in sorted(set_a - set_b) if freq_a[p] >= min_freq]
-    # Phrases in B but not A (added)
-    added = [p for p in sorted(set_b - set_a) if freq_b[p] >= min_freq]
-
-    # Build substitution pairs: match removed→added by structural context
-    substitutions: list[dict] = []
-    for r in removed[:50]:
-        # Find best matching added phrase by character overlap
-        best = max(added, key=lambda a: sum(1 for x, y in zip(a, r) if x == y) - abs(len(a) - len(r)), default=None)
-        if best:
-            substitutions.append({"from": r, "to": best})
-
-    return {
-        "schema_version": 1,
-        "phrases_in_a": len(set_a),
-        "phrases_in_b": len(set_b),
-        "removed_count": len(removed),
-        "added_count": len(added),
-        "substitutions": substitutions[:30],
-        "removed": removed[:30],
-        "added": added[:30],
-        "mask_summary": f"{len(substitutions)} phrase-level substitutions from {len(removed)} removed to {len(added)} added.",
-    }
+_BUGFIX_PATTERN = re.compile(r'\b(fix|bug|hotfix|regression|defect|patch|repair)\b', re.IGNORECASE)
 
 
-def shrapnel_report(path: str = ".", lookback_weeks: int = 12) -> dict:
-    """Dead-Water Shrapnel — find phrases stranded by cavitated neighbors.
+def forecast_report(path: str = ".", files: list[str] | None = None,
+                     lookback_commits: int = 500, seismic: bool = False) -> dict:
+    """Doppler Defect Radar — forecast regression risk from structural shifts.
 
-    Scans git history for phrases that appeared, disappeared (cavitated),
-    and whose unique co-occurrence partners remain in the codebase as
-    stranded shrapnel.
+    Scans git history for bugfix commits. For each pair of files that
+    co-changed in a bugfix, records the correlation. Given a changed
+    file, emits historically bug-prone neighbors with regression probability.
+
+    When seismic=True: filters neighbors to files NOT co-modified in
+    the most recent commit (P-wave), isolating latent S-wave risks.
     """
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
+    if not files:
+        return {"error": "no files provided"}
 
-    week_data = vgit.weekly_commits(path, weeks=lookback_weeks)
-    if not week_data or len(week_data) < 3:
-        return {"error": "insufficient git history"}
+    log = vgit.ref_log(path, count=lookback_commits * 2)
+    if not log:
+        return {"error": "insufficient git history", "files": []}
 
-    from vocab.scanner import scan_codebase, _is_lock_file, _is_generated
-
-    # Build phrase presence timeline
-    phrase_weekly: dict[str, list[bool]] = {}
-    for wk in week_data:
-        shas = wk.get("shas", [])
-        if not shas:
-            continue
+    # For seismic: get the most recent commit's modified files (P-wave)
+    p_wave_files: set[str] = set()
+    if seismic and log:
         try:
-            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=1500, max_seconds=20)
+            p_wave_files = set(vgit.diff_refs(path, f"{log[0].sha}^", log[0].sha))
+        except Exception:
+            pass
+
+    pair_counts: dict[tuple[str, str], int] = {}
+    file_bugfix_count: dict[str, int] = {}
+    total_bugfix = 0
+    for ref in log:
+        sha = ref.sha
+        try:
+            msg = _git_log_message(path, sha)
         except Exception:
             continue
-
-        week_phrases: set[str] = set()
-        for fv in analysis.file_vocabs:
-            ext = os.path.splitext(fv.path)[1].lower()
-            if ext in {".go", ".ts", ".py", ".js", ".rs", ".c", ".cpp", ".h", ".rb", ".java"}:
-                for p in fv.vocabulary:
-                    if len(p) > 3:
-                        week_phrases.add(p)
-
-        for p in week_phrases:
-            phrase_weekly.setdefault(p, []).append(True)
-        for p in phrase_weekly:
-            if len(phrase_weekly[p]) < len(week_data):
-                phrase_weekly[p].append(False)
-
-    # Find cavitated phrases (present → absent → stable absent in last 2 weeks)
-    cavitated: list[str] = []
-    for p, timeline in phrase_weekly.items():
-        if len(timeline) < 4:
+        if not msg or not _BUGFIX_PATTERN.search(msg):
             continue
-        # Was present early, now absent in last 2 windows
-        early = sum(timeline[:len(timeline)//2])
-        recent = sum(timeline[-2:])
-        if early >= 2 and recent == 0:
-            cavitated.append(p)
+        try:
+            diffs = vgit.diff_refs(path, f"{sha}^", sha)
+        except Exception:
+            continue
+        if len(diffs) < 2 or len(diffs) > 50:
+            continue
+        total_bugfix += 1
+        for f in diffs:
+            file_bugfix_count[f] = file_bugfix_count.get(f, 0) + 1
+        for i in range(len(diffs)):
+            for j in range(i + 1, len(diffs)):
+                a, b = (diffs[i], diffs[j]) if diffs[i] < diffs[j] else (diffs[j], diffs[i])
+                pair_counts[(a, b)] = pair_counts.get((a, b), 0) + 1
 
-    if not cavitated:
-        return {"schema_version": 1, "phrases": [], "cavitated": [],
-                "shrapnel": [], "note": "no cavitation detected"}
+    if total_bugfix < 3:
+        return {"error": f"only {total_bugfix} bugfix commits found (need at least 3)", "files": []}
 
-    # Find shrapnel: phrases still present that were uniquely entangled with cavitated phrases
+    results: list[dict] = []
+    for target in files:
+        target_fixes = file_bugfix_count.get(target, 0)
+        if target_fixes < 2:
+            results.append({"file": target, "bugfix_count": target_fixes, "neighbors": [],
+                            "note": "insufficient bugfix history"})
+            continue
+        neighbors: list[dict] = []
+        for (a, b), count in pair_counts.items():
+            neighbor = None
+            if a == target:
+                neighbor = b
+            elif b == target:
+                neighbor = a
+            if neighbor is None:
+                continue
+            if seismic and neighbor in p_wave_files:
+                continue  # Exclude P-wave files — only report S-wave risks
+            prob = round(count / target_fixes, 2)
+            if prob >= 0.1:
+                neighbors.append({"file": neighbor, "co_bugfix_count": count, "probability": prob})
+        neighbors.sort(key=lambda x: -x["probability"])
+        results.append({
+            "file": target,
+            "bugfix_count": target_fixes,
+            "total_bugfix_commits": total_bugfix,
+            "neighbors": neighbors[:10],
+            "highest_probability": neighbors[0]["probability"] if neighbors else 0,
+        })
+    return {"schema_version": 1, "files": results, "total_files": len(results), "seismic": seismic}
+
+
+def _git_log_message(path: str, sha: str) -> str:
     try:
-        current = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+        import subprocess
+        out = subprocess.run(
+            ["git", "log", "--format=%s%n%b", "-1", sha],
+            capture_output=True, cwd=path, timeout=10,
+        )
+        return out.stdout.decode("utf-8", errors="replace").strip()
     except Exception:
-        return {"schema_version": 1, "phrases": [], "cavitated": cavitated[:10],
-                "shrapnel": [], "note": "current scan failed"}
+        return ""
 
-    shrapnel: list[dict] = []
-    for cv in cavitated[:20]:
-        for fv in current.file_vocabs:
-            for phrase in fv.vocabulary:
-                if cv.lower() in phrase.lower() or phrase.lower() in cv.lower():
-                    continue
-        # Find co-occurring phrases that are now stranded
-        for fv in current.file_vocabs:
-            for phrase in fv.vocabulary:
-                if len(phrase) < 4:
-                    continue
-                # Check if this phrase co-occurred with cavitated phrase historically
-                frags = phrase.lower().split()
-                if any(f in cv.lower() for f in frags if len(f) > 3):
-                    shrapnel.append({
-                        "cavitated": cv[:60],
-                        "stranded": phrase[:60],
-                        "file": fv.path,
-                    })
 
-    shrapnel = shrapnel[:20]
+def triangulate_report(path: str = ".", task: str = "") -> dict:
+    """Byzantine Triangulation — intersect 3 structural probes for target anchor.
+
+    Runs 3 structural views (repo-map skeleton, diff-structural, explore
+    identifiers) without reading source code. Collects 5 phrases per view.
+    Computes overlap anchor. No source code sent to LLM.
+    """
+    import subprocess, json
+    from vocab.scanner import scan_codebase
+
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not task:
+        return {"error": "no task provided"}
+
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    # Probe A: repo-map skeleton — top 5 file-level identifiers
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    file_ids: Counter[str] = Counter()
+    for fv in analysis.file_vocabs[:200]:
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                file_ids[m.group()] += 1
+    probe_a = [p for p, _ in file_ids.most_common(60)
+               if not any(p.startswith(x) for x in ("Http", "Https", "Www", "Get", "Set", "Post", "Put", "Del"))
+               and p not in ("Response", "Request", "Error", "Promise", "Array", "Record", "Partial", "Pick", "Omit")][:5]
+
+    # Probe B: diff-structural — identifiers from recently changed files
+    try:
+        log = vgit.ref_log(path, count=30)
+        recent_tokens: Counter[str] = Counter()
+        for ref in log:
+            try:
+                diffs = vgit.diff_refs(path, f"{ref.sha}^", ref.sha)
+            except Exception:
+                continue
+            for diff_file in diffs[:5]:
+                for fv in analysis.file_vocabs:
+                    if fv.path == diff_file:
+                        for p in fv.vocabulary:
+                            for m in token_re.finditer(p):
+                                recent_tokens[m.group()] += 1
+        probe_b = [p for p, _ in recent_tokens.most_common(20)][:5]
+    except Exception:
+        probe_b = []
+
+    # Probe C: distinctive identifiers (5-20% file frequency)
+    rare_ids: Counter[str] = Counter()
+    total_files = len(analysis.file_vocabs)
+    for fv in analysis.file_vocabs:
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                rare_ids[m.group()] += 1
+    low = max(2, int(total_files * 0.05))
+    high = max(5, int(total_files * 0.2))
+    distinctive = [p for p, c in rare_ids.most_common(200) if low <= c <= high]
+    probe_c = distinctive[:5]
+
+    # Intersection: phrases in 2/3 or 3/3 probes
+    set_a, set_b, set_c = set(probe_a), set(probe_b), set(probe_c)
+    triple_overlap = set_a & set_b & set_c
+    double_overlap = (set_a & set_b) | (set_a & set_c) | (set_b & set_c) - triple_overlap
+
+    # Task keyword overlap scoring
+    task_kws: set[str] = set()
+    for word in task.lower().split():
+        wl = word.strip(".,;:!?()[]{}\"'")
+        if len(wl) >= 4:
+            task_kws.add(wl)
+
+    anchor = sorted(triple_overlap | double_overlap)
+    scores = []
+    for p in anchor:
+        task_match = sum(1 for kw in task_kws if kw in p.lower() or p.lower() in kw)
+        scores.append({"phrase": p, "task_match": task_match, "probes": 3 if p in triple_overlap else 2})
+    scores.sort(key=lambda x: (-x["probes"], -x["task_match"]))
+    top_anchor = [s["phrase"] for s in scores[:5]] if scores else anchor[:5]
+
     return {
         "schema_version": 1,
-        "phrases_tracked": len(phrase_weekly),
-        "cavitated": cavitated[:10],
-        "shrapnel": shrapnel,
-        "cavitation_count": len(cavitated),
-        "shrapnel_count": len(shrapnel),
+        "task": task,
+        "anchor": top_anchor,
+        "probe_a": probe_a,
+        "probe_b": probe_b,
+        "probe_c": probe_c,
+        "triple_overlap": sorted(triple_overlap),
+        "double_overlap": sorted(double_overlap),
+        "confidence": 3 if triple_overlap else (2 if double_overlap else 1),
     }
 
 
