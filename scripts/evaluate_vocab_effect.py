@@ -416,6 +416,41 @@ def discovery_messages(case: Case, condition: str, files: list[str]) -> list[dic
     return [{"role": "system", "content": system}, {"role": "user", "content": "\n".join(user)}]
 
 
+def _decode_cartridge(p: dict) -> dict:
+    """Resolve index-encoded verification candidates back to path strings."""
+    if not p or p.get("error"):
+        return p
+    files = p.get("files", [])
+    if not files:
+        return p
+    v = p.get("verification_candidates")
+    if not isinstance(v, list) or not v:
+        return p
+    if any(isinstance(x, str) for x in v):
+        return p
+    resolved = []
+    for idx in v:
+        if isinstance(idx, int) and 0 <= idx < len(files):
+            resolved.append(files[idx])
+    if resolved:
+        p["verification_candidates"] = resolved
+    ent = p.get("entangled_candidates", [])
+    if ent and isinstance(ent, list):
+        for e in ent:
+            if "file" in e and isinstance(e["file"], int) and 0 <= e["file"] < len(files):
+                e["file"] = files[e["file"]]
+    av = p.get("negative_scope", [])
+    if av and isinstance(av, list) and all(isinstance(x, int) for x in av):
+        p["negative_scope"] = [files[x] for x in av if 0 <= x < len(files)]
+    hz = p.get("verification_horizon", [])
+    if hz and isinstance(hz, list):
+        for h in hz:
+            if "file" in h and isinstance(h["file"], int) and 0 <= h["file"] < len(files):
+                h["file"] = files[h["file"]]
+    p.pop("files", None)
+    return p
+
+
 def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dict[str, str]]:
     guidance = ""
     if condition == "preflight_compact":
@@ -597,6 +632,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
             p = json.loads(raw) if raw.strip() else {}
+            p = _decode_cartridge(p)
             guidance = json.dumps(p, separators=(",", ":")) if p else "no cartridge output"
         except (json.JSONDecodeError, TypeError):
             guidance = raw
@@ -604,6 +640,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
             p = json.loads(raw) if raw.strip() else {}
+            p = _decode_cartridge(p)
             ver = {
                 "verification_candidates": p.get("verification_candidates", []),
                 "entangled_candidates": p.get("entangled_candidates", []),
@@ -622,6 +659,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 cr = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
                 try:
                     cp = json.loads(cr) if cr.strip() else {}
+                    cp = _decode_cartridge(cp)
                     cands = cp.get("verification_candidates", [])
                     if cands:
                         guidance = json.dumps({"route":"none", "fallback_verification_candidates": cands}, separators=(",",":"))
@@ -633,6 +671,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 cr = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
                 try:
                     cp = json.loads(cr) if cr.strip() else {}
+                    cp = _decode_cartridge(cp)
                     if cp and not cp.get("error"):
                         guidance = json.dumps(cp, separators=(",",":"))
                     else:
@@ -659,6 +698,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
             p = json.loads(raw) if raw.strip() else {}
+            p = _decode_cartridge(p)
             det = p.get("deterministic_verify")
             if det:
                 guidance = json.dumps({"deterministic_verify": det, "verification_candidates": p.get("verification_candidates", [])[:2]}, separators=(",",":"))
@@ -679,6 +719,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 raw2 = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
                 try:
                     p2 = json.loads(raw2) if raw2.strip() else {}
+                    p2 = _decode_cartridge(p2)
                     ver = {"verification_candidates": p2.get("verification_candidates", []), "entangled_candidates": p2.get("entangled_candidates", []), "confidence": p2.get("confidence", "low")}
                     guidance = json.dumps(ver, separators=(",",":"))
                 except (json.JSONDecodeError, TypeError):
@@ -687,6 +728,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 cr = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
                 try:
                     cp = json.loads(cr) if cr.strip() else {}
+                    cp = _decode_cartridge(cp)
                     guidance = json.dumps(cp, separators=(",",":")) if cp and not cp.get("error") else ""
                 except (json.JSONDecodeError, TypeError):
                     guidance = ""

@@ -436,6 +436,55 @@ def _entangled_candidates_for_changed(changed: list[str], matrix: dict) -> list[
     return candidates[:5]
 
 
+def _transmission_tier(det: dict | None, all_candidates: list[str], osc: dict) -> str:
+    """Classify structural confidence for output shape selection."""
+    if det and det.get("score", 0) >= 0.85:
+        return "deterministic"
+    if not all_candidates:
+        return "desert"
+    if osc.get("verdict") == "divergent":
+        return "ambiguous"
+    if len(all_candidates) <= 3:
+        return "confident"
+    return "ambiguous"
+
+
+def _indexed_output(all_candidates: list[str], entangled: list[dict],
+                    avoid: list[str], changed: list[str], horizon: list[dict]) -> dict:
+    """Build shared file index and replace path strings with integer indices."""
+    all_files = []
+    seen = set()
+    for f in changed + avoid + all_candidates + [e["file"] for e in entangled] + [h["file"] for h in horizon]:
+        if f and f not in seen:
+            seen.add(f)
+            all_files.append(f)
+    idx_map = {f: i for i, f in enumerate(all_files)}
+    v = [idx_map[c] for c in all_candidates if c in idx_map]
+    ent = [{"file": idx_map[e["file"]], "score": e.get("score", 0), "count": e.get("count", 0), "reason": e.get("reason", "")}
+           for e in entangled if e["file"] in idx_map] if entangled else []
+    av = [idx_map[f] for f in avoid if f in idx_map] if avoid else []
+    hz = [{"file": idx_map[h["file"]], "tier": h.get("tier", "integration"), "stem_match": h.get("stem_match", False), "entanglement_score": h.get("entanglement_score", 0)}
+          for h in horizon if h["file"] in idx_map] if horizon else []
+    return {"files": all_files, "v": v, "ent": ent, "av": av, "hz": hz}
+
+
+def _marginal_candidate_score(rank: int, verify_with: list[str], entangled: list[dict], changed_bases: set[str]) -> float:
+    """Estimate the probability that candidate at rank is the right one (0-1)."""
+    if rank >= len(verify_with):
+        return 0.0
+    c = verify_with[rank]
+    c_base = os.path.splitext(os.path.basename(c))[0].lower()
+    c_base = c_base.replace("test_", "").replace("_test", "").replace(".test", "")
+    stem = c_base in changed_bases
+    ent = 0.0
+    for e in entangled:
+        if e["file"] == c:
+            ent = e.get("score", 0)
+            break
+    base = 0.9 if stem else 0.3
+    return round(min(1.0, base + ent), 3)
+
+
 def cartridge_report(path: str = ".", files: list[str] | None = None,
                      diff_ref: str | None = None, task: str | None = None) -> dict:
     """Compressed context packet — smallest useful scope for LLM verification."""
@@ -492,27 +541,66 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
     negs = _negative_verify_files(changed, analysis.file_vocabs)
     horizon = _verification_horizon(all_candidates, entangled, changed, changed_bases)
     osc = _oscillator_candidates(changed, analysis.file_vocabs, matrix, bootstrap)
+    det = _deterministic_verify(all_candidates, entangled, changed_bases)
 
-    result = {
-        "schema_version": 1, "mode": "verify",
-        "changed_files": changed,
-        "verification_candidates": all_candidates[:5],
-        "entangled_candidates": entangled[:3] if entangled else [],
-        "negative_scope": avoid[:5],
-        "desert": bool(des), "desert_note": des.strip() or None,
-        "confidence": "high" if len(all_candidates) >= 1 else "low",
-        "mirror_ratio": round(mirror.get("mirror_ratio", 0.0), 2) if mirror else 0.0,
-        "stop_after": "deterministic" if det else ("choose_one_of" if all_candidates else "report_desert"),
-        "deterministic_verify": det,
-        "negative_verify": negs if negs else None,
-        "verification_horizon": horizon[:5] if horizon else None,
-        "oscillator": osc if osc.get("verdict") == "divergent" else None,
-    }
+    tier = _transmission_tier(det, all_candidates, osc)
+
+    if tier == "deterministic" and det:
+        result = {
+            "schema_version": 1, "mode": "verify", "tier": "deterministic",
+            "deterministic_verify": det,
+            "stop_after": "deterministic",
+            "verification_candidates": all_candidates[:2],
+        }
+    elif tier == "confident":
+        n = 0
+        for i in range(min(len(all_candidates), 5)):
+            if _marginal_candidate_score(i, all_candidates, entangled, changed_bases) < 0.02 and i >= 2:
+                break
+            n = i + 1
+        io = _indexed_output(all_candidates[:n], entangled, avoid, changed, horizon)
+        result = {
+            "schema_version": 1, "mode": "verify", "tier": "confident",
+            "files": io["files"],
+            "verification_candidates": io["v"],
+            "deterministic_verify": det,
+            "confidence": "high" if n >= 1 else "low",
+            "desert": bool(des), "desert_note": des.strip() or None,
+            "stop_after": "choose_one_of",
+        }
+    elif tier == "desert":
+        result = {
+            "schema_version": 1, "mode": "verify", "tier": "desert",
+            "desert": True, "desert_note": des.strip() or "no structural verification candidates",
+            "stop_after": "report_desert",
+        }
+    else:
+        n = 0
+        for i in range(min(len(all_candidates), 5)):
+            if _marginal_candidate_score(i, all_candidates, entangled, changed_bases) < 0.02 and i >= 2:
+                break
+            n = i + 1
+        io = _indexed_output(all_candidates[:n], entangled, avoid, changed, horizon)
+        result = {
+            "schema_version": 1, "mode": "verify", "tier": "ambiguous",
+            "changed_files": changed,
+            "files": io["files"],
+            "verification_candidates": io["v"],
+            "entangled_candidates": io["ent"] if io["ent"] else None,
+            "negative_scope": io["av"] if io["av"] else None,
+            "deterministic_verify": det,
+            "desert": False, "desert_note": des.strip() or None,
+            "confidence": "low",
+            "verification_horizon": io["hz"] if io["hz"] else None,
+            "oscillator": osc if osc.get("verdict") == "divergent" else None,
+            "mirror_ratio": round(mirror.get("mirror_ratio", 0.0), 2) if mirror else 0.0,
+            "stop_after": "choose_one_of",
+        }
 
     try:
         file_types = [_file_type(f) for f in changed]
         dom_type = max(set(file_types), key=file_types.count) if file_types else "unknown"
-        chosen = result.get("deterministic_verify", {}).get("file") or (all_candidates[0] if all_candidates else None)
+        chosen = det.get("file") if det else (all_candidates[0] if all_candidates else None)
         if chosen:
             hit = _self_assess_hit(path, changed, chosen)
             _append_fragment_entry(path, dom_type, "cartridge", len(all_candidates), hit, changed)
