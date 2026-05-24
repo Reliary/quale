@@ -1488,6 +1488,47 @@ def traffic_control_cmd(path=".", file="", intended_import="", format="compact")
         typer.echo(f'  Import route clear. ({src} -> {dst})')
 
 
+@cli.command(name="splice-exons", rich_help_panel="Inspection")
+def splice_exons_cmd(path=".", file="", format="compact"):
+    from vocab.reports import splice_exons_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not file:
+        typer.echo("provide --file", err=True); raise typer.Exit(1)
+    data = splice_exons_report(path=p, file_path=file)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    pct = data.get("compression_pct", 0)
+    typer.echo(f'{data.get("file","")}: {pct}% reduction ({data.get("exon_count",0)} exons from {data.get("original_lines",0)} lines)')
+    for e in data.get("exons", [])[:5]:
+        typer.echo(f'  L{e["line"]}: {e["text"]} [{e["type"]}]')
+
+
+@cli.command(name="catalytic-crack", rich_help_panel="Utilities")
+def catalytic_crack_cmd(path=".", file="", format="compact"):
+    from vocab.reports import catalytic_crack_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not file:
+        typer.echo("provide --file", err=True); raise typer.Exit(1)
+    data = catalytic_crack_report(path=p, file_path=file)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'{data.get("file","")}: {data.get("fragments_count",0)} fragments from {data.get("total_lines",0)} lines')
+    for f in data.get("fragments", [])[:3]:
+        typer.echo(f'  Fragment {f["fragment_index"]}: {f["lines"]} lines -> {f["output_file"]}')
+        typer.echo(f'    Phrases: {", ".join(f["cluster_phrases"][:3])}')
+    for fv in data.get("fragment_vocabularies", [])[:3]:
+        for name, phrases in fv.items():
+            typer.echo(f'  LLM name: {name} = [{", ".join(phrases)}]')
+
+
 @cli.command(name="decay", rich_help_panel="Inspection")
 def decay_cmd(path=".", file="", weeks=12, half_life=30,
               metabolism: Annotated[bool, typer.Option("--metabolism", help="Active Metabolism: verify pattern declining repo-wide")] = False,

@@ -2624,6 +2624,122 @@ def traffic_control_report(path: str = ".", file_path: str = "",
     }
 
 
+def splice_exons_report(path: str = ".", file_path: str = "") -> dict:
+    """Intron Splicing — extract assertion exons from test boilerplate."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    full = os.path.join(path, file_path) if not os.path.isabs(file_path) else file_path
+    if not os.path.exists(full):
+        return {"error": f"file not found: {file_path}"}
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception:
+        analysis = None
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{2,40}\b')
+    from collections import Counter
+    global_freq: Counter[str] = Counter()
+    if analysis:
+        for fv in analysis.file_vocabs:
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    global_freq[m.group()] += 1
+    with open(full) as f:
+        lines = f.readlines()
+    exons: list[dict] = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "#", "/*", "* ")):
+            continue
+        tokens = token_re.findall(stripped)
+        if not tokens:
+            continue
+        if "expect(" in stripped or "assert." in stripped or "assertEqual" in stripped:
+            exons.append({"line": i + 1, "text": stripped[:80], "type": "assertion"})
+        else:
+            rare_ratio = 0.0
+            if global_freq and tokens:
+                rare_count = sum(1 for t in tokens if global_freq.get(t, 0) < 5)
+                rare_ratio = rare_count / len(tokens)
+            if rare_ratio >= 0.5:
+                exons.append({"line": i + 1, "text": stripped[:80], "type": "logic"})
+    return {"file": file_path, "original_lines": len(lines), "exon_count": len(exons),
+            "compression_pct": round((1 - len(exons) / max(len(lines), 1)) * 100, 1),
+            "exons": exons}
+
+
+def catalytic_crack_report(path: str = ".", file_path: str = "") -> dict:
+    """Fluid Catalytic Cracking — split monolith by internal vocabulary clusters."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    full = os.path.join(path, file_path) if not os.path.isabs(file_path) else file_path
+    if not os.path.exists(full):
+        return {"error": f"file not found: {file_path}"}
+    from vocab.fold import _indent_blocks
+    with open(full) as f:
+        lines = f.readlines()
+    blocks = _indent_blocks(lines)
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+    block_phrases: list[dict] = []
+    for blk in blocks:
+        phr: Counter[str] = Counter()
+        for i in range(blk["start"], blk["end"] + 1):
+            if i < len(lines):
+                for m in token_re.finditer(lines[i]):
+                    phr[m.group()] += 1
+        block_phrases.append({"start": blk["start"], "end": blk["end"],
+                              "phrases": set(phr.keys()),
+                              "size": blk["end"] - blk["start"] + 1})
+    clusters: list[list[dict]] = []
+    assigned = [False] * len(block_phrases)
+    for i, bp in enumerate(block_phrases):
+        if assigned[i]:
+            continue
+        cluster = [bp]
+        assigned[i] = True
+        for j in range(i + 1, len(block_phrases)):
+            if assigned[j]:
+                continue
+            bpj = block_phrases[j]
+            union = len(bp["phrases"] | bpj["phrases"])
+            if union == 0:
+                continue
+            overlap = len(bp["phrases"] & bpj["phrases"]) / union
+            if overlap >= 0.2:
+                cluster.append(bpj)
+                assigned[j] = True
+        clusters.append(cluster)
+    ext = os.path.splitext(file_path)[1]
+    base = os.path.splitext(os.path.basename(file_path))[0]
+    out_dir = os.path.dirname(file_path) if os.path.dirname(file_path) else "."
+    fragments: list[dict] = []
+    rep_phrases: list[str] = []
+    for idx, cluster in enumerate(clusters):
+        cluster_lines: list[str] = []
+        cluster_phrases: Counter[str] = Counter()
+        for bp in cluster:
+            for i in range(bp["start"], bp["end"] + 1):
+                if i < len(lines):
+                    cluster_lines.append(lines[i])
+            for p in bp["phrases"]:
+                cluster_phrases[p] += 1
+        if not cluster_lines:
+            continue
+        top = [p for p, _ in cluster_phrases.most_common(4)]
+        rep_phrases.extend(top[:2])
+        out_file = os.path.join(out_dir, f"{base}_fragment_{idx + 1}{ext}")
+        fragments.append({"fragment_index": idx + 1, "output_file": out_file,
+                          "lines": len(cluster_lines), "cluster_phrases": top[:5],
+                          "content": "".join(cluster_lines)})
+    return {"file": file_path, "total_lines": len(lines), "fragments_count": len(fragments),
+            "fragments": [{k: v for k, v in f.items() if k != "content"} for f in fragments],
+            "representative_phrases": rep_phrases[:8],
+            "llm_naming_task": f"Name these {len(fragments)} files:",
+            "fragment_vocabularies": [{f"File {f['fragment_index']}": f['cluster_phrases']} for f in fragments]}
+
+
 def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
                        max_results: int = 20) -> dict:
     """Bose-Einstein Condensation — find structurally identical files.
