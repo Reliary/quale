@@ -546,14 +546,14 @@ def _route_path(path: str, changed: list[str], analysis, task: str | None = None
     """Determine the correct intervention tier for a given change set."""
     from vocab.scanner import _is_generated
     decl_exts = {".yml", ".yaml", ".json", ".proto", ".sql", ".env", ".cfg", ".toml", ".ini", ".md", ".txt"}
+
+    has_substance = bool(task and len(task) > 10 and task not in ("fix bug", "cleanup", "refactor", "tidy up", "misc"))
+
     if all(any(f.endswith(e) for e in decl_exts) for f in changed):
-        return "none"
+        return "verify" if has_substance else "none"
     if len(changed) == 1 and _is_generated(changed[0]):
-        return "none"
-    if len(changed) == 1:
-        for fv in analysis.file_vocabs if analysis else []:
-            if fv.path == changed[0] and fv.total_phrases <= 2:
-                return "none"
+        return "verify" if has_substance else "none"
+    # Removed phrase-count gate — tiny files still need verification if task has substance.
     verify_with = _preflight_verify_files(changed, None, analysis.file_vocabs if analysis else [])
     if not verify_with:
         try:
@@ -1448,6 +1448,9 @@ def route_recommendation(path: str, task: str | None = None, files: list[str] | 
     if action == "none":
         command = []
         reasons.append("change is structurally trivial; no LLM verification needed")
+        fallback = _preflight_verify_files(normalized_files, None, analysis.file_vocabs if analysis else [])
+        if fallback:
+            reasons.append(f"fallback: {len(fallback)} structural candidates available as safety net")
     elif action == "verify":
         command = ["vocab", "cartridge", "--path", path]
         for f in normalized_files[:10]:
@@ -1475,6 +1478,7 @@ def route_recommendation(path: str, task: str | None = None, files: list[str] | 
     return {
         "schema_version": 1,
         "action": action,
+        "route_reason": reasons[0] if reasons else "unknown",
         "command": command,
         "reasons": reasons,
         "warnings": warnings,

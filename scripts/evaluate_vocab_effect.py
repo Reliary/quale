@@ -613,17 +613,29 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             p = json.loads(raw) if raw.strip() else {}
             action = p.get("action", "verify")
             if action == "none":
-                guidance = "null route: change is structurally trivial. No LLM verification needed. Return empty verify."
-            elif action == "verify":
-                guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
-            elif action == "contract":
-                raw2 = run_vocab(case.path, ["contract", "--path", case.path, "--files", case.edit_file, "--format", "tool"])
-                guidance = raw2 if raw2.strip() else preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
-            elif action == "human":
-                guidance = "verification desert: change is structurally risky and hard to verify. Human review recommended."
+                cr = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+                try:
+                    cp = json.loads(cr) if cr.strip() else {}
+                    cands = cp.get("verification_candidates", [])
+                    if cands:
+                        guidance = json.dumps({"route":"none", "fallback_verification_candidates": cands}, separators=(",",":"))
+                    else:
+                        guidance = ""
+                except (json.JSONDecodeError, TypeError):
+                    guidance = ""
+            elif action in ("verify", "human", "contract"):
+                cr = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
+                try:
+                    cp = json.loads(cr) if cr.strip() else {}
+                    if cp and not cp.get("error"):
+                        guidance = json.dumps(cp, separators=(",",":"))
+                    else:
+                        guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+                except (json.JSONDecodeError, TypeError):
+                    guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
             else:
                 guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError, Exception):
             guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
     elif condition == "verify_scope":
         raw = run_vocab(case.path, ["preflight", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
