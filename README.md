@@ -273,6 +273,12 @@ vocab coupling --path .                              # concept coupling classifi
 vocab diff --ref HEAD~10                             # vocabulary changes across git history
 vocab landmarks .                                    # characteristic phrases
 vocab delta --path .                                 # dead reckoning: structural changes since `vocab init`
+vocab fold --file src/billing.ts --task "fix proration"  # fractional distillation: fold irrelevant code blocks (~40-80% reduction)
+vocab drift-check --file src/billing.ts --snapshot        # take structural baseline for drift monitoring
+vocab drift-check --file src/billing.ts                   # detect velocity spikes (>30% vocabulary turnover)
+vocab forecast --files src/billing.ts                     # Doppler radar: forecast regression risk from bugfix history
+vocab mycorrhiza --files src/billing.ts                   # hidden structural dependencies (no imports)
+vocab isolate --task "Update billing" --format json       # structural module bisection (85% edit-in-top-3)
 ```
 
 ## Measured Effect (LLM Agent Harness)
@@ -319,6 +325,10 @@ Adaptive router selects the best condition per repo using fragment matrix histor
 - **Git co-change bridges vocabulary gaps**: `verify_entangle` fixes the `__init__.py` → `test_*.py` class of failure that pure vocabulary analysis misses.
 - **Multi-turn YES/NO is most efficient**: 93% fewer tokens at 60% verify. Escalate to full context on reject for 70% at ~650 tok.
 - **Contract system eliminates path hallucination**: 0 invalid IDs, 0 raw paths across all measured conditions.
+- **`vocab forecast` detects hidden regression risk**: scanning bugfix history reveals files that historians regress together despite zero imports — 71% probability on vocab's own reports.py/evaluate_vocab_effect.py pair.
+- **`vocab mycorrhiza` catches coupling no linter can**: structural dependencies (shared rare vocabulary + co-change) between files with no declared imports.
+- **`vocab drift-check` monitors structural decay**: per-file vocabulary velocity tracking. Alerts on >30% turnover. Zero token cost, background-runnable.
+- **`vocab fold` reduces context on large files**: indentation-aware block folding by task relevance. 18% reduction on unrelated task. Structural lines protected.
 - **The 17% boundary**: repos without stem-matched tests or co-change history (opencode-index, llama-cpp) remain structurally ambiguous across all conditions. Vocab documents this honestly rather than hallucinating.
 
 ## Philosophy
