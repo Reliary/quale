@@ -122,6 +122,44 @@ CASES: tuple[Case, ...] = (
          "app/compression/__init__.py",
          ("app/compression/__init__.py", "app/compression/crispr_v2_backend.py", "app/compression/base.py"),
          ("tests/test_minhash_index.py",)),
+
+    # HARDER CASES: cross-package, non-stem-match, desert, multi-language
+
+    Case("private_unseen", "autopsylab-janitor", "/home/user/src/autopsylab",
+         "add retention-based cleanup for old data export records",
+         "internal/services/janitor.go",
+         ("internal/services/janitor.go", "internal/database/queries/queries.sql", "internal/models/export.go"),
+         ("tests/functional/api_failures_test.go",)),
+
+    Case("private_unseen", "autopsylab-desert", "/home/user/src/autopsylab",
+         "add a new feature flag for recovery retry budget",
+         "config/features.yaml",
+         ("config/features.yaml", "internal/features/features.go"),
+         ()),
+
+    Case("private_unseen", "agent-mcp-cross", "/home/user/src/autopsylab-agent",
+         "add MCP tool registration for a new server recovery tool",
+         "packages/mcp/src/index.ts",
+         ("packages/mcp/src/index.ts", "packages/core/src/types.ts", "packages/opencode/src/plugin.ts"),
+         ("packages/core/tests/events.test.ts",)),
+
+    Case("private_unseen", "agent-multi-file", "/home/user/src/autopsylab-agent",
+         "add retry with backoff to spool upload and redact errors in transit",
+         "packages/core/src/spool.ts",
+         ("packages/core/src/spool.ts", "packages/core/src/redaction.ts", "packages/core/src/api-transport.ts"),
+         ("packages/core/tests/spool.test.ts", "packages/core/tests/redaction.test.ts")),
+
+    Case("hard_language", "llama-cpp", "/home/user/src/llama.cpp",
+         "add a grammar-guided sampling path with temperature scheduling",
+         "src/llama.cpp",
+         ("src/llama.cpp", "src/llama.h", "ggml.h"),
+         ("tests/test-llama-grammar.cpp",)),
+
+    Case("hard_language", "opencode-index", "/home/user/src/opencode",
+         "add plugin lifecycle hook for post-install configuration",
+         "packages/opencode/src/index.ts",
+         ("packages/opencode/src/index.ts", "packages/opencode/src/plugin.ts"),
+         ("packages/opencode/test/plugin.test.ts",)),
 )
 
 
@@ -1306,7 +1344,7 @@ def select_cases(buckets: set[str], max_cases: int | None) -> list[Case]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Measure whether vocab guidance changes agent outcomes.")
     parser.add_argument("--suite", choices=("discovery", "preflight", "all"), default="all")
-    parser.add_argument("--bucket", action="append", choices=("seen_public", "weird_public", "private_unseen"), default=[])
+    parser.add_argument("--bucket", action="append", choices=("seen_public", "weird_public", "private_unseen", "hard_language"), default=[])
     parser.add_argument("--condition", action="append", default=[])
     parser.add_argument("--trials", type=int, default=1)
     parser.add_argument("--max-cases", type=int)

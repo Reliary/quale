@@ -436,7 +436,9 @@ def _entangled_candidates_for_changed(changed: list[str], matrix: dict) -> list[
     return candidates[:5]
 
 
-def _transmission_tier(det: dict | None, all_candidates: list[str], osc: dict) -> str:
+def _transmission_tier(det: dict | None, all_candidates: list[str], osc: dict,
+                       entangled: list[dict] | None = None,
+                       changed_bases: set[str] | None = None) -> str:
     """Classify structural confidence for output shape selection."""
     if det and det.get("score", 0) >= 0.85:
         return "deterministic"
@@ -444,7 +446,12 @@ def _transmission_tier(det: dict | None, all_candidates: list[str], osc: dict) -
         return "desert"
     if osc.get("verdict") == "divergent":
         return "ambiguous"
-    if len(all_candidates) <= 3:
+    top = 0.0
+    if entangled is not None and changed_bases is not None:
+        top = _marginal_candidate_score(0, all_candidates, entangled, changed_bases)
+    if top >= 0.4:
+        return "confident"
+    if top >= 0.3 and len(all_candidates) <= 3:
         return "confident"
     return "ambiguous"
 
@@ -543,7 +550,7 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
     osc = _oscillator_candidates(changed, analysis.file_vocabs, matrix, bootstrap)
     det = _deterministic_verify(all_candidates, entangled, changed_bases)
 
-    tier = _transmission_tier(det, all_candidates, osc)
+    tier = _transmission_tier(det, all_candidates, osc, entangled, changed_bases)
 
     if tier == "deterministic" and det:
         result = {
