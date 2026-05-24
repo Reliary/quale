@@ -258,3 +258,16 @@ def format_isolate_confirm(task: str, module: dict, turn: int) -> str:
     lines.append("NO = this module is unrelated.")
     lines.append("Output: {'confirmed': true_or_false, 'reason': '<opt>'}")
     return "\n".join(lines)
+
+
+def format_folded_file(data: dict) -> str:
+    """Render folded file with annotations and unfold instructions."""
+    lines = ["FOLDED SOURCE FILE"]
+    lines.append(f"File: {data['file_path']}")
+    lines.append(f"Original lines: {data['original_lines']} -> Visible: {data['visible_lines']} ({data['compression_pct']}% reduction)")
+    fb = data.get("folded_blocks", [])
+    if fb:
+        lines.append(f"Folded blocks: {len(fb)}. Unfold via `unfold(start_line)` tool.")
+    lines.append("")
+    lines.append(data.get("folded_text", ""))
+    return "\n".join(lines)

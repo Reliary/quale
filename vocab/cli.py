@@ -1020,6 +1020,78 @@ def isolate_cmd(
     typer.echo(prompt)
 
 
+@cli.command(name="fold", rich_help_panel="Agent")
+def fold_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to fold")] = "",
+    task: Annotated[str, typer.Option("--task", "-t", help="Task description")] = "",
+    threshold: Annotated[float, typer.Option("--threshold", help="Minimum score to keep a block")] = 0.02,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Fractional distillation — fold task-irrelevant code blocks.
+
+    Indentation-aware block folding preserves syntax while removing
+    structural noise. 40-80% token reduction on large files.
+
+    Example:
+      vocab fold --file src/billing.ts --task 'fix proration'
+    """
+    from vocab.fold import fold_file
+    path_abs = os.path.abspath(path)
+    data = fold_file(path=path_abs, file_path=file, task=task, threshold=threshold)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    from vocab.formats.llm import format_folded_file
+    typer.echo(format_folded_file(data))
+
+
+@cli.command(name="drift-check", rich_help_panel="CI")
+def drift_check_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to snapshot or check")] = "",
+    snapshot: Annotated[bool, typer.Option("--snapshot", help="Take initial baseline snapshot")] = False,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Structural drift IMU — detect anomaly velocity in codebase.
+
+    Takes vocabulary snapshots per-file. On check, compares current
+    state against baseline and alerts on velocity spikes.
+
+    Example:
+      vocab drift-check --file src/billing.ts --snapshot
+      vocab drift-check --file src/billing.ts
+    """
+    from vocab.reports import drift_velocity_snapshot
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not file:
+        typer.echo("provide --file", err=True)
+        raise typer.Exit(1)
+    data = drift_velocity_snapshot(path=path_abs, files=[file], snapshot=snapshot)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    if snapshot:
+        typer.echo(f"Drift baseline saved for {file} ({data.get('phrases_captured', 0)} phrases)")
+        return
+    vel = data.get("velocity", 0)
+    anomalies = data.get("anomalies", [])
+    if anomalies:
+        for a in anomalies[:5]:
+            typer.echo(f"  IMU: {a}")
+    else:
+        typer.echo(f"Drift stable. Velocity: {vel:.3f}")
+
+
 @cli.command(name="verify-packet",  rich_help_panel="Agent")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",

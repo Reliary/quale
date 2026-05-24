@@ -970,6 +970,63 @@ def isolate_modules(path: str = ".", task: str = "") -> dict:
     }
 
 
+def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
+                             snapshot: bool = False) -> dict:
+    import json
+    from vocab.scanner import scan_codebase
+    path = os.path.abspath(path)
+    drift_dir = os.path.join(path, ".reliary", "vocab", "drift")
+    os.makedirs(drift_dir, exist_ok=True)
+    if not files:
+        return {"error": "no files provided"}
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    file_phrases: dict[str, set[str]] = {}
+    for fv in analysis.file_vocabs:
+        if fv.path in files:
+            file_phrases[fv.path] = set(fv.vocabulary.keys())
+    results: list[dict] = []
+    for f in files:
+        phrases = file_phrases.get(f, set())
+        safe = f.replace("/", "_")
+        basin_path = os.path.join(drift_dir, f"{safe}.json")
+        if snapshot:
+            with open(basin_path, "w") as fp:
+                json.dump({"phrases": sorted(phrases), "count": len(phrases)}, fp)
+            results.append({"file": f, "phrases_captured": len(phrases), "snapshot": True})
+            continue
+        if not os.path.exists(basin_path):
+            results.append({"file": f, "error": "no baseline", "velocity": 0, "anomalies": ["no baseline"]})
+            continue
+        try:
+            with open(basin_path) as fp:
+                baseline = json.load(fp)
+        except Exception:
+            results.append({"file": f, "error": "corrupt baseline", "velocity": 0})
+            continue
+        base_phrases = set(baseline.get("phrases", []))
+        if not base_phrases:
+            results.append({"file": f, "error": "empty baseline", "velocity": 0})
+            continue
+        new_phrases = phrases - base_phrases
+        removed_phrases = base_phrases - phrases
+        intro_rate = len(new_phrases) / max(len(base_phrases), 1)
+        removal_rate = len(removed_phrases) / max(len(base_phrases), 1)
+        velocity = round((intro_rate + removal_rate) / 2, 3)
+        stable_anchors = base_phrases & phrases
+        anchor_survival = round(len(stable_anchors) / max(len(base_phrases), 1), 3)
+        anomalies = []
+        if velocity > 0.3:
+            anomalies.append(f"Velocity spike: {velocity:.3f}")
+        if anchor_survival < 0.5:
+            anomalies.append(f"Anchor destruction: {anchor_survival:.3f}")
+        results.append({"file": f, "velocity": velocity, "anchors_preserved": anchor_survival,
+                        "anomalies": anomalies, "stable": len(anomalies) == 0})
+    return {"schema_version": 1, "files": results, "total_files": len(results)}
+
+
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
     """Seed the adaptive router's fragment matrix using git history.
 
