@@ -361,5 +361,55 @@ class TestCommandCoverage(unittest.TestCase):
         self.assertGreaterEqual(data["label_counts"].get("edit_sprawl", 0), 1)
 
 
+class TestStructuralDetection(unittest.TestCase):
+    """Structural detection: desert, co-location, same-package prefix."""
+
+    def test_has_code_case_pascal_case(self):
+        from vocab.reports import _has_code_case
+        self.assertTrue(_has_code_case("JanitorService"))
+        self.assertTrue(_has_code_case("RetentionCutoff"))
+
+    def test_has_code_case_camel_case(self):
+        from vocab.reports import _has_code_case
+        self.assertTrue(_has_code_case("retentionCutoff"))
+        self.assertTrue(_has_code_case("cleanupOldData"))
+
+    def test_has_code_case_declarative(self):
+        from vocab.reports import _has_code_case
+        self.assertFalse(_has_code_case("features"))
+        self.assertFalse(_has_code_case("enabled"))
+        self.assertFalse(_has_code_case("true"))
+        self.assertFalse(_has_code_case("false"))
+        self.assertFalse(_has_code_case("retention_days"))
+
+    def test_is_declarative_changed_config(self):
+        from vocab.reports import _is_declarative_changed
+        from vocab.analyze import FileVocab
+        fv = FileVocab(path="config/features.yaml", language="YAML",
+                       vocabulary={"features": 1, "enabled": 1, "true": 2, "false": 1, "retention_days": 1},
+                       total_phrases=5)
+        self.assertTrue(_is_declarative_changed(["config/features.yaml"], [fv]))
+
+    def test_is_declarative_changed_code(self):
+        from vocab.reports import _is_declarative_changed
+        from vocab.analyze import FileVocab
+        fv = FileVocab(path="src/worker.go", language="Go",
+                       vocabulary={"JanitorService": 1, "cleanup": 2, "true": 1},
+                       total_phrases=3)
+        self.assertFalse(_is_declarative_changed(["src/worker.go"], [fv]))
+
+    def test_same_package_prefix_same(self):
+        from vocab.reports import _same_package_prefix
+        self.assertTrue(_same_package_prefix("packages/mcp/test", "packages/mcp/src"))
+
+    def test_same_package_prefix_different(self):
+        from vocab.reports import _same_package_prefix
+        self.assertFalse(_same_package_prefix("packages/cli/test", "packages/mcp/src"))
+
+    def test_same_package_prefix_too_shallow(self):
+        from vocab.reports import _same_package_prefix
+        self.assertFalse(_same_package_prefix("src", "src"))
+
+
 if __name__ == "__main__":
     unittest.main()

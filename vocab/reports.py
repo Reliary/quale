@@ -515,6 +515,15 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     except Exception as e:
         return {"error": f"scan failed: {e}"}
+
+    if _is_declarative_changed(changed, analysis.file_vocabs):
+        return {
+            "schema_version": 1, "mode": "verify", "tier": "desert",
+            "desert": True,
+            "desert_note": "declarative file(s) — no structural verification candidates",
+            "stop_after": "report_desert",
+        }
+
     bootstrap = None
     if task:
         try:
@@ -523,9 +532,10 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
         except Exception:
             pass
     verify_with = _preflight_verify_files(changed, bootstrap, analysis.file_vocabs)
+    co_located = _co_located_tests(changed, analysis.file_vocabs)
     matrix = entanglement_matrix(path)
     entangled = _entangled_candidates_for_changed(changed, matrix)
-    all_candidates = list(dict.fromkeys(verify_with + [e["file"] for e in entangled]))
+    all_candidates = list(dict.fromkeys(verify_with + [c["file"] for c in co_located if c["file"] not in verify_with] + [e["file"] for e in entangled]))
     avoid = []
     if bootstrap:
         for item in bootstrap.get("avoid_touching_without_context", []):
@@ -938,6 +948,90 @@ def _save_fragment_matrix(path: str, entries: list[dict]):
         json.dump({"schema_version": 1, "entries": entries}, f, indent=2, default=str)
 
 
+def _has_code_case(token: str) -> bool:
+    """True if token looks like a code identifier (mixed case)."""
+    if len(token) < 3:
+        return False
+    if token[0].isupper() and any(c.islower() for c in token[1:]):
+        return True
+    if token[0].islower() and any(c.isupper() for c in token[1:]):
+        return True
+    return False
+
+
+def _is_declarative_changed(changed: list[str], file_vocabs) -> bool:
+    """Return True if all changed files are declarative (no code identifiers)."""
+    for f in changed:
+        for fv in file_vocabs:
+            if fv.path == f:
+                for phrase in fv.vocabulary or {}:
+                    if _has_code_case(phrase):
+                        return False
+                break
+    return True
+
+
+def _same_package_prefix(test_dir: str, src_dir: str) -> bool:
+    """True if directories share a meaningful package prefix (at least 2 segments)."""
+    t_parts = test_dir.split("/")
+    s_parts = src_dir.split("/")
+    if len(t_parts) < 2 or len(s_parts) < 2:
+        return False
+    if t_parts[0] != s_parts[0]:
+        return False
+    return sum(1 for a, b in zip(t_parts, s_parts) if a == b) >= 2
+
+
+_CO_LOCATED_CONVENTIONS = [
+    ("src/", "tests/", 0.5),
+    ("/src/", "/test/", 0.5),
+    ("lib/", "test/", 0.5),
+    ("internal/", "internal/", 0.7),
+]
+
+
+def _co_located_tests(changed: list[str], file_vocabs) -> list[dict]:
+    """Find test files co-located with changed files using directory mirrors."""
+    all_tests = []
+    for fv in file_vocabs:
+        p = fv.path
+        if "/test" not in p.lower() and "tests/" not in p.lower() and ".test." not in p and "_test." not in p:
+            continue
+        all_tests.append(p)
+    candidates = []
+    for cf in changed:
+        cf_dir = os.path.dirname(cf)
+        cf_stem = os.path.splitext(os.path.basename(cf))[0].lower()
+        for src_pfx, test_pfx, base_score in _CO_LOCATED_CONVENTIONS:
+            if src_pfx not in cf_dir and src_pfx != "/":
+                continue
+            test_dir = cf_dir.replace(src_pfx, test_pfx, 1) if src_pfx != "/" else test_pfx
+            for test_path in all_tests:
+                td = os.path.dirname(test_path)
+                if td != test_dir and not td.startswith(test_dir + "/"):
+                    continue
+                ts = os.path.splitext(os.path.basename(test_path))[0].lower()
+                ts = ts.replace("test_", "").replace("_test", "").replace(".test", "")
+                score = base_score
+                if ts == cf_stem:
+                    score += 0.2
+                elif cf_stem and ts and (cf_stem in ts or ts in cf_stem):
+                    score += 0.1
+                candidates.append({
+                    "file": test_path,
+                    "score": round(min(0.9, score), 2),
+                    "reason": f"co-located with {cf} ({src_pfx}→{test_pfx})",
+                })
+    candidates.sort(key=lambda x: -x["score"])
+    seen = set()
+    uniq = []
+    for c in candidates:
+        if c["file"] not in seen:
+            seen.add(c["file"])
+            uniq.append(c)
+    return uniq[:5]
+
+
 def _append_fragment_entry(path: str, file_type: str, condition: str, candidates_count: int, verify_hit: bool, changed_files: list[str] | None = None):
     """Append a labeled trial outcome to the fragment matrix."""
     try:
@@ -1169,9 +1263,10 @@ def _preflight_verify_files(changed: list[str], bootstrap: dict | None, file_voc
             changed_dirs.add(d)
     verify.sort(key=lambda f: (
         0 if f in bootstrap_added and os.path.splitext(os.path.basename(f))[0].replace(".test", "").replace("_test", "").lower() in changed_bases else
-        1 if f in bootstrap_added else
-        2 if os.path.dirname(f) in changed_dirs else
-        3,
+        1 if os.path.dirname(f) in changed_dirs else
+        2 if any(_same_package_prefix(os.path.dirname(f), cd) for cd in changed_dirs) else
+        3 if f in bootstrap_added else
+        4,
         f
     ))
     return verify[:5]

@@ -128,8 +128,8 @@ CASES: tuple[Case, ...] = (
     Case("private_unseen", "autopsylab-janitor", "/home/user/src/autopsylab",
          "add retention-based cleanup for old data export records",
          "internal/services/janitor.go",
-         ("internal/services/janitor.go", "internal/database/queries/queries.sql", "internal/models/export.go"),
-         ("tests/functional/api_failures_test.go",)),
+         ("internal/services/janitor.go", "internal/entitlements/limits.go", "internal/services/janitor.go"),
+         ("internal/services/janitor_test.go",)),
 
     Case("private_unseen", "autopsylab-desert", "/home/user/src/autopsylab",
          "add a new feature flag for recovery retry budget",
