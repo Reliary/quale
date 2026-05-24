@@ -1754,6 +1754,278 @@ def triangulate_report(path: str = ".", task: str = "") -> dict:
     }
 
 
+_WORDLIST: set[str] | None = None
+
+def _load_wordlist() -> set[str]:
+    """Load standard English word list for frequency analysis filtering."""
+    global _WORDLIST
+    if _WORDLIST is not None:
+        return _WORDLIST
+    try:
+        import os
+        wl_path = os.path.join(os.path.dirname(__file__), "wordlist.txt")
+        if os.path.exists(wl_path):
+            with open(wl_path) as f:
+                _WORDLIST = set(line.strip().lower() for line in f if line.strip())
+            return _WORDLIST
+    except Exception:
+        pass
+    _WORDLIST = set()
+    return _WORDLIST
+
+
+def solve_report(path: str = ".", top_n: int = 20) -> dict:
+    """Frequency Analysis Code-Breaking (The Bimoth Index).
+
+    Filters global phrase frequencies against standard English dictionary.
+    Extracts top N highest-frequency non-dictionary identifiers — the
+    'structural cipher keys' of an alien/obfuscated codebase.
+
+    Output is a 50-token decryption key for architecture onboarding.
+    """
+    from vocab.scanner import scan_codebase
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    # Build global frequency map
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+    freq: Counter[str] = Counter()
+    for fv in analysis.file_vocabs:
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                freq[m.group()] += fv.vocabulary[phrase]
+
+    wordlist = _load_wordlist()
+    has_wordlist = len(wordlist) > 0
+
+    # Filter: exclude dictionary words and common programming terms
+    common_prog = frozenset({
+        "this", "that", "with", "from", "into", "than", "then", "else", "more",
+        "some", "when", "what", "which", "where", "while", "after", "before",
+        "const", "let", "var", "func", "type", "true", "false", "null", "void",
+        "async", "await", "import", "export", "class", "return", "throw", "new",
+        "string", "number", "boolean", "array", "object", "error", "promise",
+    })
+    filtered: list[tuple[str, int]] = []
+    for phrase, count in freq.most_common(500):
+        lower = phrase.lower()
+        if has_wordlist and lower in wordlist:
+            continue
+        if lower in common_prog:
+            continue
+        if len(phrase) <= 3:
+            continue
+        if phrase[0].isdigit():
+            continue
+        filtered.append((phrase, count))
+
+    top = filtered[:top_n]
+    # Map each top identifier to its top-3 file locations
+    file_map: dict[str, list[str]] = {}
+    for phrase, _ in top:
+        locations: list[tuple[str, int]] = []
+        for fv in analysis.file_vocabs:
+            if phrase in fv.vocabulary or any(phrase in p for p in fv.vocabulary):
+                locations.append((fv.path, fv.vocabulary.get(phrase, 0)))
+        locations.sort(key=lambda x: -x[1])
+        file_map[phrase] = [loc[0] for loc in locations[:3]]
+
+    return {
+        "schema_version": 1,
+        "total_phrases": len(freq),
+        "has_wordlist": has_wordlist,
+        "bimoth_index": [{"phrase": p, "frequency": c, "top_files": file_map.get(p, [])} for p, c in top],
+        "summary": f"{len(freq)} total phrases → {len(filtered)} non-dictionary identifiers → top {len(top)} structural cipher keys.",
+    }
+
+
+def mycorrhiza_map(path: str = ".", files: list[str] | None = None,
+                    min_rare_co_occurrences: int = 2) -> dict:
+    """Detect hidden structural dependencies between files.
+
+    Files that share rare vocabulary AND co-change in git history
+    despite having zero import/require/include relationships.
+
+    When tolerance=True: additionally checks whether the changed file's
+    vocabulary cluster overlaps with clusters the target has never
+    historically touched (Tolerance Gaging).
+    """
+    from vocab.scanner import scan_codebase
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not files:
+        return {"error": "no files provided"}
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    # Build per-file rare-phrase sets
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    file_rare_tokens: dict[str, set[str]] = {}
+    for fv in analysis.file_vocabs:
+        tokens: Counter[str] = Counter()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                tokens[m.group()] += 1
+        # Identify rare tokens (appear in few files)
+        file_rare_tokens[fv.path] = set(t for t in tokens if t)
+
+    # Count file co-occurrence for each token
+    token_file_count: Counter[str] = Counter()
+    for tokens in file_rare_tokens.values():
+        for t in tokens:
+            token_file_count[t] += 1
+
+    total_files = len(analysis.file_vocabs)
+    rare_threshold = max(2, int(total_files * 0.15))
+    rare_set: set[str] = set(t for t, c in token_file_count.items() if c <= rare_threshold)
+
+    # Build co-change matrix from git history
+    co_change_pair_count: dict[tuple[str, str], int] = {}
+    log = vgit.ref_log(path, count=200)
+    for ref in log:
+        try:
+            diffs = vgit.diff_refs(path, f"{ref.sha}^", ref.sha)
+        except Exception:
+            continue
+        if len(diffs) < 2 or len(diffs) > 50:
+            continue
+        for i in range(len(diffs)):
+            for j in range(i + 1, len(diffs)):
+                a, b = (diffs[i], diffs[j]) if diffs[i] < diffs[j] else (diffs[j], diffs[i])
+                co_change_pair_count[(a, b)] = co_change_pair_count.get((a, b), 0) + 1
+
+    result_files: list[dict] = []
+    for target in files:
+        target_tokens = file_rare_tokens.get(target, set())
+        if not target_tokens:
+            result_files.append({"file": target, "count": 0, "hidden_dependencies": [], "tolerance": {}})
+            continue
+
+        hidden: list[dict] = []
+        for other_path, other_tokens in file_rare_tokens.items():
+            if other_path == target:
+                continue
+            shared = target_tokens & other_tokens
+            if len(shared) < min_rare_co_occurrences:
+                continue
+            rare_shared = shared & rare_set
+            if len(rare_shared) < min_rare_co_occurrences:
+                continue
+            # Check co-change signal
+            pair = (target, other_path) if target < other_path else (other_path, target)
+            co_change_count = co_change_pair_count.get(pair, 0)
+            confidence = "high" if co_change_count >= 3 else ("moderate" if co_change_count >= 1 else "low")
+            if confidence == "low":
+                continue
+            hidden.append({
+                "file": other_path,
+                "shared_rare_terms": sorted(rare_shared)[:5],
+                "co_change_count": co_change_count,
+                "confidence": confidence,
+            })
+
+        hidden.sort(key=lambda x: -len(x["shared_rare_terms"]))
+        result_files.append({
+            "file": target,
+            "count": len(hidden),
+            "hidden_dependencies": hidden[:10],
+        })
+
+    return {"schema_version": 1, "files": result_files, "total_files": len(result_files)}
+
+
+def mycorrhiza_with_tolerance(path: str = ".", files: list[str] | None = None) -> dict:
+    """mycorrhiza_map + Tolerance Gaging.
+
+    Computes historical cluster radius for each target file.
+    If an edit introduces vocabulary from outside that radius,
+    emits tolerance_violation: true.
+    """
+    from vocab.scanner import scan_codebase
+    from vocab.bootstrap import compute_modules
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    base = mycorrhiza_map(path=path, files=files)
+    if "error" in base:
+        return base
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+        mods = compute_modules(path, analysis=analysis)
+        mod_list = mods.get("modules", []) if isinstance(mods, dict) else []
+    except Exception:
+        return base
+
+    # Build cluster → files map
+    cluster_files: dict[str, set[str]] = {}
+    for m in mod_list:
+        label = "_".join(m.get("exemplar_phrases", [])[:3]) or f"cluster_{m.get('size', 0)}"
+        cluster_files[label] = set(m.get("files", []))
+
+    # For each result file, compute historical cluster radius
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    for res in base.get("files", []):
+        target = res["file"]
+        # Collect all tokens in target file
+        target_tokens: set[str] = set()
+        for fv in analysis.file_vocabs:
+            if fv.path == target:
+                for phrase in fv.vocabulary:
+                    for m in token_re.finditer(phrase):
+                        target_tokens.add(m.group())
+
+        # Map target tokens to clusters
+        touched_clusters: set[str] = set()
+        for cl, fs in cluster_files.items():
+            for f in fs:
+                for fv in analysis.file_vocabs:
+                    if fv.path == f:
+                        if any(t in fv.vocabulary or any(t in p for p in fv.vocabulary) for t in target_tokens):
+                            touched_clusters.add(cl)
+                            break
+                if cl in touched_clusters:
+                    break
+
+        # Check hidden dep tokens — do they introduce new clusters?
+        violations: list[str] = []
+        for dep in res.get("hidden_dependencies", []):
+            dep_tokens: set[str] = set()
+            for fv in analysis.file_vocabs:
+                if fv.path == dep["file"]:
+                    for phrase in fv.vocabulary:
+                        for m in token_re.finditer(phrase):
+                            dep_tokens.add(m.group())
+            dep_clusters: set[str] = set()
+            for cl, fs in cluster_files.items():
+                for f in fs:
+                    for fv in analysis.file_vocabs:
+                        if fv.path == f:
+                            if any(t in fv.vocabulary for t in dep_tokens):
+                                dep_clusters.add(cl)
+                                break
+                    if cl in dep_clusters:
+                        break
+            new_clusters = dep_clusters - touched_clusters
+            if new_clusters:
+                violations.append(f"introduces vocabulary from cluster(s): {', '.join(sorted(new_clusters)[:3])}")
+
+        res["tolerance"] = {
+            "historical_clusters": sorted(touched_clusters)[:5],
+            "violations": violations[:3],
+            "tolerance_ok": len(violations) == 0,
+        }
+
+    return base
+
+
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
     """Seed the adaptive router's fragment matrix using git history.
 

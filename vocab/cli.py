@@ -1105,14 +1105,18 @@ def mycorrhiza_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="File(s) to map hidden deps for")] = [],
     active_days: Annotated[int, typer.Option("--active-days", help="Only analyze files modified in N days (active gene pool)")] = 0,
+    tolerance: Annotated[bool, typer.Option("--tolerance", help="Tolerance Gaging: check if edit introduces vocabulary outside historical cluster radius")] = False,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
     """Detect hidden structural dependencies (no direct imports).
 
     Files that share rare vocabulary AND co-change in git history
     despite having zero import/require/include relationships.
+
+    Use --tolerance to detect when an edit introduces vocabulary
+    from clusters the target file has never historically touched.
     """
-    from vocab.reports import mycorrhiza_map, _active_gene_pool
+    from vocab.reports import mycorrhiza_map, mycorrhiza_with_tolerance, _active_gene_pool
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1126,7 +1130,7 @@ def mycorrhiza_cmd(
         if not files:
             typer.echo("No files in active gene pool.", err=True)
             raise typer.Exit(1)
-    data = mycorrhiza_map(path=path_abs, files=list(files))
+    data = mycorrhiza_with_tolerance(path=path_abs, files=list(files)) if tolerance else mycorrhiza_map(path=path_abs, files=list(files))
     if "error" in data:
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
@@ -1141,6 +1145,44 @@ def mycorrhiza_cmd(
             conf = dep.get("confidence", "moderate")
             clr = "yellow" if conf == "moderate" else "red"
             typer.echo(f"    -> {dep['file']}  [{_color(conf, clr)}] shared: {', '.join(dep['shared_rare_terms'][:3])}")
+        if tolerance and f.get("tolerance", {}).get("violations"):
+            for v in f["tolerance"]["violations"]:
+                typer.echo(f"    {_color('TOLERANCE VIOLATION:', 'red')} {v}")
+
+
+@cli.command(name="solve", rich_help_panel="Inspection")
+def solve_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    top_n: Annotated[int, typer.Option("--top", help="Number of cipher keys to extract")] = 20,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Frequency Analysis Code-Breaking (Bimoth Index).
+
+    Filters global phrase frequencies against a standard English dictionary.
+    Extracts the top N highest-frequency non-dictionary identifiers —
+    the 'structural cipher keys' of an alien/obfuscated codebase.
+
+    Output is a 50-token decryption key for architecture onboarding.
+    Use when dropped into an unfamiliar codebase.
+
+    Example:
+      vocab solve --path /path/to/alien/codebase
+    """
+    from vocab.reports import solve_report
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = solve_report(path=path_abs, top_n=top_n)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    typer.echo(data["summary"])
+    for i, p in enumerate(data.get("bimoth_index", [])[:8]):
+        typer.echo(f"  {i+1}. {p['phrase']} (freq={p['frequency']}) — {', '.join(p['top_files'][:2])}")
 
 
 @cli.command(name="forecast", rich_help_panel="CI")
