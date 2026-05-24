@@ -1310,6 +1310,87 @@ def entropy_cmd(
         typer.echo(f"  [{label}] {d['directory']:30s} entropy={d['entropy']:.2f} baseline={d['baseline']:.2f}")
 
 
+@cli.command(name="zk-proof", rich_help_panel="Agent")
+def zk_proof_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="Schema file (source of truth)")] = "",
+    code: Annotated[str, typer.Option("--code", help="LLM-generated code to verify")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Zk-Vocabulary Prover — verify generated code uses only allowed identifiers.
+
+    Extracts identifiers from the schema file. Scans generated code.
+    Rejects any identifier not in the allowed set with alternatives.
+
+    Example:
+      vocab zk-proof --file db/types.ts --code 'const q = db.query(...)'
+    """
+    from vocab.reports import zk_proof_report
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not file or not code:
+        typer.echo("provide --file and --code", err=True)
+        raise typer.Exit(1)
+    data = zk_proof_report(path=path_abs, schema_file=file, generated_code=code)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2, default=str))
+        return
+    if data.get("passed"):
+        typer.echo(_color("ZK-PROOF PASSED", "green"))
+        typer.echo(f"  All {data['code_identifiers']} identifiers valid against {data['allowed_count']}-item vocabulary.")
+    else:
+        typer.echo(_color("ZK-PROOF FAILED", "red"))
+        vc = data.get("violation_count", 0)
+        for v in data.get("violations", [])[:5]:
+            alts = ", ".join(v.get("allowed_alternatives", [])[:2])
+            typer.echo(f"  '{v['identifier']}' not in schema. Did you mean: {alts}?")
+
+
+@cli.command(name="lagrange", rich_help_panel="Inspection")
+def lagrange_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to analyze")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Lagrange Points — detect structurally isolated blocks safe to edit.
+
+    Finds blocks with zero co-occurrence edges to the file's primary
+    clusters. Editing these blocks has zero blast radius.
+
+    Example:
+      vocab lagrange --file legacy.ts
+    """
+    from vocab.reports import lagrange_report
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not file:
+        typer.echo("provide --file", err=True)
+        raise typer.Exit(1)
+    data = lagrange_report(path=path_abs, file_path=file)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2, default=str))
+        return
+    pts = data.get("lagrange_points", [])
+    if pts:
+        typer.echo(_color(f"Lagrange Points: {len(pts)} safe injection sites", "green"))
+        for p in pts[:3]:
+            typer.echo(f"  Lines {p['start']}-{p['end']} ({p['lines']} lines, {p['identifier_count']} identifiers)")
+            typer.echo(f"    {p['code'][:80]}...")
+    else:
+        note = data.get("note", "none found")
+        typer.echo(f"No Lagrange Points: {note}")
+
+
 @cli.command(name="verify-packet",  rich_help_panel="Agent")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",

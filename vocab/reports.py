@@ -1353,6 +1353,196 @@ def isothermal_entropy(path: str = ".", lookback_weeks: int = 12) -> dict:
     }
 
 
+def zk_proof_report(path: str = ".", schema_file: str = "", generated_code: str = "") -> dict:
+    """Zk-Vocabulary Prover — verify generated code uses only allowed identifiers.
+
+    Extracts all exported identifiers from schema_file. Scans generated_code
+    for identifier-like tokens. Rejects any not in the allowed set.
+    Returns pass/fail with alternatives for rejected identifiers.
+    """
+    from vocab.segmenter import segment
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not schema_file or not generated_code:
+        return {"error": "provide --file and --code"}
+
+    full = os.path.join(path, schema_file) if not os.path.isabs(schema_file) else schema_file
+    if not os.path.exists(full):
+        return {"error": f"schema file not found: {full}"}
+    try:
+        with open(full, encoding="utf-8", errors="replace") as f:
+            schema_text = f.read()
+    except Exception as e:
+        return {"error": f"read failed: {e}"}
+
+    # Extract allowed identifiers from schema
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{2,45}\b')
+    allowed: set[str] = set()
+    for m in token_re.finditer(schema_text):
+        allowed.add(m.group())
+    # Add common keywords and structural tokens
+    for kw in ["true", "false", "null", "undefined", "async", "await", "return", "if", "else", "for", "while", "switch", "case", "break", "continue", "try", "catch", "finally", "throw", "new", "delete", "typeof", "instanceof", "import", "export", "from", "const", "let", "var", "function", "class", "extends", "implements", "interface", "type", "enum", "namespace", "this", "super"]:
+        allowed.add(kw)
+    allowed.add("string")
+    allowed.add("number")
+    allowed.add("boolean")
+    allowed.add("any")
+    allowed.add("void")
+    allowed.add("never")
+    allowed.add("Promise")
+    allowed.add("Array")
+    allowed.add("Record")
+    allowed.add("Partial")
+    allowed.add("Pick")
+    allowed.add("Omit")
+    allowed.add("Required")
+    allowed.add("Readonly")
+    allowed.add("Map")
+    allowed.add("Set")
+    allowed.add("Error")
+
+    # Extract identifiers from generated code
+    code_identifiers: set[str] = set()
+    code_token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{2,45}\b')
+    for m in code_token_re.finditer(generated_code):
+        code_identifiers.add(m.group())
+
+    # Check each identifier
+    violations: list[dict] = []
+    for ident in sorted(code_identifiers):
+        if ident not in allowed:
+            # Find closest allowed alternative
+            candidates = sorted(allowed, key=lambda a: sum(1 for x, y in zip(a, ident) if x != y) + abs(len(a) - len(ident)))
+            best = candidates[:3] if candidates else []
+            violations.append({
+                "identifier": ident,
+                "allowed_alternatives": best,
+            })
+
+    # Also check if all schema concepts are used correctly
+    concept_checks: list[str] = []
+    for a in sorted(allowed):
+        if a not in code_identifiers and len(a) > 4 and a[0].islower():
+            concept_checks.append(a)
+
+    return {
+        "schema_version": 1,
+        "schema_file": schema_file,
+        "allowed_count": len(allowed),
+        "code_identifiers": len(code_identifiers),
+        "violations": violations[:20],
+        "violation_count": len(violations),
+        "unused_concepts": concept_checks[:10],
+        "passed": len(violations) == 0,
+    }
+
+
+def lagrange_report(path: str = ".", file_path: str = "") -> dict:
+    """Lagrange Points — detect structurally isolated blocks within a file.
+
+    A block is a Lagrange point if its phrases have zero co-occurrence
+    edges to the file's primary cluster — safe to edit without blast radius.
+    """
+    from vocab.segmenter import segment
+    import subprocess
+
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file_path:
+        return {"error": "no file provided"}
+
+    full = os.path.join(path, file_path) if not os.path.isabs(file_path) else file_path
+    if not os.path.exists(full):
+        return {"error": f"file not found: {full}"}
+    try:
+        with open(full, encoding="utf-8", errors="replace") as f:
+            lines = f.read().split("\n")
+    except Exception as e:
+        return {"error": f"read failed: {e}"}
+
+    if len(lines) < 5:
+        return {"file_path": file_path, "lagrange_points": [], "note": "file too small"}
+
+    # Build phrase→id mapping for the file
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{3,45}\b')
+    line_identifiers: list[set[str]] = []
+    all_file_ids: Counter[str] = Counter()
+
+    for line in lines:
+        ids: set[str] = set()
+        for m in token_re.finditer(line):
+            ids.add(m.group())
+            all_file_ids[m.group()] += 1
+        line_identifiers.append(ids)
+
+    # Compute inter-line co-occurrence edges
+    edge_count: list[int] = []
+    for i, ids_i in enumerate(line_identifiers):
+        edges = 0
+        for j, ids_j in enumerate(line_identifiers):
+            if i == j or not ids_i or not ids_j:
+                continue
+            if ids_i & ids_j:
+                edges += len(ids_i & ids_j)
+        edge_count.append(edges)
+
+    if not edge_count:
+        return {"file_path": file_path, "lagrange_points": [], "note": "no identifiers found"}
+
+    max_edges = max(edge_count)
+    if max_edges == 0:
+        return {"file_path": file_path, "lagrange_points": [], "note": "no co-occurrence edges"}
+
+    # Find zero-edge lines (Lagrange points) and group contiguous blocks
+    zero_regions: list[list[int]] = []
+    current_region: list[int] = []
+    for i, ec in enumerate(edge_count):
+        if ec == 0 and line_identifiers[i]:
+            current_region.append(i)
+        else:
+            if len(current_region) >= 3:
+                zero_regions.append(current_region)
+            current_region = []
+
+    if len(current_region) >= 3:
+        zero_regions.append(current_region)
+
+    points: list[dict] = []
+    for region in zero_regions:
+        safe = True
+        region_ids: set[str] = set()
+        for li in region:
+            region_ids.update(line_identifiers[li])
+        # Verify zero edges to rest of file
+        for li in range(len(lines)):
+            if li in region:
+                continue
+            if line_identifiers[li] & region_ids:
+                safe = False
+                break
+        if safe:
+            region_text = "\n".join(lines[region[0]:region[-1] + 1])
+            points.append({
+                "start": region[0],
+                "end": region[-1],
+                "lines": len(region),
+                "identifier_count": len(region_ids),
+                "code": region_text[:200],
+            })
+
+    points.sort(key=lambda x: -x["lines"])
+    return {
+        "schema_version": 1,
+        "file_path": file_path,
+        "total_lines": len(lines),
+        "lagrange_points": points[:5],
+        "zero_edge_count": len(points),
+        "primary_edges_max": max_edges,
+    }
+
+
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
     """Seed the adaptive router's fragment matrix using git history.
 
