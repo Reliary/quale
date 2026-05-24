@@ -1257,6 +1257,102 @@ def epidemiology_report(path: str = ".", lookback_weeks: int = 12) -> dict:
     }
 
 
+def isothermal_entropy(path: str = ".", lookback_weeks: int = 12) -> dict:
+    """Isothermal Limit — track directory-level entropy over time.
+
+    Entropy = vocabulary cluster dispersion within a directory.
+    Low entropy (1-2 clusters) = cohesive. High entropy (5+ clusters) = fragmented.
+    When entropy exceeds a 30-commit rolling baseline, the Isothermal Limit is hit.
+    """
+    from vocab.scanner import scan_codebase
+    from vocab.bootstrap import compute_modules
+
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+
+    # Current entropy
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    modules = compute_modules(path, analysis=analysis)
+    mods = modules.get("modules", []) if isinstance(modules, dict) else []
+
+    # Build directory→clusters mapping
+    dir_clusters: dict[str, set[str]] = {}
+    for m in mods:
+        exemplars = set(m.get("exemplar_phrases", []))
+        for f in m.get("files", []):
+            d = os.path.dirname(f) or "/"
+            if d not in dir_clusters:
+                dir_clusters[d] = set()
+            dir_clusters[d].update(exemplars)
+
+    # Compute current entropy per directory
+    current_entropy: dict[str, float] = {}
+    for d, clusters in dir_clusters.items():
+        frag = max(len(clusters) / 10, len([m for m in mods if any(f.startswith(d) for f in m.get("files", []))]))
+        current_entropy[d] = round(frag, 2)
+
+    # Historical entropy via weekly scans
+    week_data = vgit.weekly_commits(path, weeks=lookback_weeks)
+    hist_entropy: dict[str, list[float]] = {}
+    for wk in week_data:
+        shas = wk.get("shas", [])
+        if not shas:
+            continue
+        try:
+            hist_analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=1500, max_seconds=20)
+        except Exception:
+            continue
+        hist_mods = compute_modules(path, analysis=hist_analysis)
+        hm = hist_mods.get("modules", []) if isinstance(hist_mods, dict) else []
+        for m in hm:
+            exemplars = set(m.get("exemplar_phrases", []))
+            for f in m.get("files", []):
+                d = os.path.dirname(f) or "/"
+                if d not in hist_entropy:
+                    hist_entropy[d] = []
+                # Record number of modules covering this dir as entropy proxy
+        week_dir_count: dict[str, int] = {}
+        for m in hm:
+            for f in m.get("files", []):
+                d = os.path.dirname(f) or "/"
+                week_dir_count[d] = week_dir_count.get(d, 0) + 1
+        for d, cnt in week_dir_count.items():
+            hist_entropy.setdefault(d, []).append(float(cnt))
+
+    # Compute baseline and max limit per directory
+    dir_results: list[dict] = []
+    for d, entropy in current_entropy.items():
+        hist = hist_entropy.get(d, [])
+        if len(hist) >= 2:
+            baseline = round(sum(hist) / len(hist), 2)
+            max_hist = max(hist)
+            limit_exceeded = entropy > max_hist * 1.3
+        else:
+            baseline = entropy
+            max_hist = entropy
+            limit_exceeded = False
+        dir_results.append({
+            "directory": d,
+            "entropy": entropy,
+            "baseline": baseline,
+            "max_historical": max_hist,
+            "limit_exceeded": limit_exceeded,
+            "historical_samples": len(hist),
+        })
+
+    dir_results.sort(key=lambda x: -x["entropy"])
+    return {
+        "schema_version": 1,
+        "directories": dir_results[:20],
+        "any_limit_exceeded": any(d["limit_exceeded"] for d in dir_results),
+        "total_directories_scanned": len(dir_results),
+    }
+
+
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
     """Seed the adaptive router's fragment matrix using git history.
 
@@ -2837,6 +2933,22 @@ def validate_plan(contract: dict, proposal: dict, allow_paths: bool = False) -> 
     }
 
 
+def _active_gene_pool(path: str, active_days: int) -> set[str]:
+    """Return files modified within active_days."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "log", "--since", f"{active_days}.days", "--name-only", "--pretty=format:", "--diff-filter=ACMR"],
+            capture_output=True, cwd=path, timeout=30, text=True, errors="replace",
+        )
+        files: set[str] = set()
+        for line in out.stdout.split("\n"):
+            f = line.strip()
+            if f:
+                files.add(f)
+        return files
+    except Exception:
+        return set()
 
 
 def _task_is_vague(task: str) -> bool:

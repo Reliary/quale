@@ -1255,6 +1255,41 @@ def epidemiology_cmd(
         typer.echo(f"All stable. {data['total_tracked']} phrases tracked.")
 
 
+@cli.command(name="entropy", rich_help_panel="Inspection")
+def entropy_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    weeks: Annotated[int, typer.Option("--weeks", help="History lookback")] = 12,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Isothermal Limit — track directory-level structural entropy.
+
+    Measures vocabulary cluster dispersion per directory. When entropy
+    exceeds the 30-commit rolling baseline, the limit is tripped.
+
+    Example:
+      vocab entropy --weeks 12
+    """
+    from vocab.reports import isothermal_entropy
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = isothermal_entropy(path=path_abs, lookback_weeks=weeks)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2, default=str))
+        return
+    if data.get("any_limit_exceeded"):
+        typer.echo(_color("ISOTHERMAL LIMIT EXCEEDED", "red"))
+    else:
+        typer.echo(_color("Entropy within limits", "green"))
+    for d in data.get("directories", [])[:8]:
+        label = _color("HOT", "red") if d["limit_exceeded"] else _color("COLD", "green")
+        typer.echo(f"  [{label}] {d['directory']:30s} entropy={d['entropy']:.2f} baseline={d['baseline']:.2f}")
+
+
 @cli.command(name="verify-packet",  rich_help_panel="Agent")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
