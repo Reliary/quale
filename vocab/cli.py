@@ -348,6 +348,9 @@ def preflight(
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
+    if not files and not diff:
+        typer.echo("provide --files or --diff", err=True)
+        raise typer.Exit(1)
     if diff is not None and vgit.has_commits(path) and not vgit.ref_exists(path, diff):
         typer.echo(f"Unknown git ref: {diff}", err=True)
         raise typer.Exit(1)
