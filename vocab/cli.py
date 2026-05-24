@@ -1391,6 +1391,70 @@ def lagrange_cmd(
         typer.echo(f"No Lagrange Points: {note}")
 
 
+@cli.command(name="phase-shift", rich_help_panel="Inspection")
+def phase_shift_cmd(
+    repo_a: Annotated[str, typer.Option("--repo-a", help="Pre-migration repo path")] = "",
+    repo_b: Annotated[str, typer.Option("--repo-b", help="Post-migration repo path")] = "",
+    min_freq: Annotated[int, typer.Option("--min-freq", help="Minimum frequency to include")] = 2,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Phase-Vocoder Differential Mask — deterministic migration substitution pairs.
+
+    Scans two repos (pre/post migration). Extracts phrase-level delta.
+    Output is a deterministic replacement task: apply these substitutions.
+
+    Example:
+      vocab phase-shift --repo-a ./pre-migration --repo-b ./post-migration
+    """
+    from vocab.reports import phase_shift_report
+    if not repo_a or not repo_b:
+        typer.echo("provide --repo-a and --repo-b", err=True)
+        raise typer.Exit(1)
+    data = phase_shift_report(path_a=repo_a, path_b=repo_b, min_freq=min_freq)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2, default=str))
+        return
+    typer.echo(data.get("mask_summary", ""))
+    for s in data.get("substitutions", [])[:10]:
+        typer.echo(f"  {s['from'][:40]} -> {s['to'][:40]}")
+
+
+@cli.command(name="shrapnel", rich_help_panel="Inspection")
+def shrapnel_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    weeks: Annotated[int, typer.Option("--weeks", help="History lookback")] = 12,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Dead-Water Shrapnel — find phrases stranded by cavitated neighbors.
+
+    Scans git history for phrases that appeared, then disappeared
+    (cavitated). Finds remaining phrases uniquely entangled with them.
+
+    Example:
+      vocab shrapnel --weeks 12
+    """
+    from vocab.reports import shrapnel_report
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = shrapnel_report(path=path_abs, lookback_weeks=weeks)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2, default=str))
+        return
+    cav = data.get("cavitated", [])
+    shrap = data.get("shrapnel", [])
+    typer.echo(f"Cavitated phrases: {len(cav)}  Shrapnel fragments: {len(shrap)}")
+    for s in shrap[:5]:
+        typer.echo(f"  '{s['cavitated'][:30]}' -> '{s['stranded'][:30]}' in {s['file']}")
+
+
 @cli.command(name="verify-packet",  rich_help_panel="Agent")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",

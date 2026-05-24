@@ -1554,6 +1554,159 @@ def lagrange_report(path: str = ".", file_path: str = "") -> dict:
     }
 
 
+def phase_shift_report(path_a: str, path_b: str, min_freq: int = 2) -> dict:
+    """Phase-Vocoder Differential Mask — extract deterministic substitution pairs.
+
+    Scans two repos (pre/post migration) and extracts the exact phrase-level
+    delta. Output is a list of {from: str, to: str} substitutions that
+    define the migration. Zero-token replacement task for LLMs.
+    """
+    from vocab.scanner import scan_codebase
+
+    for label, p in [("repo_a", path_a), ("repo_b", path_b)]:
+        if not vgit.is_repo(p):
+            return {"error": f"{label} is not a git repository: {p}"}
+
+    try:
+        analysis_a = scan_codebase(path_a, quiet=True, max_files=2500, max_seconds=30)
+        analysis_b = scan_codebase(path_b, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    # Build phrase→frequency maps
+    freq_a: dict[str, int] = {}
+    freq_b: dict[str, int] = {}
+    for fv in analysis_a.file_vocabs:
+        for phrase, count in fv.vocabulary.items():
+            freq_a[phrase] = freq_a.get(phrase, 0) + count
+    for fv in analysis_b.file_vocabs:
+        for phrase, count in fv.vocabulary.items():
+            freq_b[phrase] = freq_b.get(phrase, 0) + count
+
+    set_a = set(freq_a.keys())
+    set_b = set(freq_b.keys())
+
+    # Phrases in A but not B (removed)
+    removed = [p for p in sorted(set_a - set_b) if freq_a[p] >= min_freq]
+    # Phrases in B but not A (added)
+    added = [p for p in sorted(set_b - set_a) if freq_b[p] >= min_freq]
+
+    # Build substitution pairs: match removed→added by structural context
+    substitutions: list[dict] = []
+    for r in removed[:50]:
+        # Find best matching added phrase by character overlap
+        best = max(added, key=lambda a: sum(1 for x, y in zip(a, r) if x == y) - abs(len(a) - len(r)), default=None)
+        if best:
+            substitutions.append({"from": r, "to": best})
+
+    return {
+        "schema_version": 1,
+        "phrases_in_a": len(set_a),
+        "phrases_in_b": len(set_b),
+        "removed_count": len(removed),
+        "added_count": len(added),
+        "substitutions": substitutions[:30],
+        "removed": removed[:30],
+        "added": added[:30],
+        "mask_summary": f"{len(substitutions)} phrase-level substitutions from {len(removed)} removed to {len(added)} added.",
+    }
+
+
+def shrapnel_report(path: str = ".", lookback_weeks: int = 12) -> dict:
+    """Dead-Water Shrapnel — find phrases stranded by cavitated neighbors.
+
+    Scans git history for phrases that appeared, disappeared (cavitated),
+    and whose unique co-occurrence partners remain in the codebase as
+    stranded shrapnel.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+
+    week_data = vgit.weekly_commits(path, weeks=lookback_weeks)
+    if not week_data or len(week_data) < 3:
+        return {"error": "insufficient git history"}
+
+    from vocab.scanner import scan_codebase, _is_lock_file, _is_generated
+
+    # Build phrase presence timeline
+    phrase_weekly: dict[str, list[bool]] = {}
+    for wk in week_data:
+        shas = wk.get("shas", [])
+        if not shas:
+            continue
+        try:
+            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=1500, max_seconds=20)
+        except Exception:
+            continue
+
+        week_phrases: set[str] = set()
+        for fv in analysis.file_vocabs:
+            ext = os.path.splitext(fv.path)[1].lower()
+            if ext in {".go", ".ts", ".py", ".js", ".rs", ".c", ".cpp", ".h", ".rb", ".java"}:
+                for p in fv.vocabulary:
+                    if len(p) > 3:
+                        week_phrases.add(p)
+
+        for p in week_phrases:
+            phrase_weekly.setdefault(p, []).append(True)
+        for p in phrase_weekly:
+            if len(phrase_weekly[p]) < len(week_data):
+                phrase_weekly[p].append(False)
+
+    # Find cavitated phrases (present → absent → stable absent in last 2 weeks)
+    cavitated: list[str] = []
+    for p, timeline in phrase_weekly.items():
+        if len(timeline) < 4:
+            continue
+        # Was present early, now absent in last 2 windows
+        early = sum(timeline[:len(timeline)//2])
+        recent = sum(timeline[-2:])
+        if early >= 2 and recent == 0:
+            cavitated.append(p)
+
+    if not cavitated:
+        return {"schema_version": 1, "phrases": [], "cavitated": [],
+                "shrapnel": [], "note": "no cavitation detected"}
+
+    # Find shrapnel: phrases still present that were uniquely entangled with cavitated phrases
+    try:
+        current = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception:
+        return {"schema_version": 1, "phrases": [], "cavitated": cavitated[:10],
+                "shrapnel": [], "note": "current scan failed"}
+
+    shrapnel: list[dict] = []
+    for cv in cavitated[:20]:
+        for fv in current.file_vocabs:
+            for phrase in fv.vocabulary:
+                if cv.lower() in phrase.lower() or phrase.lower() in cv.lower():
+                    continue
+        # Find co-occurring phrases that are now stranded
+        for fv in current.file_vocabs:
+            for phrase in fv.vocabulary:
+                if len(phrase) < 4:
+                    continue
+                # Check if this phrase co-occurred with cavitated phrase historically
+                frags = phrase.lower().split()
+                if any(f in cv.lower() for f in frags if len(f) > 3):
+                    shrapnel.append({
+                        "cavitated": cv[:60],
+                        "stranded": phrase[:60],
+                        "file": fv.path,
+                    })
+
+    shrapnel = shrapnel[:20]
+    return {
+        "schema_version": 1,
+        "phrases_tracked": len(phrase_weekly),
+        "cavitated": cavitated[:10],
+        "shrapnel": shrapnel,
+        "cavitation_count": len(cavitated),
+        "shrapnel_count": len(shrapnel),
+    }
+
+
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
     """Seed the adaptive router's fragment matrix using git history.
 
