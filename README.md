@@ -275,6 +275,52 @@ vocab landmarks .                                    # characteristic phrases
 vocab delta --path .                                 # dead reckoning: structural changes since `vocab init`
 ```
 
+## Measured Effect (LLM Agent Harness)
+
+Results from ~1,100 trials across 10 private and public repos using `deepseek-v4-flash`.
+
+### Preflight (verification scope control)
+
+| Condition | Verify | Sprawl | Tokens | Efficiency |
+|-----------|--------|--------|--------|------------|
+| baseline (no vocab) | 10-20% | 0.40-0.65 | ~1,200 | 0.55-0.90 |
+| `progressive_verify` | 65% | **0.0** | ~1,280 | 2.27 |
+| `veto_cascade` | 71% | **0.0** | ~1,225 | 2.38 |
+| `multi_turn_progressive` | 60% | **0.0** | **~88** | **31.52** |
+| `hybrid_progressive` | **70%** | **0.0** | ~650 | ~10-15 |
+| `verify_entangle` | 80% | **0.0** | ~1,300 | **2.87** |
+
+Best efficiency: `multi_turn_progressive` — 93% token reduction at 28-31× efficiency.
+Best verify rate: `verify_entangle` at 80% (includes git co-change signal).
+Best all-round: `hybrid_progressive` — 70% verify, 0 sprawl, ~650 tokens avg.
+
+### Discovery (edit file identification)
+
+| Condition | Edit-in-top-3 | Tokens |
+|-----------|--------------|--------|
+| baseline (grep + guess) | 80% | ~1,200 |
+| `isolate` | **85%** | **~100** |
+
+Module-based structural bisection matches baseline accuracy at ~1/12 the token cost.
+
+### OpenCode (full tool-access agent)
+
+| Condition | Verify | Sprawl | Tokens | Efficiency |
+|-----------|--------|--------|--------|------------|
+| baseline | 46% | 0.31 | ~45,800 | 0.93 |
+| `fragment_route` | **100%** | **0.0** | ~41,800 | **3.29** |
+
+Adaptive router selects the best condition per repo using fragment matrix history.
+
+### Key takeaways
+
+- **Sprawl is the most consistent win**: every vocab condition eliminated agent wandering (0.0 sprawl) across all repos.
+- **Structured JSON beats prose**: compact oneline JSON doubles verify rate vs narrative guidance.
+- **Git co-change bridges vocabulary gaps**: `verify_entangle` fixes the `__init__.py` → `test_*.py` class of failure that pure vocabulary analysis misses.
+- **Multi-turn YES/NO is most efficient**: 93% fewer tokens at 60% verify. Escalate to full context on reject for 70% at ~650 tok.
+- **Contract system eliminates path hallucination**: 0 invalid IDs, 0 raw paths across all measured conditions.
+- **The 17% boundary**: repos without stem-matched tests or co-change history (opencode-index, llama-cpp) remain structurally ambiguous across all conditions. Vocab documents this honestly rather than hallucinating.
+
 ## Philosophy
 
 `vocab` treats code as a **phrase-file incidence matrix** — a vocabulary lattice that can be diffed, analyzed, and traced without knowing the language. This reframing unlocks capabilities that no existing tool provides:
