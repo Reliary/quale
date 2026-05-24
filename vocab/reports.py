@@ -990,7 +990,8 @@ def isolate_modules(path: str = ".", task: str = "") -> dict:
 
 
 def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
-                             snapshot: bool = False) -> dict:
+                             snapshot: bool = False,
+                             decoherence_window: int = 0) -> dict:
     import json
     from vocab.scanner import scan_codebase
     path = os.path.abspath(path)
@@ -1004,169 +1005,106 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
         return {"error": f"scan failed: {e}"}
     file_phrases: dict[str, set[str]] = {}
     for fv in analysis.file_vocabs:
-        if fv.path in files:
+        if fv.path in files or any(fv.path.endswith(f) for f in files):
             file_phrases[fv.path] = set(fv.vocabulary.keys())
+
+    # Decoherence window: track orphan phrases across snapshots
+    if decoherence_window > 0 and not snapshot:
+        dc_dir = os.path.join(drift_dir, "decoherence")
+        os.makedirs(dc_dir, exist_ok=True)
+        import time
+        now = int(time.time())
+
     results: list[dict] = []
     for f in files:
         phrases = file_phrases.get(f, set())
-        safe = f.replace("/", "_")
-        basin_path = os.path.join(drift_dir, f"{safe}.json")
+        safe_name = f.replace("/", "_").replace("\\", "_")
+        basin_path = os.path.join(drift_dir, f"{safe_name}.json")
+
         if snapshot:
             with open(basin_path, "w") as fp:
                 json.dump({"phrases": sorted(phrases), "count": len(phrases)}, fp)
             results.append({"file": f, "phrases_captured": len(phrases), "snapshot": True})
             continue
+
         if not os.path.exists(basin_path):
-            results.append({"file": f, "error": "no baseline", "velocity": 0, "anomalies": ["no baseline"]})
+            results.append({"file": f, "error": "no baseline snapshot exists", "velocity": 0, "anomalies": ["no baseline — run with --snapshot first"]})
             continue
+
         try:
             with open(basin_path) as fp:
                 baseline = json.load(fp)
         except Exception:
             results.append({"file": f, "error": "corrupt baseline", "velocity": 0})
             continue
+
         base_phrases = set(baseline.get("phrases", []))
         if not base_phrases:
             results.append({"file": f, "error": "empty baseline", "velocity": 0})
             continue
+
         new_phrases = phrases - base_phrases
         removed_phrases = base_phrases - phrases
-        intro_rate = len(new_phrases) / max(len(base_phrases), 1)
-        removal_rate = len(removed_phrases) / max(len(base_phrases), 1)
+        intro_rate = len(new_phrases) / len(base_phrases) if base_phrases else 0
+        removal_rate = len(removed_phrases) / len(base_phrases) if base_phrases else 0
         velocity = round((intro_rate + removal_rate) / 2, 3)
-        stable_anchors = base_phrases & phrases
+
+        stable_anchors = set()
+        for p in base_phrases:
+            if p in phrases:
+                stable_anchors.add(p)
         anchor_survival = round(len(stable_anchors) / max(len(base_phrases), 1), 3)
-        anomalies = []
+
+        anomalies: list[str] = []
         if velocity > 0.3:
-            anomalies.append(f"Velocity spike: {velocity:.3f}")
+            anomalies.append(f"Velocity spike: {velocity:.3f} (threshold 0.3)")
         if anchor_survival < 0.5:
-            anomalies.append(f"Anchor destruction: {anchor_survival:.3f}")
-        results.append({"file": f, "velocity": velocity, "anchors_preserved": anchor_survival,
-                        "anomalies": anomalies, "stable": len(anomalies) == 0})
-    return {"schema_version": 1, "files": results, "total_files": len(results)}
+            anomalies.append(f"Stable anchor destruction: {anchor_survival:.3f} survived")
+        if len(new_phrases) >= 10 and removal_rate > 0.2:
+            anomalies.append("Churn anomaly: 10+ new phrases with >20% removal")
 
+        # Decoherence window: orphan phrase detection across turns
+        if decoherence_window > 0:
+            dc_file = os.path.join(drift_dir, "decoherence", f"{safe_name}.json")
+            existing: dict = {}
+            if os.path.exists(dc_file):
+                try:
+                    with open(dc_file) as fp:
+                        existing = json.load(fp)
+                except Exception:
+                    existing = {}
 
-def strata_report(path: str = ".", file_path: str = "") -> dict:
-    """Tectonic Fault Lines — date lines by git blame and find epoch boundaries.
+            # Track orphan phrases across snapshots
+            orphan_history = existing.get("orphan_turns", {})
+            current_orphans = set()
+            for p in new_phrases:
+                # Check if phrase bonded to task vocabulary
+                bonded = any(bp in p.lower() for bp in ["task", "task_"] if bp) or False
+                if not bonded:
+                    turn = orphan_history.get(p, 0) + 1
+                    orphan_history[p] = turn
+                    if turn >= decoherence_window:
+                        anomalies.append(f"Vacuum leak (orphan {decoherence_window}+ turns): {p[:50]}")
+                    current_orphans.add(p)
 
-    Uses git blame to find the last-modification date for each line.
-    Groups contiguous lines with similar ages into epochs.
-    Fault lines occur where epochs of different ages collide.
-    """
-    import subprocess
+            with open(dc_file, "w") as fp:
+                json.dump({"orphan_turns": orphan_history, "timestamp": int(time.time())}, fp)
+        else:
+            # Clear decoherence tracking when window is 0
+            dc_file = os.path.join(drift_dir, "decoherence", f"{safe_name}.json")
+            if os.path.exists(dc_file):
+                try:
+                    os.remove(dc_file)
+                except Exception:
+                    pass
 
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    if not file_path:
-        return {"error": "no file provided"}
-
-    # Use git blame --date=short to get per-line dates
-    try:
-        result = subprocess.run(
-            ["git", "blame", "--line-porcelain", file_path],
-            capture_output=True, cwd=path, timeout=60, text=True, errors="replace",
-        )
-    except subprocess.TimeoutExpired:
-        return {"error": "git blame timed out"}
-    except Exception as e:
-        return {"error": f"git blame failed: {e}"}
-
-    # Parse blame output to extract dates per line
-    dates: list[str | None] = []
-    current_date = None
-    for line in result.stdout.split("\n"):
-        if line.startswith("author-time "):
-            ts = line.split(" ", 1)[1] if " " in line else ""
-            import datetime
-            try:
-                dt = datetime.datetime.fromtimestamp(int(ts), tz=datetime.timezone.utc)
-                current_date = dt.strftime("%Y-%m-%d")
-            except (ValueError, OSError):
-                current_date = None
-        elif line.startswith("\t"):
-            # Content line — record the date for this line
-            dates.append(current_date)
-
-    if len(dates) < 3:
-        return {"file_path": file_path, "epochs": [], "fault_lines": [],
-                "note": "insufficient lines"}
-
-    # Convert dates to week positions for bucketing
-    import datetime
-    now = datetime.datetime.now(datetime.timezone.utc)
-    line_ages: list[int | None] = []
-    all_ages: list[int] = []
-    for ds in dates:
-        if ds is None:
-            line_ages.append(None)
-            continue
-        try:
-            dt = datetime.datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc)
-            weeks_ago = max(0, int((now - dt).days / 7))
-            line_ages.append(weeks_ago)
-            all_ages.append(weeks_ago)
-        except ValueError:
-            line_ages.append(None)
-
-    if len(all_ages) < 3:
-        return {"file_path": file_path, "epochs": [], "fault_lines": [],
-                "note": "insufficient datable lines"}
-
-    # Group contiguous lines with similar ages into epochs (5 buckets)
-    max_age = max(all_ages)
-    min_age = min(all_ages)
-    age_span = max(max_age - min_age, 1)
-    epochs: list[dict] = []
-    fault_lines: list[dict] = []
-    current_start = 0
-    current_bucket = None
-
-    for i, age in enumerate(line_ages):
-        if age is None:
-            continue
-        bucket = round((age - min_age) / age_span * 4)
-        if current_bucket is None:
-            current_bucket = bucket
-            current_start = i
-        if bucket != current_bucket:
-            epochs.append({
-                "start": current_start,
-                "end": i - 1,
-                "epoch_bucket": current_bucket,
-                "age_weeks": line_ages[current_start] or 0,
-                "lines": i - current_start,
-            })
-            fault_lines.append({
-                "older_epoch_start": current_start,
-                "newer_epoch_start": i,
-                "older_bucket": current_bucket,
-                "newer_bucket": bucket,
-                "gap": abs((line_ages[i] or 0) - (line_ages[current_start] or 0)),
-            })
-            current_bucket = bucket
-            current_start = i
-
-    if current_bucket is not None:
-        epochs.append({
-            "start": current_start,
-            "end": len(dates) - 1,
-            "epoch_bucket": current_bucket,
-            "age_weeks": line_ages[current_start] or 0,
-            "lines": len(dates) - current_start,
+        results.append({
+            "file": f, "velocity": velocity, "anchors_preserved": anchor_survival,
+            "new_phrases": len(new_phrases), "removed_phrases": len(removed_phrases),
+            "anomalies": anomalies, "stable": len(anomalies) == 0,
         })
 
-    fault_lines.sort(key=lambda x: -x["gap"])
-    return {
-        "schema_version": 1,
-        "file_path": file_path,
-        "total_lines": len(dates),
-        "datable_lines": len(all_ages),
-        "epochs": epochs[:10],
-        "epoch_labels": ["newest", "young", "middle-aged", "old", "oldest"],
-        "fault_lines": fault_lines[:5],
-        "major_fault_count": sum(1 for f in fault_lines if f["gap"] > 4),
-    }
+    return {"schema_version": 1, "files": results, "total_files": len(results), "any_anomalies": any(r.get("anomalies") for r in results)}
 
 
 def epidemiology_report(path: str = ".", lookback_weeks: int = 12) -> dict:
@@ -2215,6 +2153,70 @@ def guard_pipeline(path: str = ".", files: list[str] | None = None, task: str = 
     except Exception as e:
         result["contract"] = {"error": str(e)}
     return {"task": task, "changed_files": changed, "verification": result.get("verification", {}), "scope": result.get("scope", {}), "contract": result.get("contract", {}), "all_checks_ran": "verification" in result and "scope" in result and "contract" in result}
+
+
+def anneal_report(path: str = ".", file_path: str = "", task: str = "") -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file_path or not os.path.exists(os.path.join(path, file_path)):
+        return {"error": f"provide existing --file" or "no file"}
+    full = os.path.join(path, file_path)
+    from vocab.bootstrap import compute_modules
+    from vocab.scanner import scan_codebase
+    from vocab.fold import _indent_blocks
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception:
+        return {"error": "scan failed"}
+    mods = compute_modules(path, analysis=analysis)
+    mod_list = mods.get("modules", []) if isinstance(mods, dict) else []
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{3,40}\b')
+    ftokens: dict[str, set[str]] = {}
+    for fv in analysis.file_vocabs:
+        ftokens[fv.path] = set(m.group() for p in fv.vocabulary for m in token_re.finditer(p))
+    ptokens = ftokens.get(file_path, set())
+    if not ptokens:
+        return {"error": "no tokens in file"}
+    cluster_tokens: dict[str, set[str]] = {}
+    for m in mod_list:
+        label = "_".join(m.get("exemplar_phrases", [])[:3]) or f"c{m.get('size',0)}"
+        ct: set[str] = set()
+        f2: set[str] = set()
+        for f in m.get("files", []):
+            if f in ftokens and f != file_path:
+                ct |= ftokens[f]
+        cluster_tokens[label] = ct
+    with open(full) as f:
+        lines = f.readlines()
+    blocks = _indent_blocks(lines)
+    results: list[tuple[int, int, str, int, int]] = []
+    for blk in blocks:
+        bt: set[str] = set()
+        for i in range(blk["start"], blk["end"] + 1):
+            if i < len(lines):
+                bt |= set(token_re.findall(lines[i]))
+        best_cl, best_sc = "", 0
+        for cl, ct in cluster_tokens.items():
+            o = len(bt & ct)
+            if o > best_sc:
+                best_sc, best_cl = o, cl
+        if best_sc >= 2:
+            results.append((blk["start"], blk["end"], best_cl, best_sc, blk["end"] - blk["start"] + 1))
+    results.sort(key=lambda x: (x[3], x[4]))
+    if not results:
+        return {"error": "no extraction zone", "total_clusters": len(cluster_tokens)}
+    start, end, clname, score, size = results[0]
+    ext = os.path.splitext(file_path)[1]
+    bd = os.path.dirname(file_path)
+    ext_file = os.path.join(bd, f"{clname.replace('_','-')[:20]}_annealed{ext}") if bd else f"{clname.replace('_','-')[:20]}_annealed{ext}"
+    return {
+        "file": file_path, "total_lines": len(lines), "total_clusters": len(cluster_tokens),
+        "anneal_required": len(cluster_tokens) >= 3,
+        "extraction": {"extract_lines": [start + 1, end + 1], "extract_to_file": ext_file,
+                        "cluster": clname, "cluster_score": score, "lines_count": size,
+                        "preview": "".join(lines[start:end + 1]).strip()[:200]},
+    }
 
 
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:

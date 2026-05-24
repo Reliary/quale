@@ -1481,6 +1481,28 @@ def guard_cmd(path=".", files=[], task="", format="compact"):
     typer.echo(f'Guard: tier={v.get("cascade_tier","?")} | candidates={len(verv)} | blast={len(s.get("blast_radius",[]) or [])} | contract={(c.get("contract_id","") or "")[:8]}')
 
 
+@cli.command(name="anneal", rich_help_panel="Inspection")
+def anneal_cmd(path=".", file="", task="", format="compact"):
+    from vocab.reports import anneal_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not file:
+        typer.echo("provide --file", err=True); raise typer.Exit(1)
+    data = anneal_report(path=p, file_path=file, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    ex = data.get("extraction", {})
+    typer.echo(f'{data.get("file","")}: {data.get("total_clusters",0)} clusters, {data.get("total_lines",0)} lines')
+    typer.echo(f'  Anneal {"REQUIRED" if data.get("anneal_required") else "OPTIONAL"}')
+    if ex.get("extract_lines"):
+        typer.echo(f'  Extract lines {ex["extract_lines"][0]}-{ex["extract_lines"][1]} -> {ex.get("extract_to_file","")}')
+        typer.echo(f'  Cluster: {ex.get("cluster","")} ({ex.get("cluster_score",0)})')
+        typer.echo(f'  Preview: {ex.get("preview","")[:80]}')
+
+
 @cli.command(name="entropy", rich_help_panel="Inspection")
 def entropy_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
