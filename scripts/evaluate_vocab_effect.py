@@ -669,22 +669,27 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
             p = json.loads(raw) if raw.strip() else {}
-            p = _decode_cartridge(p)
-            guidance = json.dumps(p, separators=(",", ":")) if p else "no cartridge output"
+            if p.get("desert"):
+                guidance = '{"desert":true}'
+            else:
+                p = _decode_cartridge(p)
+                guidance = json.dumps(p, separators=(",", ":")) if p else "no cartridge output"
         except (json.JSONDecodeError, TypeError):
             guidance = raw
     elif condition == "verify_entangle":
         raw = run_vocab(case.path, ["cartridge", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
             p = json.loads(raw) if raw.strip() else {}
-            p = _decode_cartridge(p)
-            ver = {
-                "verification_candidates": p.get("verification_candidates", []),
-                "entangled_candidates": p.get("entangled_candidates", []),
-                "confidence": p.get("confidence", "low"),
-                "desert": p.get("desert", False),
-            }
-            guidance = json.dumps(ver, separators=(",", ":"))
+            if p.get("desert"):
+                guidance = '{"desert":true}'
+            else:
+                p = _decode_cartridge(p)
+                ver = {
+                    "verification_candidates": p.get("verification_candidates", []),
+                    "entangled_candidates": p.get("entangled_candidates", []),
+                    "confidence": p.get("confidence", "low"),
+                }
+                guidance = json.dumps(ver, separators=(",", ":"))
         except (json.JSONDecodeError, TypeError):
             guidance = raw
     elif condition == "null_route":

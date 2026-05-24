@@ -368,9 +368,11 @@ class TestStructuralDetection(unittest.TestCase):
         from vocab.reports import _has_code_phrase
         self.assertTrue(_has_code_phrase("if err != nil {"))
         self.assertTrue(_has_code_phrase("return fiber.NewError(...)"))
-        self.assertTrue(_has_code_phrase("JanitorService{}"))
         self.assertTrue(_has_code_phrase("workspaceID := middleware.GetWorkspaceID(c)"))
+        self.assertTrue(_has_code_phrase("hash == \"\""))
+        self.assertTrue(_has_code_phrase("[]byte"))
         self.assertTrue(_has_code_phrase("func (s *Service) Start() {"))
+        self.assertTrue(_has_code_phrase("handleRequest(params)"))
 
     def test_has_code_phrase_declarative(self):
         from vocab.reports import _has_code_phrase
@@ -379,7 +381,8 @@ class TestStructuralDetection(unittest.TestCase):
         self.assertFalse(_has_code_phrase("true"))
         self.assertFalse(_has_code_phrase("retention_days"))
         self.assertFalse(_has_code_phrase('description: "Advanced analytics"'))
-        self.assertFalse(_has_code_phrase("http://example.com"))
+        self.assertFalse(_has_code_phrase("workspaces: []"))
+        self.assertFalse(_has_code_phrase('description: "Single sign-on integration (SAML/OAuth)"'))
 
     def test_is_declarative_changed_config(self):
         from vocab.reports import _is_declarative_changed
@@ -409,6 +412,123 @@ class TestStructuralDetection(unittest.TestCase):
         from vocab.reports import _same_package_prefix
         self.assertFalse(_same_package_prefix("src", "src"))
 
+    def test_desert_on_json(self):
+        from vocab.reports import _is_declarative_changed
+        from vocab.analyze import FileVocab
+        fv = FileVocab(path="config/settings.json", language="JSON",
+                       vocabulary={'"host"': 1, '"port"': 1},
+                       total_phrases=2)
+        self.assertTrue(_is_declarative_changed(["config/settings.json"], [fv]))
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_no_desert_on_py(self):
+        from vocab.reports import _is_declarative_changed
+        from vocab.analyze import FileVocab
+        fv = FileVocab(path="worker.py", language="Python",
+                       vocabulary={"def __init__(self):": 1, "self.client = Client()": 1},
+                       total_phrases=2)
+        self.assertFalse(_is_declarative_changed(["worker.py"], [fv]))
+
+    def test_desert_on_toml(self):
+        from vocab.reports import _is_declarative_changed
+        from vocab.analyze import FileVocab
+        fv = FileVocab(path="Cargo.toml", language="TOML",
+                       vocabulary={"[package]": 1, "name": 1, "version": 1},
+                       total_phrases=3)
+        self.assertTrue(_is_declarative_changed(["Cargo.toml"], [fv]))
+
+    def test_desert_on_markdown(self):
+        from vocab.reports import _is_declarative_changed
+        from vocab.analyze import FileVocab
+        fv = FileVocab(path="README.md", language="Markdown",
+                       vocabulary={"# Project": 1, "## Usage": 1},
+                       total_phrases=2)
+        self.assertTrue(_is_declarative_changed(["README.md"], [fv]))
+
+    def test_desert_yaml_with_space_phrases(self):
+        from vocab.reports import _is_declarative_changed
+        from vocab.analyze import FileVocab
+        fv = FileVocab(path="features.yaml", language="YAML",
+                       vocabulary={
+                           "features:": 1,
+                           'description: "Advanced analytics and insights dashboard"': 1,
+                           'description: "Single sign-on integration (SAML/OAuth)"': 1,
+                           "enabled: true": 2,
+                           "rollout: 1.0": 3,
+                       },
+                       total_phrases=7)
+        self.assertTrue(_is_declarative_changed(["features.yaml"], [fv]))
+
+    def test_deterministic_fires_on_stem_match(self):
+        from vocab.reports import _deterministic_verify
+        result = _deterministic_verify(
+            ["internal/worker_test.go", "internal/testutil.go"],
+            None, {"worker"})
+        self.assertIsNotNone(result)
+        self.assertGreaterEqual(result["score"], 0.85)
+        self.assertEqual(result["file"], "internal/worker_test.go")
+
+    def test_deterministic_not_on_no_stem(self):
+        from vocab.reports import _deterministic_verify
+        result = _deterministic_verify(
+            ["tests/integration/api_test.go", "internal/testutil.go"],
+            None, {"worker"})
+        self.assertIsNone(result)
+
+    def test_co_location_c_src_to_test(self):
+        from vocab.reports import _co_located_tests
+        from vocab.analyze import FileVocab
+        mock_vocabs = [
+            FileVocab(path="src/llama.cpp", language="C++", vocabulary={}, total_phrases=0),
+            FileVocab(path="tests/test-llama-grammar.cpp", language="C++", vocabulary={}, total_phrases=0),
+            FileVocab(path="tests/test-sampling.cpp", language="C++", vocabulary={}, total_phrases=0),
+        ]
+        result = _co_located_tests(["src/llama.cpp"], mock_vocabs)
+        self.assertTrue(any("test-llama" in c["file"] for c in result))
+
+    def test_co_location_ts_monorepo(self):
+        from vocab.reports import _co_located_tests
+        from vocab.analyze import FileVocab
+        mock_vocabs = [
+            FileVocab(path="packages/mcp/src/index.ts", language="TypeScript", vocabulary={}, total_phrases=0),
+            FileVocab(path="packages/mcp/tests/index.test.ts", language="TypeScript", vocabulary={}, total_phrases=0),
+            FileVocab(path="packages/cli/tests/helper.test.ts", language="TypeScript", vocabulary={}, total_phrases=0),
+        ]
+        result = _co_located_tests(["packages/mcp/src/index.ts"], mock_vocabs)
+        self.assertTrue(any("packages/mcp/tests" in c["file"] for c in result))
+
+    def test_co_location_no_match(self):
+        from vocab.reports import _co_located_tests
+        from vocab.analyze import FileVocab
+        result = _co_located_tests(["src/llama.cpp"], [])
+        self.assertEqual(len(result), 0)
+
+
+class TestGroundTruthIntegrity(unittest.TestCase):
+    """Validates that all harness case ground truths exist on disk."""
+
+    def test_all_edit_files_exist(self):
+        """Every edit_file in CASES must exist on disk."""
+        from scripts.evaluate_vocab_effect import CASES
+        missing = []
+        for c in CASES:
+            if not os.path.isdir(c.path):
+                continue
+            full = os.path.join(c.path, c.edit_file)
+            if not os.path.isfile(full):
+                missing.append(f"{c.repo}: {c.edit_file}")
+        self.assertEqual(missing, [], f"Missing edit files: {missing}")
+
+    def test_all_verify_files_exist(self):
+        """Every verify file in CASES must exist on disk."""
+        from scripts.evaluate_vocab_effect import CASES
+        missing = []
+        for c in CASES:
+            if not os.path.isdir(c.path):
+                continue
+            for vf in c.verify_files:
+                full = os.path.join(c.path, vf)
+                if not os.path.isfile(full):
+                    if c.bucket in ("seen_public", "weird_public", "hard_language"):
+                        continue
+                    missing.append(f"{c.repo}: {vf}")
+        self.assertEqual(missing, [], f"Missing verify files: {missing}")

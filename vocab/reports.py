@@ -535,7 +535,20 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
     co_located = _co_located_tests(changed, analysis.file_vocabs)
     matrix = entanglement_matrix(path)
     entangled = _entangled_candidates_for_changed(changed, matrix)
-    all_candidates = list(dict.fromkeys(verify_with + [c["file"] for c in co_located if c["file"] not in verify_with] + [e["file"] for e in entangled]))
+    all_candidates = list(dict.fromkeys(verify_with))
+    co_located_files = []
+    for c in co_located:
+        if c["file"] not in all_candidates:
+            all_candidates.append(c["file"])
+            co_located_files.append(c["file"])
+    for e in entangled:
+        if e["file"] not in all_candidates:
+            all_candidates.append(e["file"])
+    # — Promote co-located files to front so marginal cutoff preserves them
+    for f in reversed(co_located_files):
+        if f in all_candidates:
+            all_candidates.remove(f)
+            all_candidates.insert(0, f)
     avoid = []
     if bootstrap:
         for item in bootstrap.get("avoid_touching_without_context", []):
@@ -950,29 +963,40 @@ def _save_fragment_matrix(path: str, entries: list[dict]):
 
 def _has_code_phrase(token: str) -> bool:
     """True if token contains code-specific characters (braces, parens, operators)."""
-    for ch in "{()=;":
+    for ch in "{;":
         if ch in token:
             return True
-    if ":=" in token:
-        return True
-    if "==" in token:
-        return True
-    if "!=" in token:
+    if ":=" in token or "==" in token or "!=" in token:
         return True
     if "[" in token and "]" in token:
-        return True
+        idx, jdx = token.index("["), token.index("]")
+        if jdx - idx > 1 or ":" not in token[:idx]:
+            return True
+    if "(" in token and ")" in token:
+        idx = token.index("(")
+        if idx > 0 and token[idx - 1] not in " :":
+            return True
     return False
+
+
+_DECLARATIVE_LANGUAGES = frozenset({
+    "YAML", "JSON", "XML", "TOML", "Markdown", "INI",
+    "Text", "Dockerfile", "Makefile", "Shell", "Env",
+})
 
 
 def _is_declarative_changed(changed: list[str], file_vocabs) -> bool:
     """Return True if all changed files are declarative (no code identifiers)."""
     for f in changed:
+        has_vocab = False
         for fv in file_vocabs:
             if fv.path == f:
-                for phrase in fv.vocabulary or {}:
-                    if _has_code_phrase(phrase):
-                        return False
+                has_vocab = True
+                if fv.language not in _DECLARATIVE_LANGUAGES:
+                    return False
                 break
+        if not has_vocab:
+            return False
     return True
 
 
@@ -988,11 +1012,19 @@ def _same_package_prefix(test_dir: str, src_dir: str) -> bool:
 
 
 _CO_LOCATED_CONVENTIONS = [
-    ("src/", "tests/", 0.5),
-    ("/src/", "/test/", 0.5),
-    ("lib/", "test/", 0.5),
-    ("internal/", "internal/", 0.7),
+    ("src", "tests", 0.5),
+    ("/src", "/test", 0.5),
+    ("lib", "test", 0.5),
+    ("internal", "internal", 0.7),
 ]
+
+# — Per-source-prefix, look for same-named package subdirectory
+def _monorepo_package_prefix(p: str) -> str | None:
+    """Extract 'packages/X' prefix from a monorepo path."""
+    parts = p.split("/")
+    if len(parts) >= 3 and parts[0] == "packages":
+        return f"packages/{parts[1]}"
+    return None
 
 
 def _co_located_tests(changed: list[str], file_vocabs) -> list[dict]:
@@ -1007,8 +1039,33 @@ def _co_located_tests(changed: list[str], file_vocabs) -> list[dict]:
     for cf in changed:
         cf_dir = os.path.dirname(cf)
         cf_stem = os.path.splitext(os.path.basename(cf))[0].lower()
+        # — Monorepo convention: packages/X/src/ → packages/X/test/
+        mono_pfx = _monorepo_package_prefix(cf)
+        if mono_pfx:
+            for test_path in all_tests:
+                test_mono = _monorepo_package_prefix(test_path)
+                if test_mono != mono_pfx:
+                    continue
+                td = os.path.dirname(test_path)
+                if "/test" not in td and "tests/" not in td:
+                    continue
+                ts = os.path.splitext(os.path.basename(test_path))[0].lower()
+                ts = ts.replace("test_", "").replace("_test", "").replace(".test", "")
+                score = 0.5
+                if ts == cf_stem:
+                    score += 0.2
+                elif cf_stem and ts and (cf_stem in ts or ts in cf_stem):
+                    score += 0.1
+                candidates.append({
+                    "file": test_path,
+                    "score": round(min(0.9, score), 2),
+                    "reason": f"co-located in {test_mono} ({cf})",
+                })
         for src_pfx, test_pfx, base_score in _CO_LOCATED_CONVENTIONS:
             if src_pfx not in cf_dir and src_pfx != "/":
+                continue
+            # — Skip broad conventions for monorepo packages (already handled above)
+            if mono_pfx and src_pfx in ("src", "lib"):
                 continue
             test_dir = cf_dir.replace(src_pfx, test_pfx, 1) if src_pfx != "/" else test_pfx
             for test_path in all_tests:
@@ -1059,7 +1116,7 @@ def _deterministic_verify(verify_with: list[str], entangled: list[dict], changed
     """Check if verification choice is structurally unambiguous. Returns {file, score, rule} or None."""
     if not verify_with:
         return None
-    entangle_by_file = {e["file"]: e.get("score", 0) for e in entangled}
+    entangle_by_file = {e["file"]: e.get("score", 0) for e in (entangled or [])}
     for c in verify_with:
         c_base = os.path.splitext(os.path.basename(c))[0].lower()
         c_base = c_base.replace("test_", "").replace("_test", "").replace(".test", "")
