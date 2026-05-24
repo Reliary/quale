@@ -894,6 +894,82 @@ def veto_cascade(path: str = ".", changed_files: list[str] | None = None,
     }
 
 
+def isolate_modules(path: str = ".", task: str = "") -> dict:
+    """Pre-edit file discovery via structural module matching.
+
+    Scores existing module clusters by task-keyword overlap.
+    The LLM confirms or rejects each module with ~100 tokens.
+    """
+    import re
+    from vocab.bootstrap import compute_modules
+    from vocab.scanner import scan_codebase
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not task:
+        return {"error": "no task provided"}
+
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    modules = compute_modules(path, analysis=analysis)
+    mod_list = modules.get("modules", []) if isinstance(modules, dict) else []
+
+    if not mod_list:
+        return {"schema_version": 1, "task": task, "modules": [], "total_files": 0}
+
+    # Build file→identifiers lookup from analysis
+    file_to_ids: dict[str, set[str]] = {}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    for fv in analysis.file_vocabs:
+        ids: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                ids.add(m.group())
+        if ids:
+            file_to_ids[fv.path] = ids
+
+    task_keywords: set[str] = set()
+    for word in re.findall(r'\b[A-Z][a-zA-Z]{3,}\b', task):
+        task_keywords.add(word.lower())
+    for word in task.split():
+        wl = word.lower().strip(".,;:!?()[]{}\"'")
+        if len(wl) >= 4 and wl.isalpha():
+            task_keywords.add(wl)
+
+    scored = []
+    for m in mod_list:
+        module_ids: set[str] = set()
+        for f in m["files"]:
+            module_ids.update(file_to_ids.get(f, set()))
+        overlap = 0
+        for tid in task_keywords:
+            for mid in module_ids:
+                if tid in mid.lower() or mid.lower() in tid:
+                    overlap += 1
+                    break
+        exemplar_phrases = m.get("exemplar_phrases", [])
+        has_exemplar_overlap = len(set(e.lower() for e in exemplar_phrases) & task_keywords)
+        scored.append({
+            "files": m["files"][:20],
+            "exemplar_phrases": exemplar_phrases[:5],
+            "match_score": round(max(overlap, has_exemplar_overlap) / max(len(task_keywords), 1), 3),
+            "overlap_count": max(overlap, has_exemplar_overlap),
+            "size": m["size"],
+        })
+
+    scored.sort(key=lambda x: (-x["match_score"], -x["size"]))
+    return {
+        "schema_version": 1,
+        "task": task,
+        "task_keywords": sorted(task_keywords),
+        "modules": scored[:5],
+        "total_files": sum(m["size"] for m in scored[:5]),
+        "total_modules_scored": len(mod_list),
+    }
+
+
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
     """Seed the adaptive router's fragment matrix using git history.
 

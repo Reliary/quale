@@ -162,7 +162,7 @@ CASES: tuple[Case, ...] = (
 )
 
 
-DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", "repo-map", "route_policy")
+DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", "repo-map", "route_policy", "module_isolate")
 PREFLIGHT_CONDITIONS = (
     "candidate_baseline", "diff_preflight", "cartridge", "verify_entangle",
     "route_policy", "null_route", "deterministic_only", "fragment_route",
@@ -409,6 +409,15 @@ def discovery_messages(case: Case, condition: str, files: list[str]) -> list[dic
             guidance = ""
         elif route.get("command"):
             guidance = "Route: " + " ".join(route.get("command", []))
+    elif condition == "module_isolate":
+        raw = run_vocab(case.path, ["isolate", "--path", case.path, "--task", case.task, "--format", "json"])
+        try:
+            parsed = json.loads(raw)
+            prompt = parsed.get("llm_prompt", "")
+            if prompt:
+                guidance = prompt
+        except Exception:
+            guidance = ""
 
     system = (
         "You are evaluating an unfamiliar codebase. Select files for a task. "

@@ -953,6 +953,73 @@ def veto_cascade_cmd(
         typer.echo(f"Veto cascade: progressive  Candidates: {len(cands)}  Tokens: {tok}  Cohesion: {coh}")
 
 
+@cli.command(name="isolate", rich_help_panel="Agent")
+def isolate_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    task: Annotated[str, typer.Option("--task", "-t", help="Task description")] = "",
+    turn: Annotated[int, typer.Option("--turn", help="Which module to evaluate (0-based)")] = 0,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    why: Annotated[bool, typer.Option("--why", help="Show why this module was ranked here")] = False,
+):
+    """Pre-edit file discovery via structural module bisection.
+
+    Scores module clusters by task-keyword overlap. Each turn presents
+    one module for YES/NO confirmation. ~100 tokens per turn.
+    """
+    from vocab.reports import isolate_modules
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not task:
+        typer.echo("provide --task", err=True)
+        raise typer.Exit(1)
+    data = isolate_modules(path=path_abs, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    mods = data.get("modules", [])
+    if not mods:
+        typer.echo("No structural modules found for this repo.", err=True)
+        raise typer.Exit(1)
+    if turn >= len(mods):
+        typer.echo(f"Turn {turn} exceeds available modules ({len(mods)}). Try --turn 0 through {len(mods)-1}.", err=True)
+        raise typer.Exit(1)
+    module = mods[turn]
+    from vocab.formats.llm import format_isolate_confirm
+    prompt = format_isolate_confirm(task, module, turn)
+    if format == "json":
+        typer.echo(json.dumps({
+            "schema_version": 1,
+            "tier": "bisection",
+            "turn": turn,
+            "total_modules": len(mods),
+            "task": task,
+            "task_keywords": data.get("task_keywords", []),
+            "token_cost": "~100",
+            "llm_prompt": prompt,
+            "module_scores": [{ "score": m["match_score"], "size": m["size"], "overlap": m["overlap_count"] } for m in mods],
+        }, indent=2))
+        return
+    typer.echo(_color("STRUCTURAL BISECTION", "header"))
+    typer.echo(f"Task: {task}")
+    typer.echo(f"Turn {turn}/{len(mods)-1} | Module match score: {module['match_score']:.3f} | {module['size']} files")
+    files = module.get("files", [])
+    if files:
+        typer.echo(_color(f"Files ({len(files)}):", "subheader"))
+        for f in files[:6]:
+            typer.echo(f"  {f}")
+    ph = module.get("exemplar_phrases", [])
+    if ph:
+        typer.echo(f"Key concepts: {', '.join(ph[:5])}")
+    typer.echo("")
+    if why and turn > 0:
+        prev = mods[turn - 1]
+        typer.echo(f"Previous module score: {prev['match_score']:.3f} (difference: {module['match_score'] - prev['match_score']:+.3f})")
+    typer.echo(_color("Present this module for LLM confirmation:", "dim"))
+    typer.echo(prompt)
+
+
 @cli.command(name="verify-packet",  rich_help_panel="Agent")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",

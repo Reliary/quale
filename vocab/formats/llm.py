@@ -237,3 +237,24 @@ def format_contract_llm(contract: dict) -> str:
     if boundary:
         lines.append(f"  BOUNDARY:{' '.join(boundary[:3])}")
     return "\n".join(lines)
+
+
+def format_isolate_confirm(task: str, module: dict, turn: int) -> str:
+    """Prompt the LLM to confirm whether a structural module matches the task."""
+    lines = ["MODULE CONFIRMATION (YES or NO)"]
+    lines.append(f"Task: {task}")
+    lines.append(f"Turn: {turn}")
+    files = module.get("files", [])
+    if files:
+        lines.append(f"Files ({len(files)}):")
+        for f in files[:6]:
+            lines.append(f"  {f}")
+    ph = module.get("exemplar_phrases", [])
+    if ph:
+        lines.append("Key concepts: " + ", ".join(ph[:5]))
+    lines.append(f"Score: {module.get('match_score', 0):.3f}")
+    lines.append("")
+    lines.append("YES = this module contains files you need for the task.")
+    lines.append("NO = this module is unrelated.")
+    lines.append("Output: {'confirmed': true_or_false, 'reason': '<opt>'}")
+    return "\n".join(lines)
