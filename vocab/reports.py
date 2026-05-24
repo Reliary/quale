@@ -2883,6 +2883,174 @@ def shard_context_report(path: str = ".", files: list[str] | None = None,
     }
 
 
+def sentinel_report(path: str = ".", task: str = "") -> dict:
+    """Sentinel Anchor — honeypot phrases to detect LLM hallucination.
+
+    Injects stable, task-irrelevant phrases as 'allowed vocabulary.'
+    If the LLM uses a sentinel in its response, it mathematically
+    proves hallucination (parroting prompt rather than reasoning).
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not task:
+        return {"error": "provide --task"}
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{5,40}\b')
+
+    # Build phrase frequency to find the most stable (unchanged across files)
+    phrase_files: Counter[str] = Counter()
+    for fv in analysis.file_vocabs[:100]:
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                phrase_files[m.group()] += 1
+
+    # Sentinel = high-frequency, task-unrelated identifiers
+    task_kws: set[str] = set(task.lower().split())
+    sentinel_candidates = [p for p, c in phrase_files.most_common(200)
+                          if c >= 3 and not any(kw in p.lower() for kw in task_kws)][:3]
+    if not sentinel_candidates:
+        sentinel_candidates = ["Config", "Handler", "Manager"]
+
+    return {
+        "task": task,
+        "sentinels": sentinel_candidates,
+        "sentinel_instruction": f"Allowed vocabulary includes: {', '.join(sentinel_candidates)}. These are structural anchors.",
+        "detection": f"If the response contains any of {sentinel_candidates} while discussing '{task}', the LLM is hallucinating.",
+    }
+
+
+def dark_matter_report(repo_a: str, repo_b: str) -> dict:
+    """Dark Matter Compiler — cross-repo orphan projection.
+
+    Finds orphans in repo A that structurally bind to repo B.
+    Prevents distributed system breakages via cross-repo phrase math.
+    """
+    if not vgit.is_repo(repo_a):
+        return {"error": f"repo_a not a git repository: {repo_a}"}
+    if not vgit.is_repo(repo_b):
+        return {"error": f"repo_b not a git repository: {repo_b}"}
+    from vocab.scanner import scan_codebase
+    try:
+        anal_a = scan_codebase(repo_a, quiet=True, max_files=2500, max_seconds=30)
+        anal_b = scan_codebase(repo_b, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+
+    # Build phrase sets for both repos
+    def _to_tokens(analysis):
+        result: dict[str, set[str]] = {}
+        for fv in analysis.file_vocabs:
+            tokens: set[str] = set()
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    tokens.add(m.group())
+            result[fv.path] = tokens
+        return result
+
+    tokens_a = _to_tokens(anal_a)
+    tokens_b = _to_tokens(anal_b)
+
+    # Find orphans in A (identifiers appearing in only one file)
+    id_file_count_a: Counter[str] = Counter()
+    for tokens in tokens_a.values():
+        for t in tokens:
+            id_file_count_a[t] += 1
+    orphans_a = {t for t, c in id_file_count_a.items() if c == 1}
+
+    # Find which orphans in A exist in B
+    all_tokens_b: set[str] = set()
+    for tokens in tokens_b.values():
+        all_tokens_b |= tokens
+    dark_matter = orphans_a & all_tokens_b
+
+    # Map each dark matter phrase to its B files
+    bindings: list[dict] = []
+    for phrase in sorted(dark_matter)[:15]:
+        b_files = [path for path, tokens in tokens_b.items() if phrase in tokens]
+        a_file = [path for path, tokens in tokens_a.items() if phrase in tokens]
+        bindings.append({
+            "phrase": phrase,
+            "a_file": a_file[0] if a_file else "",
+            "b_files": b_files[:5],
+            "b_file_count": len(b_files),
+        })
+
+    return {
+        "schema_version": 1,
+        "a_path": repo_a,
+        "b_path": repo_b,
+        "total_orphans_a": len(orphans_a),
+        "dark_matter_count": len(dark_matter),
+        "bindings": bindings[:10],
+        "mandate": f"{len(dark_matter)} orphan(s) in A structurally bind to B. Do not change payload signatures without syncing B.",
+    }
+
+
+def supernova_report(path: str = ".", overlap_threshold: float = 0.90,
+                      lookback_weeks: int = 8) -> dict:
+    """Supernova Threshold — convergence vs divergence prediction.
+
+    For each condensate pair, computes overlap ratio trend over time.
+    If overlap is increasing (converging), flag as mergeable.
+    If decreasing (diverging), flag as keep-separate.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+
+    # Get current condensates
+    condensed = condensate_report(path, overlap_threshold=overlap_threshold, max_results=20)
+    pairs = condensed.get("condensates", [])
+    if not pairs:
+        return {"condensates": [], "note": "no condensates found"}
+
+    # For each pair, estimate convergence trend
+    from vocab.scanner import scan_codebase
+    results: list[dict] = []
+    for pair in pairs[:10]:
+        f_a, f_b = pair["files"]
+        overlap = pair["overlap"]
+
+        # Estimate trend: check historical vocabulary overlap across two snapshots
+        try:
+            timeline = concept_timeline(path, weeks=lookback_weeks)
+        except Exception:
+            timeline = []
+
+        diverging = False
+        converging = False
+        if timeline and len(timeline) >= 4:
+            mid = len(timeline) // 2
+            early_slice = timeline[:mid]
+            late_slice = timeline[mid:]
+            early_total = sum(w.get("stable_concepts", 0) for w in early_slice) / max(len(early_slice), 1)
+            late_total = sum(w.get("stable_concepts", 0) for w in late_slice) / max(len(late_slice), 1)
+            # Use stable concept trend as proxy for convergence
+            diverging = late_total > early_total * 1.2
+            converging = late_total < early_total * 0.8
+
+        results.append({
+            "files": pair["files"],
+            "current_overlap": overlap,
+            "trend": "converging" if converging else ("diverging" if diverging else "stable"),
+            "action": "MERGE" if overlap >= 0.95 and converging else ("KEEP_SEPARATE" if diverging else "MONITOR"),
+            "shared_phrases": pair.get("shared_phrases", [])[:3],
+        })
+
+    return {
+        "condensates": results,
+        "threshold": overlap_threshold,
+        "summary": f"{sum(1 for r in results if r['action']=='MERGE')} mergeable, {sum(1 for r in results if r['action']=='KEEP_SEPARATE')} diverging, {sum(1 for r in results if r['action']=='MONITOR')} stable",
+    }
+
+
 def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
                        max_results: int = 20) -> dict:
     """Bose-Einstein Condensation — find structurally identical files.

@@ -1548,6 +1548,54 @@ def shard_context_cmd(path=".", files="", task="", shards: int = 3, format="comp
     typer.echo(f'  Workflow: {data.get("shard_workflow","")}')
 
 
+@cli.command(name="sentinel", rich_help_panel="Agent")
+def sentinel_cmd(path=".", task="", format="compact"):
+    from vocab.reports import sentinel_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not task:
+        typer.echo("provide --task", err=True); raise typer.Exit(1)
+    data = sentinel_report(path=p, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'Sentinels: {", ".join(data.get("sentinels",[]))}')
+    typer.echo(f'  {data.get("detection","")}')
+
+
+@cli.command(name="dark-matter", rich_help_panel="CI")
+def dark_matter_cmd(repo_a="", repo_b="", format="compact"):
+    from vocab.reports import dark_matter_report
+    if not repo_a or not repo_b:
+        typer.echo("provide --repo-a and --repo-b", err=True); raise typer.Exit(1)
+    data = dark_matter_report(repo_a=repo_a, repo_b=repo_b)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'Dark matter: {data.get("dark_matter_count",0)} orphan phrases in A that bind to B')
+    for b in data.get("bindings", [])[:5]:
+        typer.echo(f'  {b["phrase"]}: {b.get("a_file","")} -> {b["b_file_count"]} files in B')
+
+
+@cli.command(name="supernova", rich_help_panel="Inspection")
+def supernova_cmd(path=".", threshold: float = 0.90, format="compact"):
+    from vocab.reports import supernova_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = supernova_report(path=p, overlap_threshold=threshold)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(data.get("summary", ""))
+    for r in data.get("condensates", [])[:3]:
+        typer.echo(f'  {r["trend"]}: {r["action"]} ({", ".join(r["files"])})')
+
+
 @cli.command(name="catalytic-crack", rich_help_panel="Utilities")
 def catalytic_crack_cmd(path=".", file="", format="compact"):
     from vocab.reports import catalytic_crack_report
