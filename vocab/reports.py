@@ -871,13 +871,11 @@ def _deterministic_verify(verify_with: list[str], entangled: list[dict], changed
         c_base = c_base.replace("test_", "").replace("_test", "").replace(".test", "")
         stem_match = c_base in changed_bases
         ent_score = entangle_by_file.get(c, 0)
-        if stem_match and ent_score > 0.5:
+        if stem_match and ent_score >= 0.25:
             return {"file": c, "score": 1.0, "rule": "stem_match_and_entanglement"}
-        if stem_match and ent_score > 0.3:
-            return {"file": c, "score": 0.90, "rule": "stem_match_weak_entanglement"}
         if stem_match:
             return {"file": c, "score": 0.85, "rule": "stem_match"}
-        if ent_score > 0.7:
+        if ent_score >= 0.25:
             return {"file": c, "score": 0.80, "rule": "entanglement_only"}
     if len(verify_with) >= 2:
         d0, d1 = verify_with[0].count("/"), verify_with[1].count("/")

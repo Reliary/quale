@@ -704,6 +704,8 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             "Use keys: edit_ids (array), verify_ids (array), expand_scope (array), manual_verify (array). "
             "Use only IDs from the contract. Do not return raw file paths."
         )
+    if condition in {"deterministic_only", "fragment_route"}:
+        system += " Obey deterministic/constrained guidance: do not propose extra_edits unless the task explicitly requires them."
     if condition in {"preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy"}:
         system += " Obey report-only sprawl guidance: do not propose extra_edits unless the task explicitly requires them."
     if condition in {"desert_aware_preflight", "route_policy"}:
