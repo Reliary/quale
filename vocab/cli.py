@@ -1525,27 +1525,28 @@ def condensate_cmd(path=".", threshold: float = 0.90, format="compact"):
 
 
 @cli.command(name="decay", rich_help_panel="Inspection")
-def decay_cmd(path=".", file="", weeks=12, half_life=30, format="compact"):
+def decay_cmd(path=".", file="", weeks=12, half_life=30,
+              metabolism: Annotated[bool, typer.Option("--metabolism", help="Active Metabolism: verify pattern declining repo-wide")] = False,
+              format="compact"):
     from vocab.reports import decay_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
     if not file:
         typer.echo("provide --file", err=True); raise typer.Exit(1)
-    data = decay_report(path=p, file_path=file, lookback_weeks=weeks, half_life_days=half_life)
+    data = decay_report(path=p, file_path=file, lookback_weeks=weeks, half_life_days=half_life, active_metabolism=metabolism)
     if "error" in data:
         typer.echo(data["error"], err=True); raise typer.Exit(1)
     if format == "json":
         typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'{data.get("file","")}: {data.get("phrases_tracked",0)} tokens | {data.get("decaying_count",0)} decaying, {data.get("growing_count",0)} growing')
-    tc = data.get("cluster_competition", [])
-    if tc:
-        typer.echo(f'  {_color("TOXICITY CLEARANCE REQUIRED", "red")}')
-        for t in tc[:3]:
-            typer.echo(f'    {t["decaying"]} \u2192 {t["replacement"]} (similarity {t["similarity"]:.0%})')
+    dp = data.get("decaying_patterns", [])
+    if dp:
+        typer.echo(f'{_color("TOXICITY CLEARANCE REQUIRED", "red")}')
+        for d in dp[:5]:
+            typer.echo(f'  {d["phrase"]} -> {d["replacement"]}')
         typer.echo(f'  Mandate: {data.get("mandate","")}')
     else:
-        typer.echo('  No active migration needed.')
+        typer.echo(f'{data.get("file","")}: clean — no decaying patterns')
 
 
 @cli.command(name="entropy", rich_help_panel="Inspection")

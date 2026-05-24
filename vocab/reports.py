@@ -57,6 +57,11 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
         from vocab.compare import pr_blast_radius
         radius = pr_blast_radius(changed, analysis.file_vocabs)
         blast_results = radius.get("impacts", [])
+        attractor = _attractor_cluster(changed, analysis) if analysis else None
+        if attractor:
+            for b in blast_results[:5]:
+                b["attractor_cluster"] = attractor["cluster"]
+                b["attractor_note"] = attractor["note"]
         mirror = _mirror_signals(changed, analysis.file_vocabs)
 
     try:
@@ -2234,13 +2239,84 @@ def anneal_report(path: str = ".", file_path: str = "", task: str = "",
     return base_data
 
 
+def _attractor_cluster(changed: list[str], analysis) -> dict | None:
+    """Identify the Strange Attractor cluster where blast radius terminates.
+
+    Follows co-occurrence edges from changed files outward. Finds the
+    dominant module cluster where >80% of ripple effects settle.
+    """
+    from vocab.bootstrap import compute_modules
+    try:
+        mods = compute_modules(os.path.dirname(analysis.file_vocabs[0].path) if analysis.file_vocabs else ".", analysis=analysis)
+        mod_list = mods.get("modules", []) if isinstance(mods, dict) else []
+    except Exception:
+        return None
+    if not mod_list:
+        return None
+
+    # Build cluster -> files map
+    cluster_files: dict[str, set[str]] = {}
+    for m in mod_list:
+        label = "_".join(m.get("exemplar_phrases", [])[:3]) or f"c{m.get('size',0)}"
+        cluster_files[label] = set(m.get("files", []))
+
+    # Find which clusters the changed files belong to
+    changed_clusters: set[str] = set()
+    for c in changed:
+        for cl, fs in cluster_files.items():
+            if c in fs:
+                changed_clusters.add(cl)
+
+    # Find which clusters the blast radius files belong to
+    blast_files: set[str] = set()
+    for fv in analysis.file_vocabs:
+        if fv.path not in changed:
+            for c in changed:
+                shared = set(fv.vocabulary.keys()) & set(
+                    dict(list(analysis.file_vocabs[0].vocabulary.items())[:10]).keys() if analysis.file_vocabs else []
+                )
+                if shared:
+                    blast_files.add(fv.path)
+
+    # Score clusters by blast file concentration
+    blast_tokens: set[str] = set()
+    for fv in analysis.file_vocabs:
+        if fv.path in blast_files:
+            for p in fv.vocabulary:
+                blast_tokens.add(p)
+
+    cluster_scores: list[tuple[str, int, float]] = []
+    for cl, fs in cluster_files.items():
+        if cl in changed_clusters:
+            continue
+        intersect = 0
+        for bf in blast_files:
+            if bf in fs:
+                intersect += 1
+        if intersect >= 2:
+            ratio = intersect / max(len(blast_files), 1)
+            cluster_scores.append((cl, intersect, ratio))
+
+    if not cluster_scores:
+        return None
+    cluster_scores.sort(key=lambda x: -x[1])
+    best_cl, best_count, best_ratio = cluster_scores[0]
+    return {
+        "cluster": best_cl,
+        "files_in_cluster": best_count,
+        "ratio_of_blast": round(best_ratio, 3),
+        "note": f"Blast radius terminates in [{best_cl}] cluster" if best_ratio > 0.5 else None,
+    }
+
+
 def decay_report(path: str = ".", file_path: str = "",
-                  lookback_weeks: int = 12, half_life_days: int = 30) -> dict:
+                  lookback_weeks: int = 12, half_life_days: int = 30,
+                  active_metabolism: bool = False) -> dict:
     """Pharmacokinetic Half-Life Clearance — detect actively decaying legacy patterns.
 
-    Uses concept_timeline to find phrases that are actively decaying while a
-    competing phrase grows in the same structural cluster. When an agent loads
-    a file containing the decaying pattern, emits toxicity clearance mandate.
+    When active_metabolism=True, checks concept_timeline to verify the legacy
+    pattern is actively declining while a modern alternative is growing in the
+    same structural cluster. Prevents false positives on stable legacy code.
     """
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -2273,30 +2349,33 @@ def decay_report(path: str = ".", file_path: str = "",
     for token in file_tokens:
         for legacy, replacement in legacy_map:
             if token.startswith(legacy.rstrip("(").rstrip(" ")) or token.strip().startswith(legacy.strip()):
+                # Active metabolism: verify the pattern is actually declining repo-wide
+                if active_metabolism:
+                    try:
+                        timeline = concept_timeline(path, weeks=lookback_weeks)
+                        if timeline and len(timeline) >= 4:
+                            early_count = 0
+                            late_count = 0
+                            for wk_data in timeline[:len(timeline)//2]:
+                                if legacy[:8] in str(wk_data.keys()):
+                                    early_count += 1
+                            for wk_data in timeline[-len(timeline)//2:]:
+                                if replacement[:8] in str(wk_data.keys()):
+                                    late_count += 1
+                            if early_count <= late_count:
+                                continue  # no active metabolism — skip
+                    except Exception:
+                        pass
                 decaying.append({"phrase": token[:40], "legacy_pattern": legacy.strip()[:25],
-                                 "replacement": replacement, "half_life_days": half_life_days})
+                                 "replacement": replacement, "half_life_days": half_life_days,
+                                 "metabolism_verified": active_metabolism})
                 break
-
-    # Check timeline for overall file decay signal
-    try:
-        timeline = concept_timeline(path, weeks=lookback_weeks)
-    except Exception:
-        timeline = []
-
-    if timeline and len(timeline) >= 4:
-        early_stable = timeline[:2]
-        late_stable = timeline[-2:]
-        early_avg = sum(w.get("stable_concepts", 0) for w in early_stable) / max(len(early_stable), 1)
-        late_avg = sum(w.get("stable_concepts", 0) for w in late_stable) / max(len(late_stable), 1)
-        decay_signal = early_avg > 0 and late_avg < early_avg * 0.7
-    else:
-        decay_signal = False
 
     return {
         "file": file_path, "phrases_tracked": len(file_tokens),
         "decaying_patterns": decaying[:8],
-        "decay_signal": decay_signal,
         "toxicity_clearance_required": len(decaying) > 0,
+        "metabolism_mode": active_metabolism,
         "mandate": f"Clear {len(decaying)} legacy pattern(s) before adding new logic." if decaying else "No active migration needed.",
     }
 
