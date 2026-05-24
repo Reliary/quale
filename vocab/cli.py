@@ -1380,12 +1380,14 @@ def orient_cmd(path=".", task="", format="compact"):
 
 
 @cli.command(name="health", rich_help_panel="CI")
-def health_cmd(path=".", format="compact"):
+def health_cmd(path=".",
+               balance: Annotated[bool, typer.Option("--balance", help="Phototropism: check root-to-shoot vocabulary ratio")] = False,
+               format="compact"):
     from vocab.reports import structural_health_score
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = structural_health_score(path=p)
+    data = structural_health_score(path=p, balance=balance)
     if "error" in data:
         typer.echo(data["error"], err=True); raise typer.Exit(1)
     if format == "json":
@@ -1393,135 +1395,37 @@ def health_cmd(path=".", format="compact"):
     h = data.get("health", "?")
     c = "green" if h == "good" else ("yellow" if h == "moderate" else "red")
     typer.echo(f"Health: {_color(h.upper(), c)} (debt: {data.get('debt_acceleration',0):.3f})")
+    if balance and data.get("root_shoot_ratio"):
+        ratio = data["root_shoot_ratio"]
+        clr = "red" if ratio > 3 else ("green" if ratio < 0.5 else "yellow")
+        typer.echo(f"  Root/Shoot ratio: {ratio}:1 [{_color('Features outgrowing core' if ratio > 3 else 'Core dominates' if ratio < 0.5 else 'Balanced', clr)}]")
+    elif balance:
+        typer.echo(f"  {data.get('phototropism_note', '')}")
 
 
-@cli.command(name="squeeze", rich_help_panel="Agent")
-def squeeze_cmd(path=".", file="", task="", format="compact"):
-    from vocab.reports import pipeline_squeeze
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not file or not task:
-        typer.echo("provide --file and --task", err=True); raise typer.Exit(1)
-    data = pipeline_squeeze(path=p, file=file, task=task)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'{file}: ~{data.get("visible_lines",0)} visible | {data.get("lagrange_points",0)} L-points')
-
-
-@cli.command(name="certify", rich_help_panel="CI")
-def certify_cmd(path=".", files=[], schema="", code="", format="compact"):
-    from vocab.reports import pipeline_certify
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = pipeline_certify(path=p, changed_files=list(files) if files else None, generated_code=code, schema_file=schema)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    s = data.get("summary", "")
-    typer.echo(f"Certification: {s}")
-    for n, c in data.get("certificates", {}).items():
-        p2 = c.get("passed", True)
-        typer.echo(f'  {n}: {_color("PASS" if p2 else "FAIL", "green" if p2 else "red")}')
-
-
-@cli.command(name="migrate", rich_help_panel="CI")
-def migrate_cmd(repo_a="", repo_b="", format="compact"):
-    from vocab.reports import migrate_report
-    if not repo_a or not repo_b:
-        typer.echo("provide --from and --to", err=True); raise typer.Exit(1)
-    data = migrate_report(path_a=repo_a, path_b=repo_b)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(data.get("migration_summary", ""))
-    for s in data.get("substitutions", [])[:5]:
-        typer.echo(f"  {s}")
-
-
-@cli.command(name="debt", rich_help_panel="CI")
-def debt_cmd(path=".", files=[], format="compact"):
-    from vocab.reports import compound_debt_index
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = compound_debt_index(path=p, files=list(files) if files else None)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Overall debt: {data.get("overall_debt_index",0):.3f}')
-    for r in data.get("files", [])[:5]:
-        clr = "red" if r["debt_level"] == "critical" else ("yellow" if r["debt_level"] == "high" else "green")
-        typer.echo(f'  {r["file"]}: {_color(r["debt_level"].upper(), clr)} ({r["compound_debt"]:.3f})')
-
-
-@cli.command(name="guard", rich_help_panel="Agent")
-def guard_cmd(path=".", files=[], task="", format="compact"):
-    from vocab.reports import guard_pipeline
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not files or not task:
-        typer.echo("provide --files and --task", err=True); raise typer.Exit(1)
-    data = guard_pipeline(path=p, files=list(files), task=task)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    v = data.get("verification", {}) or {}
-    s = data.get("scope", {}) or {}
-    c = data.get("contract", {}) or {}
-    verv = v.get("verification_candidates") or []
-    typer.echo(f'Guard: tier={v.get("cascade_tier","?")} | candidates={len(verv)} | blast={len(s.get("blast_radius",[]) or [])} | contract={(c.get("contract_id","") or "")[:8]}')
-
-
-@cli.command(name="anneal", rich_help_panel="Inspection")
-def anneal_cmd(path=".", file="", task="", format="compact",
-               shield_threshold: Annotated[float, typer.Option("--shield-threshold", help="Superbug detection. Shield ratio > threshold = forbid new defensive patterns")] = 0.0):
-    from vocab.reports import anneal_report
+@cli.command(name="pulsar", rich_help_panel="Inspection")
+def pulsar_cmd(path=".", file="", format="compact"):
+    from vocab.reports import pulsar_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
     if not file:
         typer.echo("provide --file", err=True); raise typer.Exit(1)
-    data = anneal_report(path=p, file_path=file, task=task, shield_threshold=shield_threshold)
+    data = pulsar_report(path=p, file_path=file)
     if "error" in data:
         typer.echo(data["error"], err=True); raise typer.Exit(1)
     if format == "json":
         typer.echo(json.dumps(data, indent=2)); return
-    sr = data.get("shield_ratio", 0)
-    if shield_threshold > 0 and data.get("superbug"):
-        typer.echo(f"  {_color('SUPERBUG', 'red')} shield ratio {sr:.1%}")
-        typer.echo(f"  {data.get('phage_therapy', '')}")
-    ex = data.get("extraction") or {}
-    typer.echo(f'{data.get("file","")}: {data.get("total_clusters",0)} clusters, {data.get("total_lines",0)} lines, shield {sr:.0%}')
-    typer.echo(f'  Anneal {"REQUIRED" if data.get("anneal_required") else "OPTIONAL"}')
-    if ex.get("extract_lines"):
-        typer.echo(f'  Extract lines {ex["extract_lines"][0]}-{ex["extract_lines"][1]} -> {ex.get("extract_to_file","")}')
-        typer.echo(f'  Cluster: {ex.get("cluster","")} ({ex.get("cluster_score",0)})')
-
-
-@cli.command(name="condensate", rich_help_panel="Inspection")
-def condensate_cmd(path=".", threshold: float = 0.90, format="compact"):
-    from vocab.reports import condensate_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = condensate_report(path=p, overlap_threshold=threshold)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'{data.get("files_scanned",0)} files scanned | {data.get("condensate_count",0)} condensate pairs >{threshold:.0%} overlap')
-    for c in data.get("condensates", [])[:5]:
-        typer.echo(f'  {c["overlap"]:.0%}: {c["files"][0]}  \u2194  {c["files"][1]}')
-        typer.echo(f'    shared: {", ".join(c["shared_phrases"][:3])}')
+    anchors = data.get("pulsar_anchors", [])
+    missing = data.get("missing_anchors", [])
+    typer.echo(f'{data.get("file","")}: {len(anchors)} pulsar anchors, {data.get("total_tokens",0)} tokens')
+    if missing:
+        typer.echo(f'  {_color("CLOCK DRIFT ANOMALY", "red")}')
+        for m in missing[:3]:
+            typer.echo(f'    Missing anchor: {m}')
+        typer.echo(f'  Mandate: {data.get("mandate","")}')
+    else:
+        typer.echo(f'  Pulsar rhythm stable.')
 
 
 @cli.command(name="decay", rich_help_panel="Inspection")

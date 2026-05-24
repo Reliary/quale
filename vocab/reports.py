@@ -1993,7 +1993,7 @@ def pipeline_orient(path: str = ".", task: str = "") -> dict:
     }
 
 
-def structural_health_score(path: str = ".") -> dict:
+def structural_health_score(path: str = ".", balance: bool = False) -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -2019,9 +2019,86 @@ def structural_health_score(path: str = ".") -> dict:
                 max_regg = max(max_regg, r.get("highest_probability", 0))
     except Exception:
         max_regg = 0.0
+
+    # Root-to-Shoot ratio (Phototropism balance)
+    if balance:
+        try:
+            from vocab.scanner import scan_codebase as sc2
+            analysis2 = sc2(path, quiet=True, max_files=2500, max_seconds=30)
+            feature_phrases = 0
+            core_phrases = 0
+            for fv in analysis2.file_vocabs:
+                path_lower = fv.path.lower()
+                if "/features/" in path_lower or "/ui/" in path_lower or "/components/" in path_lower:
+                    feature_phrases += sum(fv.vocabulary.values())
+                elif "/core/" in path_lower or "/db/" in path_lower or "/database/" in path_lower or "/models/" in path_lower or "/infra/" in path_lower:
+                    core_phrases += sum(fv.vocabulary.values())
+            ratio = round(feature_phrases / max(core_phrases, 1), 2) if feature_phrases > 0 and core_phrases > 0 else 0
+        except Exception:
+            ratio = 0
+    else:
+        ratio = 0
+
     debt = round((avg_entropy * 0.3) + (shrapnel_count / max(20, 1) * 0.3) + (max_regg * 0.4), 3)
     health = "good" if debt < 0.3 else ("moderate" if debt < 0.6 else "poor")
-    return {"avg_entropy_ratio": round(avg_entropy, 3), "shrapnel_count": shrapnel_count, "max_regression_probability": round(max_regg, 2), "debt_acceleration": debt, "health": health, "thresholds": {"good": "<0.3", "moderate": "0.3-0.6", "poor": ">0.6"}}
+    result = {"avg_entropy_ratio": round(avg_entropy, 3), "shrapnel_count": shrapnel_count, "max_regression_probability": round(max_regg, 2), "debt_acceleration": debt, "health": health, "thresholds": {"good": "<0.3", "moderate": "0.3-0.6", "poor": ">0.6"}}
+    if balance:
+        result["root_shoot_ratio"] = ratio
+        result["root_shoot_balanced"] = "Features outgrowing core" if ratio > 3 else ("Core dominates" if ratio < 0.5 else "Balanced")
+        result["phototropism_note"] = f"Features/Core vocabulary ratio: {ratio}:1" if ratio else "No clear feature/core directories detected"
+    return result
+
+
+def pulsar_report(path: str = ".", file_path: str = "",
+                   lookback_commits: int = 100) -> dict:
+    """Pulsar Timing Array — detect Clock-Drift anomalies in core loops."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file_path or not os.path.exists(os.path.join(path, file_path)):
+        return {"error": "provide existing --file"}
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+    current_tokens: set[str] = set()
+    for fv in analysis.file_vocabs:
+        if fv.path == file_path:
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    current_tokens.add(m.group())
+    if not current_tokens:
+        return {"error": "no tokens in file"}
+    try:
+        timeline = concept_timeline(path, weeks=12)
+    except Exception:
+        timeline = []
+    if not timeline or len(timeline) < 4:
+        fallback_anchors = {t for t in current_tokens if t.lower() in
+                           ("sleep", "delay", "timeout", "wait", "retry", "backoff",
+                            "process", "fetch", "batch", "queue", "worker", "loop")}
+        anchors = fallback_anchors or set(list(current_tokens)[:3])
+    else:
+        from collections import Counter
+        presence: Counter[str] = Counter()
+        for wk in timeline:
+            wk_text = str(wk.get("new_concepts", ""))
+            for token in current_tokens:
+                if token.lower() in wk_text.lower() or token in wk_text:
+                    presence[token] += 1
+        anchors = set(t for t, c in presence.items() if c >= len(timeline) * 0.8)
+        if not anchors:
+            anchors = set(list(current_tokens)[:3])
+    missing = [t for t in anchors if t not in current_tokens]
+    return {
+        "file": file_path, "total_tokens": len(current_tokens),
+        "pulsar_anchors": sorted(anchors)[:8],
+        "missing_anchors": missing[:5],
+        "clock_drift_anomaly": len(missing) > 0,
+        "mandate": f"Restore missing anchor(s): {', '.join(missing[:3])}" if missing else "Pulsar rhythm stable.",
+    }
 
 
 def pipeline_squeeze(path: str = ".", file: str = "", task: str = "") -> dict:
