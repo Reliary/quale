@@ -2155,7 +2155,8 @@ def guard_pipeline(path: str = ".", files: list[str] | None = None, task: str = 
     return {"task": task, "changed_files": changed, "verification": result.get("verification", {}), "scope": result.get("scope", {}), "contract": result.get("contract", {}), "all_checks_ran": "verification" in result and "scope" in result and "contract" in result}
 
 
-def anneal_report(path: str = ".", file_path: str = "", task: str = "") -> dict:
+def anneal_report(path: str = ".", file_path: str = "", task: str = "",
+                   shield_threshold: float = 0.0) -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -2178,11 +2179,18 @@ def anneal_report(path: str = ".", file_path: str = "", task: str = "") -> dict:
     ptokens = ftokens.get(file_path, set())
     if not ptokens:
         return {"error": "no tokens in file"}
+
+    # Shield ratio: defensive boilerplate vs core logic
+    _SHIELD_PHRASES = frozenset({"catch", "null", "ignore", "fallback", "default", "try", "skip",
+                                  "error", "exception", "undefined", "optional", "nullable"})
+    shield_count = sum(1 for p in ptokens if p.lower() in _SHIELD_PHRASES)
+    shield_ratio = round(shield_count / max(len(ptokens), 1), 3)
+    superbug = shield_ratio >= shield_threshold if shield_threshold > 0 else False
+
     cluster_tokens: dict[str, set[str]] = {}
     for m in mod_list:
         label = "_".join(m.get("exemplar_phrases", [])[:3]) or f"c{m.get('size',0)}"
         ct: set[str] = set()
-        f2: set[str] = set()
         for f in m.get("files", []):
             if f in ftokens and f != file_path:
                 ct |= ftokens[f]
@@ -2204,18 +2212,84 @@ def anneal_report(path: str = ".", file_path: str = "", task: str = "") -> dict:
         if best_sc >= 2:
             results.append((blk["start"], blk["end"], best_cl, best_sc, blk["end"] - blk["start"] + 1))
     results.sort(key=lambda x: (x[3], x[4]))
+    base_data = {
+        "file": file_path, "total_lines": len(lines), "total_clusters": len(cluster_tokens),
+        "shield_ratio": shield_ratio, "superbug": superbug,
+        "anneal_required": len(cluster_tokens) >= 3,
+    }
+    if shield_threshold > 0 and superbug:
+        base_data["phage_therapy"] = "Shield ratio exceeds threshold. Forbid new defensive phrases."
+        base_data["extraction"] = None
+        return base_data
     if not results:
-        return {"error": "no extraction zone", "total_clusters": len(cluster_tokens)}
+        base_data["extraction"] = None
+        return base_data
     start, end, clname, score, size = results[0]
     ext = os.path.splitext(file_path)[1]
     bd = os.path.dirname(file_path)
     ext_file = os.path.join(bd, f"{clname.replace('_','-')[:20]}_annealed{ext}") if bd else f"{clname.replace('_','-')[:20]}_annealed{ext}"
+    base_data["extraction"] = {"extract_lines": [start + 1, end + 1], "extract_to_file": ext_file,
+                                "cluster": clname, "cluster_score": score, "lines_count": size,
+                                "preview": "".join(lines[start:end + 1]).strip()[:200]}
+    return base_data
+
+
+def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
+                       max_results: int = 20) -> dict:
+    """Bose-Einstein Condensation — find structurally identical files.
+
+    Compares vocabulary fingerprints across all files in the repo.
+    Files with >overlap_threshold fingerprint similarity in different
+    directories are condensates — structurally identical but scattered.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    # Build per-file vocabulary sets
+    file_sets: list[tuple[str, set[str]]] = []
+    for fv in analysis.file_vocabs:
+        vocab_set = set(fv.vocabulary.keys())
+        if len(vocab_set) >= 3:
+            file_sets.append((fv.path, vocab_set))
+
+    if len(file_sets) < 2:
+        return {"error": "too few files with vocabulary", "condensates": []}
+
+    # Compare all pairs (O(N²) but limited by max_files)
+    condensates: list[dict] = []
+    for i in range(len(file_sets)):
+        for j in range(i + 1, len(file_sets)):
+            path_a, set_a = file_sets[i]
+            path_b, set_b = file_sets[j]
+            # Only match across different directories
+            dir_a = "/".join(path_a.split("/")[:-1])
+            dir_b = "/".join(path_b.split("/")[:-1])
+            if dir_a == dir_b:
+                continue
+            union = len(set_a | set_b)
+            if union == 0:
+                continue
+            overlap = len(set_a & set_b) / union
+            if overlap >= overlap_threshold:
+                condensates.append({
+                    "files": [path_a, path_b],
+                    "overlap": round(overlap, 3),
+                    "shared_phrases": sorted(set_a & set_b)[:5],
+                })
+
+    condensates.sort(key=lambda x: -x["overlap"])
     return {
-        "file": file_path, "total_lines": len(lines), "total_clusters": len(cluster_tokens),
-        "anneal_required": len(cluster_tokens) >= 3,
-        "extraction": {"extract_lines": [start + 1, end + 1], "extract_to_file": ext_file,
-                        "cluster": clname, "cluster_score": score, "lines_count": size,
-                        "preview": "".join(lines[start:end + 1]).strip()[:200]},
+        "schema_version": 1,
+        "files_scanned": len(file_sets),
+        "threshold": overlap_threshold,
+        "condensate_count": len(condensates),
+        "condensates": condensates[:max_results],
     }
 
 

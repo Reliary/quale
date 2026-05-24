@@ -1482,25 +1482,46 @@ def guard_cmd(path=".", files=[], task="", format="compact"):
 
 
 @cli.command(name="anneal", rich_help_panel="Inspection")
-def anneal_cmd(path=".", file="", task="", format="compact"):
+def anneal_cmd(path=".", file="", task="", format="compact",
+               shield_threshold: Annotated[float, typer.Option("--shield-threshold", help="Superbug detection. Shield ratio > threshold = forbid new defensive patterns")] = 0.0):
     from vocab.reports import anneal_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
     if not file:
         typer.echo("provide --file", err=True); raise typer.Exit(1)
-    data = anneal_report(path=p, file_path=file, task=task)
+    data = anneal_report(path=p, file_path=file, task=task, shield_threshold=shield_threshold)
     if "error" in data:
         typer.echo(data["error"], err=True); raise typer.Exit(1)
     if format == "json":
         typer.echo(json.dumps(data, indent=2)); return
-    ex = data.get("extraction", {})
-    typer.echo(f'{data.get("file","")}: {data.get("total_clusters",0)} clusters, {data.get("total_lines",0)} lines')
+    sr = data.get("shield_ratio", 0)
+    if shield_threshold > 0 and data.get("superbug"):
+        typer.echo(f"  {_color('SUPERBUG', 'red')} shield ratio {sr:.1%}")
+        typer.echo(f"  {data.get('phage_therapy', '')}")
+    ex = data.get("extraction") or {}
+    typer.echo(f'{data.get("file","")}: {data.get("total_clusters",0)} clusters, {data.get("total_lines",0)} lines, shield {sr:.0%}')
     typer.echo(f'  Anneal {"REQUIRED" if data.get("anneal_required") else "OPTIONAL"}')
     if ex.get("extract_lines"):
         typer.echo(f'  Extract lines {ex["extract_lines"][0]}-{ex["extract_lines"][1]} -> {ex.get("extract_to_file","")}')
         typer.echo(f'  Cluster: {ex.get("cluster","")} ({ex.get("cluster_score",0)})')
-        typer.echo(f'  Preview: {ex.get("preview","")[:80]}')
+
+
+@cli.command(name="condensate", rich_help_panel="Inspection")
+def condensate_cmd(path=".", threshold: float = 0.90, format="compact"):
+    from vocab.reports import condensate_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = condensate_report(path=p, overlap_threshold=threshold)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'{data.get("files_scanned",0)} files scanned | {data.get("condensate_count",0)} condensate pairs >{threshold:.0%} overlap')
+    for c in data.get("condensates", [])[:5]:
+        typer.echo(f'  {c["overlap"]:.0%}: {c["files"][0]}  ↔  {c["files"][1]}')
+        typer.echo(f'    shared: {", ".join(c["shared_phrases"][:3])}')
 
 
 @cli.command(name="entropy", rich_help_panel="Inspection")
