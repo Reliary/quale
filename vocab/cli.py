@@ -958,6 +958,7 @@ def isolate_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     task: Annotated[str, typer.Option("--task", "-t", help="Task description")] = "",
     turn: Annotated[int, typer.Option("--turn", help="Which module to evaluate (0-based)")] = 0,
+    active_days: Annotated[int, typer.Option("--active-days", help="Only consider modules active in N days")] = 0,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     why: Annotated[bool, typer.Option("--why", help="Show why this module was ranked here")] = False,
 ):
@@ -966,7 +967,7 @@ def isolate_cmd(
     Scores module clusters by task-keyword overlap. Each turn presents
     one module for YES/NO confirmation. ~100 tokens per turn.
     """
-    from vocab.reports import isolate_modules
+    from vocab.reports import isolate_modules, _active_gene_pool
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -975,6 +976,11 @@ def isolate_cmd(
         typer.echo("provide --task", err=True)
         raise typer.Exit(1)
     data = isolate_modules(path=path_abs, task=task)
+    if active_days > 0:
+        pool = _active_gene_pool(path_abs, active_days)
+        for mod in data.get("modules", []):
+            mod["files"] = [f for f in mod.get("files", []) if f in pool]
+        data["modules"] = [m for m in data.get("modules", []) if m.get("files")]
     if "error" in data:
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
@@ -1098,6 +1104,7 @@ def drift_check_cmd(
 def mycorrhiza_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="File(s) to map hidden deps for")] = [],
+    active_days: Annotated[int, typer.Option("--active-days", help="Only analyze files modified in N days (active gene pool)")] = 0,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
     """Detect hidden structural dependencies (no direct imports).
@@ -1105,7 +1112,7 @@ def mycorrhiza_cmd(
     Files that share rare vocabulary AND co-change in git history
     despite having zero import/require/include relationships.
     """
-    from vocab.reports import mycorrhiza_map
+    from vocab.reports import mycorrhiza_map, _active_gene_pool
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1113,6 +1120,12 @@ def mycorrhiza_cmd(
     if not files:
         typer.echo("provide --files", err=True)
         raise typer.Exit(1)
+    if active_days > 0:
+        pool = _active_gene_pool(path_abs, active_days)
+        files = [f for f in files if f in pool]
+        if not files:
+            typer.echo("No files in active gene pool.", err=True)
+            raise typer.Exit(1)
     data = mycorrhiza_map(path=path_abs, files=list(files))
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -1135,6 +1148,7 @@ def forecast_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s) to forecast risk for")] = [],
     commits: Annotated[int, typer.Option("--commits", help="Git history lookback")] = 500,
+    active_days: Annotated[int, typer.Option("--active-days", help="Only analyze files modified in N days (active gene pool)")] = 0,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
     """Doppler Defect Radar — forecast regression risk from structural shifts.
@@ -1146,7 +1160,7 @@ def forecast_cmd(
     Example:
       vocab forecast --files src/billing.ts
     """
-    from vocab.reports import forecast_report
+    from vocab.reports import forecast_report, _active_gene_pool
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1154,6 +1168,12 @@ def forecast_cmd(
     if not files:
         typer.echo("provide --files", err=True)
         raise typer.Exit(1)
+    if active_days > 0:
+        pool = _active_gene_pool(path_abs, active_days)
+        files = [f for f in files if f in pool]
+        if not files:
+            typer.echo("No files in active gene pool. Try --active-days 0 or increase the window.", err=True)
+            raise typer.Exit(1)
     data = forecast_report(path=path_abs, files=list(files), lookback_commits=commits)
     if "error" in data:
         typer.echo(data["error"], err=True)
