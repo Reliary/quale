@@ -150,6 +150,7 @@ def diff(
     ref_b: Annotated[str, typer.Argument(help="Target git ref")],
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
+    why: Annotated[bool, typer.Option("--why", help="Show why this diff matters structurally")] = False,
 ):
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
@@ -203,6 +204,10 @@ def diff(
         typer.echo(_color("RETIRED CONCEPTS (first 10):", "subheader"))
         for phrase in sorted(retired_concepts)[:10]:
             typer.echo(f"  {_color('-', 'red')} {phrase[:60]}")
+    if why:
+        from vocab.formats.terminal import _why_diff
+        data = {"changed_files": [], "impacts": [], "mirror_ratio": None}
+        typer.echo(_why_diff(data, ref_a, ref_b))
 
 
 @cli.command(rich_help_panel="Inspection")
@@ -336,6 +341,7 @@ def preflight(
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), verify, json, checklist, compact, llm, full")] = "tool",
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Show math-heavy signals (SNR, expansion risk details)")] = False,
+    why: Annotated[bool, typer.Option("--why", help="Show why each recommendation exists")] = False,
 ):
     """File-scoped edit context and risk card.
 
@@ -466,6 +472,9 @@ def preflight(
         return
     data["verbose"] = verbose
     _print_preflight(data)
+    if why:
+        from vocab.formats.terminal import _why_edit_context
+        typer.echo(_why_edit_context(data))
 
 
 @cli.command(rich_help_panel="Agent")
@@ -860,8 +869,15 @@ def cartridge(
     diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against working tree")] = None,
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+    why: Annotated[bool, typer.Option("--why", help="Show why each candidate exists")] = False,
 ):
-    """Verification packet — compressed scope for LLM verification."""
+    """Verification packet — compressed scope for LLM verification.
+    
+    Examples:
+      vocab verify-packet --files src/spool.ts
+      vocab verify-packet --files src/spool.ts --why
+      vocab verify-packet --files src/spool.ts --format json
+    """
     from vocab.reports import cartridge_report
     data = cartridge_report(path=path, files=files or None, diff_ref=diff, task=task)
     if "error" in data:
@@ -895,6 +911,9 @@ def cartridge(
             typer.echo(f"  {f}")
     if data.get("desert"):
         typer.echo(f"Desert: {data.get('desert_note', 'no candidates')}")
+    if why:
+        from vocab.formats.terminal import _why_verify_packet
+        typer.echo(_why_verify_packet(data))
 
 
 @cli.command(name="check-diff", rich_help_panel="CI")
@@ -1774,6 +1793,7 @@ def ci_report_cmd(
     fail_blast_tier: Annotated[str | None, typer.Option("--fail-on-blast-tier", help="Fail if max_blast_tier >= tier (local/moderate/high/critical)")] = None,
     fail_stable_touched: Annotated[bool, typer.Option("--fail-on-stable-touched", help="Fail if any stable anchors touched")] = False,
     summary: Annotated[bool, typer.Option("--summary", help="Only show pass/fail, reason, and core metrics")] = False,
+    why: Annotated[bool, typer.Option("--why", help="Show why each result")] = False,
 ):
     """CI-ready structural report: blast radius + stable file check + flags.
 
@@ -1903,12 +1923,17 @@ def ci_report_cmd(
     if gate_failures:
         raise typer.Exit(gate_failures[0][0])
 
+    if why:
+        from vocab.formats.terminal import _why_ci_report
+        typer.echo(_why_ci_report(data, ref_a, ref_b))
+
 
 @cli.command(rich_help_panel="Inspection")
 def inspect(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     anomalies: Annotated[bool, typer.Option("--anomalies", help="Load cached scan and show deltas")] = False,
+    why: Annotated[bool, typer.Option("--why", help="Show why each section matters")] = False,
 ):
     """Comprehensive codebase overview: explore + modules + timeline + health.
 
@@ -2033,6 +2058,10 @@ def inspect(
     typer.echo("")
 
     typer.echo(c(f"{'━' * 60}", "cyan"))
+
+    if why:
+        from vocab.formats.terminal import _why_inspect
+        typer.echo(_why_inspect(data))
 
 
 @cli.command(rich_help_panel="Inspection")

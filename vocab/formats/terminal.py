@@ -414,6 +414,256 @@ def format_modules_json(modules_data: dict) -> str:
     }, indent=2)
 
 
+def _why_verify_packet(data: dict) -> str:
+    h = lambda t: _color(t, "header")
+    sh = lambda t: _color(t, "subheader")
+    gr = lambda t: _color(t, "green")
+    r = lambda t: _color(t, "red")
+    y = lambda t: _color(t, "yellow")
+    gy = lambda t: _color(t, "gray")
+
+    lines = []
+    lines.append(h(f"{'━' * 60}"))
+    lines.append(f"  {h('VERIFICATION PACKET — Why these candidates?')}")
+    lines.append(h(f"{'━' * 60}"))
+    lines.append("")
+
+    tier = data.get("tier", "unknown")
+    if tier == "deterministic":
+        det = data.get("deterministic_verify", {})
+        lines.append(f"  {gr('✓ Deterministic')} — only one structurally valid target")
+        lines.append(f"    {det.get('file', '?')}  ({det.get('rule', 'stem match')}, score={det.get('score', 0):.2f})")
+    elif tier == "desert":
+        lines.append(f"  {y('Desert')} — no structural verification candidates")
+        note = data.get("desert_note", "")
+        if note:
+            lines.append(f"    {gy(note)}")
+        lines.append(f"    {gy('No test file mirrors this change — inspect manually.')}")
+    elif tier == "confident":
+        lines.append(f"  {sh('How each candidate was found:')}")
+        vocab_candidates = data.get("verification_candidates", [])
+        for c in vocab_candidates[:3]:
+            lines.append(f"    {gr('→')} {c}  {gy('— shares vocabulary with changed file')}")
+        for e in data.get("entangled_candidates", [])[:2]:
+            reason = e.get('reason', '')
+            lines.append(f"    {y('↗')} {e['file']}  {gy(f'- {reason}' if reason else '- git co-change history')}")
+        if data.get("deterministic_verify"):
+            det = data["deterministic_verify"]
+            rule = det.get("rule", "stem match")
+            lines.append(f"    {gr('✓')} {det['file']}  {gy('- ' + rule)}")
+    elif tier == "ambiguous":
+        lines.append(f"  {sh('Weak signal — why candidates are uncertain:')}")
+        lines.append(f"    {gy('No strong vocabulary match or co-change history.')}")
+        lines.append(f"    {gy('Candidates below are plausible but structurally ambiguous — verify manually.')}")
+        vocab_candidates = data.get("verification_candidates", [])
+        for c in vocab_candidates[:3]:
+            lines.append(f"    {y('?')} {c}")
+
+    lines.append("")
+    if data.get("negative_scope"):
+        lines.append(f"  {r('Why avoid these:')}")
+        for f in data.get("negative_scope", [])[:3]:
+            lines.append(f"    {r('✗')} {f}")
+    lines.append(h(f"{'━' * 60}"))
+    return "\n".join(lines)
+
+
+def _why_edit_context(data: dict) -> str:
+    h = lambda t: _color(t, "header")
+    sh = lambda t: _color(t, "subheader")
+    gr = lambda t: _color(t, "green")
+    r = lambda t: _color(t, "red")
+    y = lambda t: _color(t, "yellow")
+    gy = lambda t: _color(t, "gray")
+
+    lines = []
+    lines.append(h(f"{'━' * 60}"))
+    lines.append(f"  {h('EDIT CONTEXT — Why each recommendation?')}")
+    lines.append(h(f"{'━' * 60}"))
+    lines.append("")
+
+    risk = data.get("risk", "unknown")
+    reasons = data.get("reasons", [])
+    lines.append(f"  {sh('Risk:')} {risk}")
+    for r_text in reasons:
+        lines.append(f"    {gy('•')} {r_text}")
+    lines.append("")
+
+    reads = data.get("read_first", [])
+    if reads:
+        lines.append(f"  {gr('Read these first:')}  {gy('— needed for edit context')}")
+        for f in reads[:3]:
+            lines.append(f"    {gr('→')} {f}")
+
+    blast = data.get("reverse_blast", [])
+    if blast:
+        lines.append(f"  {y('Hidden dependencies (blast radius):')}  {gy('— your change shares identifiers with these files')}")
+        for item in blast[:3]:
+            concepts = ", ".join(item.get("concepts", [])[:3])
+            lines.append(f"    {y('↗')} {item.get('file', '')}  ({item.get('shared_concepts', 0)} identifiers: {concepts})")
+
+    stable = data.get("stable_anchors_touched", [])
+    if stable:
+        lines.append(f"  {r('Stable anchors:')}  {gy('— files unchanged for months, high persistence')}")
+        for item in stable[:2]:
+            lines.append(f"    {r('!')} {item.get('file', '')}  ({item.get('persistence', 0):.0%} stable)")
+
+    expansion = data.get("expansion_risk", data.get("avoid_expanding_into", []))
+    if expansion:
+        lines.append(f"  {y('Expansion risk:')}  {gy('— avoid these files unless task expands')}")
+        for f in expansion[:3]:
+            lines.append(f"    {y('✗')} {f}")
+
+    lines.append(h(f"{'━' * 60}"))
+    return "\n".join(lines)
+
+
+def _why_diff(data: dict, ref_a: str, ref_b: str) -> str:
+    h = lambda t: _color(t, "header")
+    sh = lambda t: _color(t, "subheader")
+    gr = lambda t: _color(t, "green")
+    r = lambda t: _color(t, "red")
+    y = lambda t: _color(t, "yellow")
+    gy = lambda t: _color(t, "gray")
+
+    lines = []
+    lines.append(h(f"{'━' * 60}"))
+    lines.append(f"  {h('STRUCTURAL DIFF')} — {ref_a} → {ref_b}")
+    lines.append(h(f"{'━' * 60}"))
+    lines.append("")
+
+    changed = data.get("changed_files", [])
+    lines.append(f"  {sh('Changed:')} {len(changed)} files")
+    for f in changed[:5]:
+        lines.append(f"    {gr('+')} {f}")
+    lines.append("")
+
+    impact = data.get("impacts", [])
+    if impact:
+        lines.append(f"  {sh('Why this matters:')}")
+        lines.append(f"    {y(str(len(impact)))}  {gy('files share identifiers with changed code — risk of indirect breakage')}")
+        for item in impact[:3]:
+            lines.append(f"    {y('↗')} {item.get('file', '')}  ({item.get('shared_concepts', 0)} shared identifiers)")
+
+    mirror = data.get("mirror_ratio", None)
+    if mirror is not None:
+        pct = mirror * 100
+        if pct < 30:
+            lines.append(f"    {r('Test mirror weak:')} {gy(f'{pct:.0f}% of new concepts have test coverage')}")
+        elif pct < 70:
+            lines.append(f"    {y('Test mirror partial:')} {gy(f'{pct:.0f}% of new concepts have test coverage')}")
+        else:
+            lines.append(f"    {gr('Test mirror strong:')} {gy(f'{pct:.0f}% coverage')}")
+
+    lines.append(h(f"{'━' * 60}"))
+    return "\n".join(lines)
+
+
+def _why_inspect(data: dict) -> str:
+    h = lambda t: _color(t, "header")
+    sh = lambda t: _color(t, "subheader")
+    gr = lambda t: _color(t, "green")
+    r = lambda t: _color(t, "red")
+    y = lambda t: _color(t, "yellow")
+    gy = lambda t: _color(t, "gray")
+
+    lines = []
+    lines.append(h(f"{'━' * 60}"))
+    lines.append(f"  {h('REVIEW — Why this matters')}")
+    lines.append(h(f"{'━' * 60}"))
+    lines.append("")
+
+    explore = data.get("explore", {})
+    files = explore.get("files", [])
+    if files:
+        lines.append(f"  {sh('Read these first:')}  {gy('— each is distinctive in its identifiers')}")
+        for f in files[:3]:
+            tag = f" (unique: {f.get('unique_score', 0)} distinctive identifiers)" if f.get('unique_score', 0) > 0 else ""
+            lines.append(f"    {gr('→')} {f['file']}{tag}")
+
+    binding = data.get("binding_concepts", [])
+    if binding:
+        lines.append(f"  {sh('Why these concepts:')}  {gy('— identifiers that bind many source files')}")
+        for bc in binding[:3]:
+            langs = ",".join(bc.get("languages", [])[:2])
+            lines.append(f"    {bc['concept']}  {gy(str(bc['file_count']) + ' files (' + langs + ')')}")
+
+    debt = data.get("debt_candidates", [])
+    if debt:
+        lines.append(f"  {y('Debt candidates:')}  {gy('— files with low structural uniqueness')}")
+        for d in debt[:3]:
+            lines.append(f"    {y(str(d['debt']))}  {d['file']}")
+
+    health = data.get("health_score")
+    if health is not None:
+        val = "Well-structured" if health >= 0.7 else ("Moderate health" if health >= 0.4 else "Weak health")
+        col = "green" if health >= 0.7 else ("yellow" if health >= 0.4 else "red")
+        lines.append(f"  {gr('Health:')} {h(col)}{health:.2f} — {val}")
+
+    lines.append(h(f"{'━' * 60}"))
+    return "\n".join(lines)
+
+
+def _why_ci_report(data: dict, ref_a: str, ref_b: str) -> str:
+    h = lambda t: _color(t, "header")
+    sh = lambda t: _color(t, "subheader")
+    gr = lambda t: _color(t, "green")
+    r = lambda t: _color(t, "red")
+    y = lambda t: _color(t, "yellow")
+    gy = lambda t: _color(t, "gray")
+
+    lines = []
+    lines.append(h(f"{'━' * 60}"))
+    lines.append(f"  {h('CI REPORT — Why this result')}")
+    lines.append(h(f"{'━' * 60}"))
+    lines.append("")
+
+    mirror = data.get("mirror_ratio", None)
+    stable = data.get("stable_touched_count", 0)
+    blast = data.get("blast_tier", "none")
+
+    if mirror is not None:
+        pct = mirror * 100
+        if pct < 30:
+            lines.append(f"  {r('✗ Mirror gap:')} {pct:.0f}%  {gy('— most new concepts lack test coverage')}")
+        elif pct < 70:
+            lines.append(f"  {y('Mirror gap:')} {pct:.0f}%  {gy('— some new concepts lack test coverage')}")
+        else:
+            lines.append(f"  {gr('✓ Mirror:')} {pct:.0f}%  {gy('— adequate test coverage of new concepts')}")
+
+    if stable > 0:
+        lines.append(f"  {r('! Stable anchors:')} {stable}  {gy('— files with high persistence were touched')}")
+    else:
+        lines.append(f"  {gr('✓ Stable anchors:')} none touched")
+
+    blast_label = {"local": gy("local (no risk)"), "moderate": y("moderate"), "high": r("high"), "critical": r("critical")}.get(blast, gy(str(blast)))
+    co = data.get("co_change", {}).get("count", None)
+    if blast == "local" or blast == "none":
+        lines.append(f"  {gr('✓ Blast:')} local  {gy('— no risk of indirect breakage')}")
+    else:
+        lines.append(f"  {r('Blast:')} {blast_label}  {gy('— change affects files sharing identifiers')}")
+        if co:
+            lines.append(f"    {co}  {gy('files have co-change history with this change')}")
+
+    total_defects = sum(1 for v in data.values() if isinstance(v, dict) and v.get("severity") in ("low", "moderate", "high"))
+    if total_defects:
+        lines.append(f"  {y('Defects:')} {total_defects}  {gy('— see details above for severity and type')}")
+
+    changed = data.get("changed_files", [])
+    if changed:
+        total = len(changed)
+        lines.append(f"  {gy(f'{total} files changed — ')}")
+        if total <= 5:
+            lines.append(gy('small change set, low structural risk'))
+        elif total <= 20:
+            lines.append(gy('moderate change set, review blast radius'))
+        else:
+            lines.append(gy('large change set, high structural risk'))
+
+    lines.append(h(f"{'━' * 60}"))
+    return "\n".join(lines)
+
+
 def format_pr_report_markdown(pr_files: list[str], blast_results: dict | None,
                                orphan_results: list[dict] | None,
                                ref_a: str, ref_b: str,
