@@ -1507,6 +1507,47 @@ def splice_exons_cmd(path=".", file="", format="compact"):
         typer.echo(f'  L{e["line"]}: {e["text"]} [{e["type"]}]')
 
 
+@cli.command(name="project-hologram", rich_help_panel="Inspection")
+def hologram_cmd(path=".", dir="", format="compact"):
+    from vocab.reports import hologram_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not dir:
+        typer.echo("provide --dir", err=True); raise typer.Exit(1)
+    data = hologram_report(path=p, directory=dir)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(data.get("hologram", ""))
+    typer.echo(f'  Imports: {", ".join(data.get("imports",[])[:5])}')
+    typer.echo(f'  Exports: {", ".join(data.get("exports",[])[:5])}')
+    typer.echo(f'  Hidden: {data.get("hidden_summary","")}')
+
+
+@cli.command(name="shard-context", rich_help_panel="Inspection")
+def shard_context_cmd(path=".", files="", task="", shards: int = 3, format="compact"):
+    from vocab.reports import shard_context_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not files or not task:
+        typer.echo("provide --files and --task", err=True); raise typer.Exit(1)
+    file_list = [f.strip() for f in files.split(",") if f.strip()]
+    data = shard_context_report(path=p, files=file_list, task=task, shard_count=shards)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'{len(file_list)} files -> {data.get("shard_count",0)} shards')
+    for s in data.get("shards", []):
+        typer.echo(f'  Shard {s["shard_index"]}: {", ".join(s["files"])}')
+        for b in s.get("boundary_hologram", [])[:2]:
+            typer.echo(f'    hologram: {b}')
+    typer.echo(f'  Workflow: {data.get("shard_workflow","")}')
+
+
 @cli.command(name="catalytic-crack", rich_help_panel="Utilities")
 def catalytic_crack_cmd(path=".", file="", format="compact"):
     from vocab.reports import catalytic_crack_report

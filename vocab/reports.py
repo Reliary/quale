@@ -2736,8 +2736,151 @@ def catalytic_crack_report(path: str = ".", file_path: str = "") -> dict:
     return {"file": file_path, "total_lines": len(lines), "fragments_count": len(fragments),
             "fragments": [{k: v for k, v in f.items() if k != "content"} for f in fragments],
             "representative_phrases": rep_phrases[:8],
-            "llm_naming_task": f"Name these {len(fragments)} files:",
-            "fragment_vocabularies": [{f"File {f['fragment_index']}": f['cluster_phrases']} for f in fragments]}
+        "llm_naming_task": f"Name these {len(fragments)} files:",
+        "fragment_vocabularies": [{f"File {f['fragment_index']}": f['cluster_phrases']} for f in fragments],
+    }
+
+
+def hologram_report(path: str = ".", directory: str = "") -> dict:
+    """Holographic Boundary Projector — module surface vs volume.
+
+    Isolates boundary phrases (what crosses the directory boundary) from
+    internal volume (phrases contained entirely within the directory).
+    LLM navigates the 100-token surface, not the 8000-line volume.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not directory:
+        return {"error": "provide --dir"}
+    dir_path = os.path.join(path, directory)
+    if not os.path.isdir(dir_path):
+        return {"error": f"directory not found: {directory}"}
+
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    dir_prefix = directory.rstrip("/") + "/"
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+
+    # Collect all phrases inside the directory
+    interior_phrases: set[str] = set()
+    interior_files: list[str] = []
+    interior_file_count = 0
+    for fv in analysis.file_vocabs:
+        if fv.path.startswith(dir_prefix):
+            interior_file_count += 1
+            interior_files.append(fv.path)
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    interior_phrases.add(m.group())
+
+    # Collect phrases from outside that overlap with interior (crossing boundary)
+    exterior_overlap: Counter[str] = Counter()
+    for fv in analysis.file_vocabs:
+        if fv.path.startswith(dir_prefix):
+            continue
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                if m.group() in interior_phrases:
+                    exterior_overlap[m.group()] += 1
+
+    # Imports: boundary phrases where outside files reference interior concepts
+    imports = sorted(exterior_overlap.keys())[:10] if exterior_overlap else []
+    # Exports: interior phrases also used outside
+    exports = sorted(exterior_overlap.keys())[:10] if exterior_overlap else []
+    # Hidden volume: interior phrases NOT visible from outside
+    hidden = interior_phrases - set(exterior_overlap.keys())
+
+    return {
+        "directory": directory,
+        "interior_files": interior_file_count,
+        "interior_phrases": len(interior_phrases),
+        "boundary_phrases": len(exterior_overlap),
+        "hidden_volume_phrases": len(hidden),
+        "imports": imports[:8],
+        "exports": exports[:8],
+        "hidden_summary": f"{len(hidden)} phrases hidden across {interior_file_count} files",
+        "hologram": f"[Imports: {', '.join(imports[:5])}] -> (HIDDEN: {len(hidden)} phrases, {interior_file_count} files) -> [Exports: {', '.join(exports[:5])}]",
+        "interior_files": interior_files[:5],
+    }
+
+
+def shard_context_report(path: str = ".", files: list[str] | None = None,
+                          task: str = "", shard_count: int = 3) -> dict:
+    """Amnesic Context Sharding — parallel micro-agents solving shards.
+
+    Splits N files into shards. Each shard agent sees its files plus
+    the holographic boundary of adjacent shards. check-plan reconciles.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not files or not task:
+        return {"error": "provide --files and --task"}
+    files = list(dict.fromkeys(files))
+    if len(files) < 2:
+        return {"error": "need at least 2 files to shard"}
+
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    # Build per-file hologram for boundary projection
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+    file_phrases: dict[str, set[str]] = {}
+    for fv in analysis.file_vocabs:
+        if fv.path in files:
+            phrases: set[str] = set()
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    phrases.add(m.group())
+            file_phrases[fv.path] = phrases
+
+    # Split files into shards (round-robin for best coverage)
+    shards: list[list[str]] = [[] for _ in range(shard_count)]
+    for i, f in enumerate(files):
+        shards[i % shard_count].append(f)
+
+    shard_outputs: list[dict] = []
+    for idx, shard_files in enumerate(shards):
+        if not shard_files:
+            continue
+        # This shard's own vocabulary
+        own_phrases: set[str] = set()
+        for sf in shard_files:
+            own_phrases |= file_phrases.get(sf, set())
+
+        # Holographic projection: vocabulary from OTHER shards' files that overlaps
+        other_boundary: list[str] = []
+        for other_idx, other_files in enumerate(shards):
+            if other_idx == idx:
+                continue
+            for of in other_files:
+                op = file_phrases.get(of, set())
+                overlap = own_phrases & op
+                if overlap:
+                    other_boundary.append(f"{of} (shared: {', '.join(sorted(overlap)[:3])})")
+
+        shard_outputs.append({
+            "shard_index": idx,
+            "files": shard_files,
+            "boundary_hologram": other_boundary[:5],
+            "boundary_phrases_count": len(other_boundary),
+        })
+
+    return {
+        "task": task,
+        "total_files": len(files),
+        "shard_count": len([s for s in shards if s]),
+        "shards": shard_outputs,
+        "shard_workflow": f"Launch {len([s for s in shards if s])} parallel agents. Reconcile via check-plan.",
+    }
 
 
 def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
