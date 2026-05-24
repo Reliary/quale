@@ -1130,6 +1130,52 @@ def mycorrhiza_cmd(
             typer.echo(f"    -> {dep['file']}  [{_color(conf, clr)}] shared: {', '.join(dep['shared_rare_terms'][:3])}")
 
 
+@cli.command(name="forecast", rich_help_panel="CI")
+def forecast_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s) to forecast risk for")] = [],
+    commits: Annotated[int, typer.Option("--commits", help="Git history lookback")] = 500,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Doppler Defect Radar — forecast regression risk from structural shifts.
+
+    Scans git history for bugfix commits. For each file changed,
+    emits historically bug-prone neighbors with regression probability.
+    Zero token cost. All computation from git history.
+
+    Example:
+      vocab forecast --files src/billing.ts
+    """
+    from vocab.reports import forecast_report
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not files:
+        typer.echo("provide --files", err=True)
+        raise typer.Exit(1)
+    data = forecast_report(path=path_abs, files=list(files), lookback_commits=commits)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    for res in data.get("files", []):
+        note = res.get("note", "")
+        if note:
+            typer.echo(f"{res['file']}: {note}")
+            continue
+        bc = res.get("bugfix_count", 0)
+        top = res.get("highest_probability", 0)
+        label = _color(f"  regr: {top:.0%}  |  bugfixes: {bc}", "yellow" if top >= 0.3 else "green")
+        typer.echo(f"{res['file']}: {label}")
+        for n in res.get("neighbors", [])[:3]:
+            prob = n.get("probability", 0)
+            clr = "red" if prob >= 0.5 else "yellow"
+            typer.echo(f"    -> {n['file']}  [{_color(f'{prob:.0%}', clr)}] ({n['co_bugfix_count']}×)")
+
+
 @cli.command(name="verify-packet",  rich_help_panel="Agent")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",

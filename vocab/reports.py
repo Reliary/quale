@@ -1171,6 +1171,122 @@ def mycorrhiza_map(path: str = ".", files: list[str] | None = None) -> dict:
     }
 
 
+_BUGFIX_PATTERN = re.compile(r'\b(fix|bug|hotfix|regression|defect|patch|repair)\b', re.IGNORECASE)
+
+
+def forecast_report(path: str = ".", files: list[str] | None = None,
+                     lookback_commits: int = 500) -> dict:
+    """Doppler Defect Radar — forecast regression risk from structural shifts.
+
+    Scans git history for bugfix commits. For each pair of files that
+    co-changed in a bugfix, records the correlation. Given a changed
+    file, emits historically bug-prone neighbors with regression probability.
+
+    Zero token cost. All computation from git history.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not files:
+        return {"error": "no files provided"}
+
+    log = vgit.ref_log(path, count=lookback_commits * 2)
+    if not log:
+        return {"error": "insufficient git history", "files": []}
+
+    # Phase 1: Scan for bugfix commits and build co-change correlation
+    pair_counts: dict[tuple[str, str], int] = {}
+    file_bugfix_count: dict[str, int] = {}
+    total_bugfix = 0
+
+    for ref in log:
+        sha = ref.sha
+        try:
+            msg = _git_log_message(path, sha)
+        except Exception:
+            continue
+        if not msg or not _BUGFIX_PATTERN.search(msg):
+            continue
+
+        try:
+            diffs = vgit.diff_refs(path, f"{sha}^", sha)
+        except Exception:
+            continue
+
+        if len(diffs) < 2 or len(diffs) > 50:
+            continue  # skip trivial or merge commits
+
+        total_bugfix += 1
+        for f in diffs:
+            file_bugfix_count[f] = file_bugfix_count.get(f, 0) + 1
+
+        for i in range(len(diffs)):
+            for j in range(i + 1, len(diffs)):
+                a, b = (diffs[i], diffs[j]) if diffs[i] < diffs[j] else (diffs[j], diffs[i])
+                pair_counts[(a, b)] = pair_counts.get((a, b), 0) + 1
+
+    if total_bugfix < 3:
+        return {
+            "error": f"only {total_bugfix} bugfix commits found (need at least 3)",
+            "files": [],
+        }
+
+    # Phase 2: For each input file, find correlated bugfix neighbors
+    results: list[dict] = []
+    for target in files:
+        target_fixes = file_bugfix_count.get(target, 0)
+        if target_fixes < 2:
+            results.append({"file": target, "bugfix_count": target_fixes, "neighbors": [],
+                            "note": "insufficient bugfix history for this file"})
+            continue
+
+        neighbors: list[dict] = []
+        for (a, b), count in pair_counts.items():
+            neighbor = None
+            if a == target:
+                neighbor = b
+            elif b == target:
+                neighbor = a
+            if neighbor is None:
+                continue
+
+            prob = round(count / target_fixes, 2)
+            if prob >= 0.1:  # at least 10% correlation
+                neighbors.append({
+                    "file": neighbor,
+                    "co_bugfix_count": count,
+                    "probability": prob,
+                })
+
+        neighbors.sort(key=lambda x: -x["probability"])
+        results.append({
+            "file": target,
+            "bugfix_count": target_fixes,
+            "total_bugfix_commits": total_bugfix,
+            "neighbors": neighbors[:10],
+            "highest_probability": neighbors[0]["probability"] if neighbors else 0,
+        })
+
+    return {
+        "schema_version": 1,
+        "files": results,
+        "total_files": len(results),
+    }
+
+
+def _git_log_message(path: str, sha: str) -> str:
+    """Get commit message for a given sha."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "log", "--format=%s%n%b", "-1", sha],
+            capture_output=True, cwd=path, timeout=10,
+        )
+        return out.stdout.decode("utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+
+
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
     """Seed the adaptive router's fragment matrix using git history.
 
