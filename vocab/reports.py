@@ -960,6 +960,23 @@ def isolate_modules(path: str = ".", task: str = "") -> dict:
         })
 
     scored.sort(key=lambda x: (-x["match_score"], -x["size"]))
+
+    # Entanglement injection: if all modules have zero overlap,
+    # inject historically co-changed rare terms from git history
+    all_zero = all(m["match_score"] == 0 for m in scored[:3])
+    injection: list[str] = []
+    if all_zero and len(mod_list) >= 2:
+        try:
+            ents = entanglement_matrix(path, lookback_commits=50).get("pairs", [])
+            rare: Counter[str] = Counter()
+            for pair in ents[:30]:
+                rare[pair["file_a"].split("/")[-1].split(".")[0]] += pair["co_change_count"]
+                rare[pair["file_b"].split("/")[-1].split(".")[0]] += pair["co_change_count"]
+            for term, _ in rare.most_common(3):
+                injection.append(term)
+        except Exception:
+            pass
+
     return {
         "schema_version": 1,
         "task": task,
@@ -967,6 +984,8 @@ def isolate_modules(path: str = ".", task: str = "") -> dict:
         "modules": scored[:5],
         "total_files": sum(m["size"] for m in scored[:5]),
         "total_modules_scored": len(mod_list),
+        "flat_wave": all_zero,
+        "entanglement_injection": injection if injection else None,
     }
 
 
@@ -1025,6 +1044,131 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
         results.append({"file": f, "velocity": velocity, "anchors_preserved": anchor_survival,
                         "anomalies": anomalies, "stable": len(anomalies) == 0})
     return {"schema_version": 1, "files": results, "total_files": len(results)}
+
+
+_IMPORT_PATTERN = re.compile(
+    r'(import\s|require\(|from\s|include\s|using\s|#include|load\s|@import|use\s|extern\s(crate\s)?mod)',
+    re.IGNORECASE
+)
+
+
+def _has_direct_import(file_path: str, target_path: str) -> bool:
+    """Check if file_path has a direct import/require/include of target_path."""
+    try:
+        with open(file_path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except Exception:
+        return False
+    # Get the stem of target path for matching
+    target_stem = os.path.splitext(os.path.basename(target_path))[0].lower()
+    target_lines = target_path.replace("\\", "/").lower().split("/")
+    lines = text.split("\n")
+    for line in lines:
+        lower = line.lower()
+        if not _IMPORT_PATTERN.search(lower):
+            continue
+        if target_stem in lower:
+            return True
+        # Check path segments
+        if any(seg in lower for seg in target_lines if len(seg) > 3):
+            return True
+    return False
+
+
+def mycorrhiza_map(path: str = ".", files: list[str] | None = None) -> dict:
+    """Detect hidden structural dependencies between files.
+
+    Identifies files that share rare vocabulary AND co-change in git
+    history despite having zero direct import/require/include relationships.
+    """
+    from vocab.scanner import scan_codebase
+
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not files:
+        return {"error": "no files provided"}
+
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    # Build file→identifiers and track language
+    file_to_ids: dict[str, set[str]] = {}
+    for fv in analysis.file_vocabs:
+        file_to_ids[fv.path] = set(fv.vocabulary.keys())
+
+    matrix = entanglement_matrix(path, lookback_commits=100)
+    co_change_pairs: dict[str, set[str]] = {}
+    for pair in matrix.get("pairs", []):
+        a, b = pair["file_a"], pair["file_b"]
+        co_change_pairs.setdefault(a, set()).add(b)
+        co_change_pairs.setdefault(b, set()).add(a)
+
+    # Rare threshold: identifiers in < 5% of files
+    total_files = len(file_to_ids)
+    rare_threshold = max(3, total_files // 20)
+
+    id_df: Counter[str] = Counter()
+    for ids in file_to_ids.values():
+        id_df.update(ids)
+    rare_ids = {idf for idf, cnt in id_df.items() if cnt <= rare_threshold}
+
+    results: list[dict] = []
+    seen_pairs: set[tuple[str, str]] = set()
+
+    for target in files:
+        target_ids = file_to_ids.get(target, set())
+        target_rare = target_ids & rare_ids
+        if not target_rare:
+            results.append({
+                "file": target,
+                "hidden_dependencies": [],
+                "note": "no rare identifiers to match",
+            })
+            continue
+
+        hidden: list[dict] = []
+        for other_path, other_ids in file_to_ids.items():
+            if other_path == target:
+                continue
+
+            # Check for rare vocabulary overlap
+            shared_rare = target_rare & (other_ids & rare_ids)
+            if len(shared_rare) < 2:
+                continue
+
+            # Check for direct import
+            full_target = os.path.join(path, target) if not os.path.isabs(target) else target
+            full_other = os.path.join(path, other_path) if not os.path.isabs(other_path) else other_path
+            has_direct = _has_direct_import(full_other, target) or _has_direct_import(full_target, other_path)
+            if has_direct:
+                continue
+
+            # Check co-change evidence
+            co_changed = other_path in co_change_pairs.get(target, set())
+
+            hidden.append({
+                "file": other_path,
+                "shared_rare_terms": sorted(shared_rare)[:5],
+                "co_change": co_changed,
+                "confidence": "high" if (co_changed and len(shared_rare) >= 3) else "moderate",
+            })
+
+        hidden.sort(key=lambda x: -len(x["shared_rare_terms"]))
+        results.append({
+            "file": target,
+            "hidden_dependencies": hidden[:10],
+            "count": len(hidden),
+        })
+
+    return {
+        "schema_version": 1,
+        "files": results,
+        "total_files": len(results),
+        "any_hidden": any(r["count"] > 0 for r in results),
+    }
 
 
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:

@@ -996,6 +996,8 @@ def isolate_cmd(
             "total_modules": len(mods),
             "task": task,
             "task_keywords": data.get("task_keywords", []),
+            "flat_wave": data.get("flat_wave"),
+            "entanglement_injection": data.get("entanglement_injection"),
             "token_cost": "~100",
             "llm_prompt": prompt,
             "module_scores": [{ "score": m["match_score"], "size": m["size"], "overlap": m["overlap_count"] } for m in mods],
@@ -1090,6 +1092,42 @@ def drift_check_cmd(
             typer.echo(f"  IMU: {a}")
     else:
         typer.echo(f"Drift stable. Velocity: {vel:.3f}")
+
+
+@cli.command(name="mycorrhiza", rich_help_panel="Inspection")
+def mycorrhiza_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str], typer.Option("--files", help="File(s) to map hidden deps for")] = [],
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
+    """Detect hidden structural dependencies (no direct imports).
+
+    Files that share rare vocabulary AND co-change in git history
+    despite having zero import/require/include relationships.
+    """
+    from vocab.reports import mycorrhiza_map
+    path_abs = os.path.abspath(path)
+    if not vgit.is_repo(path_abs):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not files:
+        typer.echo("provide --files", err=True)
+        raise typer.Exit(1)
+    data = mycorrhiza_map(path=path_abs, files=list(files))
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    for f in data.get("files", []):
+        count = f.get("count", 0)
+        label = _color(f"  {count} hidden deps", "yellow") if count > 0 else _color("  no hidden deps", "green")
+        typer.echo(f"{f['file']}: {label}")
+        for dep in f.get("hidden_dependencies", [])[:3]:
+            conf = dep.get("confidence", "moderate")
+            clr = "yellow" if conf == "moderate" else "red"
+            typer.echo(f"    -> {dep['file']}  [{_color(conf, clr)}] shared: {', '.join(dep['shared_rare_terms'][:3])}")
 
 
 @cli.command(name="verify-packet",  rich_help_panel="Agent")
