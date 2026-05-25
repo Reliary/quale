@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import re
@@ -106,8 +107,8 @@ _SCAN_CACHE: dict[tuple[str, str | None], CodebaseAnalysis] = {}
 _SCAN_CACHE_MAX = 50
 
 
-def _scan_cache_key(path: str, git_ref: str | None) -> tuple[str, str | None]:
-    return (os.path.abspath(path), git_ref)
+def _scan_cache_key(path: str, git_ref: str | None, deep: bool = False) -> tuple:
+    return (os.path.abspath(path), git_ref, deep)
 
 
 def _scan_cache_clear() -> None:
@@ -119,7 +120,7 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
                   max_files: int | None = None,
                   max_seconds: float | None = None) -> CodebaseAnalysis:
     path = os.path.abspath(path)
-    key = _scan_cache_key(path, git_ref)
+    key = _scan_cache_key(path, git_ref, deep=deep)
     if key in _SCAN_CACHE:
         return _SCAN_CACHE[key]
 
@@ -213,8 +214,6 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
             total_phrases=len(phrases),
         )
         all_file_vocabs.append(file_vocab)
-        if co_matrix is not None:
-            co_matrix.add_file(set(phrase_freq.keys()))
         lang_counts[lang] += 1
         lang_phrases[lang] += len(phrases)
 
@@ -241,6 +240,7 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
     if co_matrix is not None:
         if not quiet:
             print(f"  Co-occurrence matrix ({min(len(all_file_vocabs), 500)} files)...", file=sys.stderr)
+        source_fvs = all_file_vocabs
         if len(all_file_vocabs) > 500:
             lang_groups: dict[str, list[FileVocab]] = defaultdict(list)
             for fv in all_file_vocabs:
@@ -248,8 +248,9 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
             subset = []
             for fvs in lang_groups.values():
                 subset.extend(fvs[:max(1, 500 // len(lang_groups))])
-            for fv in subset[:500]:
-                co_matrix.add_file(set(fv.vocabulary.keys()))
+            source_fvs = subset[:500]
+        for fv in source_fvs:
+            co_matrix.add_file(_extract_identifiers(fv))
         clusters = co_matrix.cluster(min_cooccurrence=max(1, len(all_file_vocabs) // 50))
         cluster_labels_list = [cluster_labels(c) for c in clusters]
         structure_clusters_list = find_structure_clusters(all_file_vocabs, clusters, quiet=quiet)
@@ -362,7 +363,7 @@ def _structural_information_score(file_count: int, total_files: int, lang_count:
     prevalence = file_count / total_files
     if prevalence > 0.45:
         return 0.0
-    repeat = min(file_count / 8, 1.5)
+    repeat = 2.0 / (1.0 + math.exp(-file_count / 4.0)) - 1.0
     rarity = 1.0 - prevalence
     lang_bonus = 1.0 + min(lang_count - 1, 2) * 0.15
     return round(file_count * rarity * repeat * lang_bonus, 3)

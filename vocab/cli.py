@@ -362,6 +362,7 @@ def preflight(
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), verify, json, checklist, compact, llm, full")] = "tool",
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Show math-heavy signals (SNR, expansion risk details)")] = False,
     why: Annotated[bool, typer.Option("--why", help="Show why each recommendation exists")] = False,
+    enrich: Annotated[bool, typer.Option("--enrich", help="Compute spectrum/deficit/cascade transforms (deep scan — ~14s cold, cached after)")] = False,
 ):
     """File-scoped edit context and risk card.
 
@@ -381,7 +382,7 @@ def preflight(
         typer.echo(f"Unknown git ref: {diff}", err=True)
         raise typer.Exit(1)
 
-    data = preflight_report(path=path, files=files, diff_ref=diff, task=task)
+    data = preflight_report(path=path, files=files, diff_ref=diff, task=task, enrich=enrich)
     if "error" in data:
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
@@ -443,6 +444,9 @@ def preflight(
             "edit_sprawl_guard": {**sprawl, "instruction": sprawl_instruction},
             "desert_warning": _desert_text(ver_confidence, data.get("changed_files", [])),
             "guardrails": data.get("guardrails", {}),
+            "spectrum": data.get("spectrum"),
+            "deficit": data.get("deficit"),
+            "cascade": data.get("cascade"),
         }
         typer.echo(json.dumps(tool_data, separators=(",", ":")))
         return
@@ -484,6 +488,9 @@ def preflight(
             "snr_annotations": snr,
             "capability_boundary": capability,
             "guardrails": data.get("guardrails", {}),
+            "spectrum": data.get("spectrum"),
+            "deficit": data.get("deficit"),
+            "cascade": data.get("cascade"),
         }
         typer.echo(json.dumps(tool_data, indent=2))
         return

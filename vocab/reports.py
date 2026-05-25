@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from collections import defaultdict, Counter
 from typing import TYPE_CHECKING, Any
@@ -141,6 +142,188 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
     }
 
 
+def _spectrum_analysis(file: str, analysis) -> dict:
+    """Classify identifiers into DC (codebase-wide), LF (module), HF (file-specific) bands.
+    Uses the same identifier extraction as scanner.py for consistency.
+    """
+    from vocab.scanner import _extract_identifiers
+    co = analysis.co_occurrence
+    if not co:
+        return {"band": "unknown", "hf_ids": [], "lf_ids": [], "pct_hf": 0}
+
+    fv = None
+    for v in analysis.file_vocabs:
+        if v.path == file:
+            fv = v
+            break
+    if not fv:
+        return {"band": "unknown", "hf_ids": [], "lf_ids": [], "pct_hf": 0}
+
+    total = max(co.total_docs, 1)
+    dc_threshold = max(int(total ** 0.5), 3)
+
+    # Module membership for LF band
+    module_files: set[str] = set()
+    for sc in (analysis.structure_clusters or []):
+        if file in sc.get("top_files", []):
+            module_files.update(sc.get("top_files", []))
+            break
+
+    file_identifiers = _extract_identifiers(fv, min_len=4)
+
+    # Fallback to phrase-level when identifiers are sparse (small files)
+    if len(file_identifiers) < 3:
+        for phrase in fv.vocabulary:
+            if any(c.isupper() for c in phrase) and len(phrase) >= 4:
+                file_identifiers.add(phrase)
+        if len(file_identifiers) < 3:
+            # Too small to analyze spectrally
+            return {
+                "hf_ids": [],
+                "lf_ids": [],
+                "pct_hf": 0,
+                "pct_lf": 0,
+                "pct_dc": 0,
+                "note": "file too small for spectral analysis",
+            }
+
+    hf_ids: list[str] = []
+    lf_ids: list[str] = []
+    dc_ids: list[str] = []
+    for ident in file_identifiers:
+        doc_count = co.phrase_count.get(ident, 0)
+        if doc_count >= dc_threshold:
+            dc_ids.append(ident)
+        elif module_files:
+            module_count = sum(1 for v2 in analysis.file_vocabs
+                               if v2.path in module_files and ident in v2.vocabulary
+                               or any(ident in seg for seg in v2.vocabulary))
+            mod_frac = module_count / max(len(module_files), 1)
+            if mod_frac > 0.2:
+                lf_ids.append(ident)
+            else:
+                hf_ids.append(ident)
+        elif doc_count <= 3:
+            hf_ids.append(ident)
+        else:
+            lf_ids.append(ident)
+
+    total_ids = max(len(file_identifiers), 1)
+    return {
+        "hf_ids": hf_ids[:10],
+        "lf_ids": lf_ids[:5],
+        "pct_hf": round(len(hf_ids) / total_ids * 100),
+        "pct_lf": round(len(lf_ids) / total_ids * 100),
+        "pct_dc": round(len(dc_ids) / total_ids * 100),
+        "instruction": "Read HF identifiers first; DC band is codebase-wide boilerplate",
+    }
+
+
+def _deficit_analysis(file: str, analysis) -> dict | None:
+    """Find module-level identifiers missing from a file."""
+    if not analysis.structure_clusters:
+        return None
+    module = None
+    for sc in analysis.structure_clusters:
+        if file in sc.get("top_files", []):
+            module = sc
+            break
+    if not module:
+        return None
+    module_files_list = module.get("top_files", [])
+    if len(module_files_list) < 5:
+        return None
+
+    # Build module-wide identifier frequency (excluding this file)
+    mod_counts: Counter = Counter()
+    for v in analysis.file_vocabs:
+        if v.path in module_files_list and v.path != file:
+            for phrase in v.vocabulary:
+                mod_counts[phrase] += 1
+
+    mod_total = max(len(module_files_list) - 1, 1)
+    file_phrases = set()
+    for v in analysis.file_vocabs:
+        if v.path == file:
+            file_phrases = set(v.vocabulary.keys())
+            break
+
+    missing: list[tuple[str, int]] = []
+    for phrase, count in mod_counts.most_common(20):
+        if phrase not in file_phrases:
+            score = count / mod_total
+            if score >= 0.5:  # present in >50% of module peers
+                missing.append((phrase, count))
+
+    critical = [p for p, c in missing[:3]] if missing else []
+    if not missing:
+        return None
+    return {
+        "missing": len(missing),
+        "missing_ids": [p for p, _ in missing[:5]],
+        "critical": critical,
+        "instruction": "Verify this file belongs in its detected module before editing" if critical else None,
+    }
+
+
+def _cascade_analysis(file: str, analysis, blast: list[dict]) -> dict | None:
+    """Transitive coupling: structural disruption diffusing beyond direct blast radius."""
+    if not blast:
+        return None
+
+    # Build coupling graph from blast + co-occurrence
+    graph: dict[str, set[str]] = {}
+    all_vocabs: dict[str, set[str]] = {}
+    for v in analysis.file_vocabs:
+        all_vocabs[v.path] = set(v.vocabulary.keys())
+
+    visited: set[str] = set()
+    visited_with_depth: dict[str, int] = {}
+    queue: list[tuple[str, int]] = [(file, 0)]
+    transitive_count = 0
+    total_damped = 0.0
+    alpha = 0.5
+
+    while queue:
+        current, depth = queue.pop(0)
+        if current in visited or depth > 5:
+            continue
+        visited.add(current)
+        visited_with_depth[current] = depth
+        if depth > 0:
+            transitive_count += 1
+            total_damped += alpha ** depth
+
+        current_ids = all_vocabs.get(current, set())
+        for item in blast:
+            bfile = item.get("file", "")
+            if bfile in visited:
+                continue
+            bf_ids = all_vocabs.get(bfile, set())
+            if current_ids and bf_ids:
+                jaccard = len(current_ids & bf_ids) / max(len(current_ids | bf_ids), 1)
+                if jaccard > 0.05:
+                    queue.append((bfile, depth + 1))
+
+        if analysis.structure_clusters:
+            for sc in analysis.structure_clusters:
+                if current in sc.get("top_files", []):
+                    for peer in sc.get("top_files", []):
+                        if peer not in visited and peer not in [q[0] for q in queue]:
+                            queue.append((peer, depth + 1))
+
+    if transitive_count == 0:
+        return None
+
+    return {
+        "hops": max(visited_with_depth.values()),
+        "transitive_files": transitive_count,
+        "damped_score": round(total_damped, 2),
+        "ratio_to_blast": round(total_damped / max(len(blast), 1), 2),
+        "instruction": "Damped score > blast count means transitive risk exceeds direct risk — verify expansion scope",
+    }
+
+
 def _file_temperature(file: str, lifecycle_data: list[dict], stability_data: list[dict], entropy_data: dict | None) -> str:
     """Compute single-word temperature for a file: COLD/WARM/HOT."""
     for item in lifecycle_data:
@@ -186,8 +369,11 @@ def _safety_envelope(changed: list[str], blast: list[dict], stable_touched: list
 
 
 def preflight_report(path: str = ".", files: list[str] | None = None,
-                     diff_ref: str | None = None, task: str | None = None) -> dict:
-    """File-scoped edit/review preflight built from grammar-free signals."""
+                     diff_ref: str | None = None, task: str | None = None,
+                     enrich: bool = False) -> dict:
+    """File-scoped edit/review preflight built from grammar-free signals.
+    When enrich=True, also computes spectrum/deficit/cascade transforms
+    (co-occurrence matrix built automatically in single scan)."""
     from vocab.scanner import scan_codebase, _mirror_signals
     from vocab.compare import pr_blast_radius
 
@@ -210,7 +396,7 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         return {"error": "no changed files found for preflight"}
 
     try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30, deep=True)
     except Exception as e:
         return {"error": f"scan failed: {e}"}
 
@@ -308,6 +494,19 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     # P2: Self/Non-Self + Keystone classification per changed file
     file_classifications = _classify_files(changed, stable_by_file, blast, co_change, analysis)
 
+    # ── Optional: Spectrum, deficit, cascade transforms ──
+    spectrum_map: dict[str, dict] = {}
+    deficit_map: dict[str, dict | None] = {}
+    cascade_map: dict[str, dict | None] = {}
+    primary = changed[0] if changed else ""
+    if enrich and primary and analysis.co_occurrence:
+        try:
+            spectrum_map[primary] = _spectrum_analysis(primary, analysis)
+            deficit_map[primary] = _deficit_analysis(primary, analysis)
+            cascade_map[primary] = _cascade_analysis(primary, analysis, blast)
+        except Exception:
+            pass
+
     # Tier 1 capability boundary
     capability = (
         "Vocab sees structure, not semantics. It cannot verify correctness, detect logic errors, "
@@ -344,6 +543,9 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         "keystone_files": [f["file"] for f in file_classifications if f.get("class") == "SELF_KEYSTONE" or f.get("class") == "FRONTIER"],
         "verify_classifications": verify_classifications,
         "vaccination_notes": vaccination,
+        "spectrum": spectrum_map.get(primary),
+        "deficit": deficit_map.get(primary),
+        "cascade": cascade_map.get(primary),
         "capability_boundary": capability,
         "guardrails": {
             "mode": "report_only",
