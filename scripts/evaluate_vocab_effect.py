@@ -171,6 +171,11 @@ PREFLIGHT_CONDITIONS = (
     "veto_verify", "progressive_verify", "veto_cascade",
     "multi_turn_progressive",
     "hybrid_progressive",
+    "exon_preflight",
+    "crack_naming",
+    "noise_cancel",
+    "microdot_constraint",
+    "fractal_nav",
 )
 
 
@@ -529,6 +534,55 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             }, indent=2)
         except (json.JSONDecodeError, KeyError):
             guidance = raw
+    elif condition == "exon_preflight":
+        raw = run_vocab(case.path, ["splice-exons", "--path", case.path, "--file", case.edit_file, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            exons = p.get("exons", [])
+            if exons:
+                exon_text = "\n".join(f"L{e['line']}: {e['text']}" for e in exons[:15])
+                guidance = f"SPLICED EXONS ({p.get('compression_pct',0)}% reduction):\n{exon_text}"
+            else:
+                guidance = "No exons found — file may be all boilerplate."
+        except (json.JSONDecodeError, TypeError):
+            guidance = ""
+    elif condition == "crack_naming":
+        raw = run_vocab(case.path, ["catalytic-crack", "--path", case.path, "--file", case.edit_file, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            frags = p.get("fragment_vocabularies", [])
+            if frags:
+                guidance = json.dumps({"task": f"Name {len(frags)} code fragments", "fragments": frags}, separators=(",",":"))
+            else:
+                guidance = "No fragments detected."
+        except (json.JSONDecodeError, TypeError):
+            guidance = ""
+    elif condition == "noise_cancel":
+        raw = run_vocab(case.path, ["noise-cancel", "--path", case.path, "--file", case.edit_file, "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            ct = p.get("cancelled_text", "")
+            guidance = ct[:800] if ct else ""
+        except (json.JSONDecodeError, TypeError):
+            guidance = ""
+    elif condition == "microdot_constraint":
+        # Find main class name from edit_file
+        raw = run_vocab(case.path, ["microdot", "--path", case.path, "--class", case.edit_file.split("/")[-1].replace(".ts","").replace(".py","").replace(".go",""), "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            md = p.get("microdot", "No microdot generated")
+            guidance = json.dumps({"microdot": md, "task": f"Implement {case.edit_file.split('/')[-1]}", "file": case.edit_file}, separators=(",",":"))
+        except (json.JSONDecodeError, TypeError):
+            guidance = ""
+    elif condition == "fractal_nav":
+        raw = run_vocab(case.path, ["fractal-zoom", "--path", case.path, "--focus", case.task, "--resolution", "1", "--format", "json"])
+        try:
+            p = json.loads(raw) if raw.strip() else {}
+            zoom = p.get("zoom", "")
+            hint = p.get("navigation_hint", "")
+            guidance = json.dumps({"zoom_resolution_1": zoom[:300], "navigation": hint}, separators=(",",":"))
+        except (json.JSONDecodeError, TypeError):
+            guidance = ""
     elif condition in {"contract_oneline", "contract_prompt", "contract_checkplan"}:
         fmt = "prompt" if condition in {"contract_prompt", "contract_checkplan"} else "tool"
         guidance = run_vocab(case.path, ["contract", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", fmt])
@@ -967,6 +1021,46 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         system = "You are verifying a candidate edit. A single test candidate is provided. Answer YES if it verifies the change, NO if not. Return JSON: {'verify': '<path>'|'', 'accept': true|false}"
     if condition == "hybrid_progressive":
         system = "You are verifying a candidate edit. Return exactly one compact JSON object. Use keys: verify (array), should_edit_candidate (boolean)."
+    if condition == "exon_preflight":
+        system = (
+            "You are verifying a candidate edit. The file has been spliced to show only exons "
+            "(unique assertions and logic). All test boilerplate has been stripped. "
+            "Return exactly one compact JSON object and no markdown. "
+            "Use keys: verify (array of relative paths), should_edit_candidate (boolean)."
+        )
+    if condition == "crack_naming":
+        system = (
+            "You are naming code fragments based on their vocabulary clusters. "
+            "Each fragment contains related phrases. Choose names that describe the fragment's purpose. "
+            "Return exactly one compact JSON object. "
+            "Use keys: fragment_names (dict mapping 'File X' to a descriptive name string)."
+        )
+    if condition == "noise_cancel":
+        system = (
+            "You are verifying a candidate edit. "
+            "The file has been noise-cancelled: stable code blocks are replaced with "
+            "'[N lines of STABLE NOISE CANCELLED]' annotations. Only mathematically "
+            "unstable edges remain visible. "
+            "Return exactly one compact JSON object. "
+            "Use keys: verify (array of relative paths), should_edit_candidate (boolean)."
+        )
+    if condition == "microdot_constraint":
+        system = (
+            "You are implementing a class based on a Microdot constraint. "
+            "The Microdot shows only public method signatures — all implementation "
+            "detail has been stripped. Implement the class satisfying the Microdot. "
+            "Do not invent methods not in the Microdot. "
+            "Return exactly one compact JSON object. "
+            "Use keys: microdot_verified (boolean), implemented_methods (list of strings)."
+        )
+    if condition == "fractal_nav":
+        system = (
+            "You are navigating a codebase via fractal zoom levels. "
+            "You are structurally forbidden from reading source files. "
+            "Respond with the exact resolution level you need to explore. "
+            "Return exactly one compact JSON object. "
+            "Use keys: next_resolution (int), parent_path (str), task_complete (boolean)."
+        )
     if condition == "null_route":
         system = "You are verifying a candidate edit. Return exactly one compact JSON object. Use keys: verify (array), should_edit_candidate (boolean). Consider route guidance first."
     if condition == "verify_entangle":
