@@ -227,13 +227,13 @@ def diff(
 @cli.command(rich_help_panel="Getting Started")
 def search(
     phrase: Annotated[str, typer.Argument(help="Phrase to search for")],
-    paths: Annotated[list[str], typer.Argument(help="Repo paths to search")] = ["."],
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     related: Annotated[bool, typer.Option("--related", "-r", help="Show co-occurring concepts")] = False,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json, compact")] = "terminal",
 ):
 
     """Find files containing a phrase or concept."""
-    results = search_cross_repo_ranked(phrase, paths)
+    results = search_cross_repo_ranked(phrase, [path])
     if not results:
         if format == "json":
             typer.echo(json.dumps({"phrase": phrase, "results": []}))

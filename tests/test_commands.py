@@ -68,13 +68,13 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_search_finds_phrase(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("search", "CoreHandler", str(repo), "--format", "json")
+        result = self.run_vocab("search", "CoreHandler", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertTrue(len(data) >= 1)
 
     def test_search_missing_phrase(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("search", "v0.0.0-non-existent", str(repo), "--format", "json")
+        result = self.run_vocab("search", "v0.0.0-non-existent", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data.get("results", []), [])
 
