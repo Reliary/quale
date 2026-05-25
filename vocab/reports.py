@@ -7484,7 +7484,7 @@ def implicature_report(path: str = ".", file_path: str = "") -> dict:
 
 def criticality_report(path: str = ".", file_path: str = "") -> dict:
     from vocab.scanner import scan_codebase
-    import re
+    import re, os
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -7493,8 +7493,12 @@ def criticality_report(path: str = ".", file_path: str = "") -> dict:
     except Exception as e:
         return {"error": f"scan failed: {e}"}
     token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    code_exts = frozenset({".go", ".ts", ".js", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".scala"})
     ft = {}
     for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in code_exts:
+            continue
         s = set()
         for phrase in fv.vocabulary:
             for m in token_re.finditer(phrase):
@@ -7514,75 +7518,4 @@ def criticality_report(path: str = ".", file_path: str = "") -> dict:
         oc = len(one) or 1
         k = round(len(two) / oc, 2)
         scores.append({"file": t, "k": k, "one_hop": len(one), "two_hop": len(two), "class": "supercritical" if k > 1.5 else ("critical" if k > 0.5 else "subcritical")})
-    return {"scores": scores}
-
-def tensegrity_report(path: str = ".", min_intermediaries: int = 3) -> dict:
-    from vocab.scanner import scan_codebase
-    from vocab.bootstrap import compute_modules
-    import re
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
-    ft = {}
-    for fv in analysis.file_vocabs:
-        s = set()
-        for phrase in fv.vocabulary:
-            for m in token_re.finditer(phrase):
-                s.add(m.group())
-        ft[fv.path] = s
-    mods = compute_modules(path, analysis=analysis)
-    ml = mods.get("modules", []) if isinstance(mods, dict) else []
-    tps = []
-    for m in ml:
-        fs = m["files"]
-        for i, a in enumerate(fs):
-            for j, b in enumerate(fs):
-                if i >= j:
-                    continue
-                if ft.get(a, set()) & ft.get(b, set()):
-                    continue
-                ics = [c for c in fs if c != a and c != b and (ft.get(a, set()) & ft.get(c, set())) and (ft.get(c, set()) & ft.get(b, set()))]
-                if len(ics) >= min_intermediaries:
-                    tps.append({"file_a": a, "file_b": b, "count": len(ics)})
-    tps.sort(key=lambda x: -x["count"])
-    return {"tensegrity_pairs": tps[:5]}
-
-def criticality_report(path: str = ".", file_path: str = "") -> dict:
-    from vocab.scanner import scan_codebase
-    import re
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
-    ft = {}
-    for fv in analysis.file_vocabs:
-        s = set()
-        for phrase in fv.vocabulary:
-            for m in token_re.finditer(phrase):
-                s.add(m.group())
-        ft[fv.path] = s
-    targets = [file_path] if file_path else list(ft.keys())[:10]
-    scores = []
-    for t in targets:
-        if t not in ft:
-            continue
-        one = [p for p, s in ft.items() if p != t and ft[t] & s]
-        two = set()
-        for oh in one:
-            for p, s in ft.items():
-                if p != t and p not in one and ft.get(oh, set()) & s:
-                    two.add(p)
-        oc = len(one) or 1
-        k = round(len(two) / oc, 2)
-        scores.append({"file": t, "k": k, "one_hop": len(one), "two_hop": len(two),
-                       "class": "supercritical" if k > 1.5 else ("critical" if k > 0.5 else "subcritical")})
     return {"scores": scores}
