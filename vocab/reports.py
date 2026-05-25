@@ -3692,6 +3692,106 @@ def thylacine_report(path: str = ".") -> dict:
     return {"thylacines": results[:8]}
 
 
+
+def guard_report(path: str = ".", file_path: str = "", task: str = "") -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    p = os.path.abspath(path)
+    r = {"file": file_path, "task": task}
+    try:
+        gd = guide_report(path=p, file_path=file_path or task)
+        r["guide"] = gd.get("guide", "")
+    except Exception:
+        pass
+    try:
+        tt = thanatosis_report(path=p)
+        for f in tt.get("files", []):
+            if (file_path or "") in f["file"]:
+                r["thanatosis"] = f"risk={f['risk_ratio']}"
+                break
+    except Exception:
+        pass
+    try:
+        tm = trompe_report(path=p, file_path=file_path or task)
+        r["trompe"] = tm.get("label", "")
+    except Exception:
+        pass
+    try:
+        ct = criticality_report(path=p, file_path=file_path or task)
+        for s in ct.get("scores", []):
+            if s["file"] == (file_path or task):
+                r["criticality"] = f'k={s["k"]} ({s["class"]})'
+                break
+    except Exception:
+        pass
+    return r
+
+def check_pr_report(path: str = ".", base_ref: str = "HEAD~1", head_ref: str = "HEAD") -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    p = os.path.abspath(path)
+    r = {"base": base_ref, "head": head_ref}
+    try:
+        pb = parity_bit_report(path=p, ref_a=base_ref, ref_b=head_ref)
+        r["parity"] = {"unchanged": pb.get("mirror_unchanged", False)}
+    except Exception:
+        r["parity"] = {"error": True}
+    try:
+        diffs = vgit.diff_refs(p, base_ref, head_ref)
+        if len(diffs) >= 2:
+            pairs = []
+            for i in range(min(len(diffs), 4)):
+                for j in range(i + 1, min(len(diffs), 4)):
+                    pairs.append(trap_report(path=p, file_a=diffs[i], file_b=diffs[j]))
+            r["trap"] = pairs[:3]
+    except Exception:
+        pass
+    return r
+
+def cleanup_list_report(path: str = ".") -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    p = os.path.abspath(path)
+    try:
+        thy = thylacine_report(path=p)
+        ev = escape_velocity_report(path=p)
+    except Exception as e:
+        return {"error": f"scan: {e}"}
+    evm = {t["phrase"]: t["label"] for t in ev.get("tagged", [])}
+    items = []
+    for t in thy.get("thylacines", []):
+        label = "ESCAPED"
+        for phrase, l in evm.items():
+            if phrase.lower() in t["identifier"].lower():
+                label = l
+                break
+        items.append({"identifier": t["identifier"], "files": t["files"], "effort": label})
+    return {"items": items, "free_to_delete": sum(1 for i in items if i["effort"] == "ESCAPED")}
+
+def vulnerability_report(path: str = ".") -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    p = os.path.abspath(path)
+    try:
+        tt = thanatosis_report(path=p)
+        cp = capillary_report(path=p)
+    except Exception as e:
+        return {"error": f"scan: {e}"}
+    dt = {f["file"] for f in tt.get("files", [])}
+    ch = {c["file"] for c in cp.get("capillaries", [])}
+    return {"don_touch": sorted(dt)[:8], "churn_hubs": sorted(ch)[:8], "critical": sorted(dt & ch)[:5]}
+
+def repo_health(path: str = ".") -> dict:
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    p = os.path.abspath(path)
+    try:
+        pr = porosity_report(path=p)
+        sg = spectral_gap_report(path=p)
+    except Exception as e:
+        return {"error": f"scan: {e}"}
+    return {"excess_porosity": pr.get("excess_porosity", 0), "spectral_gap": sg.get("spectral_gap", 0)}
+
 def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
                        max_results: int = 20) -> dict:
     """Bose-Einstein Condensation — find structurally identical files.

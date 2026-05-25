@@ -4292,64 +4292,80 @@ def criticality_cmd(path=".", file="", format="compact"):
     for s in data.get("scores", [])[:5]:
         typer.echo(f'  {s["file"]}: k={s["k"]} ({s["class"]})')
 
+
+@cli.command(name="guard", rich_help_panel="Agent")
+def guard_cmd(path=".", file="", task="", format="compact"):
+    from vocab.reports import guard_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = guard_report(path=p, file_path=file, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    for k, v in data.items():
+        if k not in ("file", "task") and v:
+            typer.echo(f'  {k}: {v}')
+
+@cli.command(name="check-pr", rich_help_panel="CI")
+def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact"):
+    from vocab.reports import check_pr_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = check_pr_report(path=p, base_ref=base, head_ref=head)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'Parity: {"OK" if data.get("parity",{}).get("unchanged") else "CHANGED"}')
+    for tp in data.get("trap", [])[:2]:
+        typer.echo(f'  {tp.get("file_a","")} <-> {tp.get("file_b","")}: {tp.get("label","")}')
+
+@cli.command(name="cleanup-list", rich_help_panel="Inspection")
+def cleanup_list_cmd(path=".", format="compact"):
+    from vocab.reports import cleanup_list_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = cleanup_list_report(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'{data.get("free_to_delete",0)} free to delete')
+    for i in data.get("items", [])[:5]:
+        typer.echo(f'  {i["identifier"]}: {i["effort"]} ({i["files"]} files)')
+
+@cli.command(name="vulnerability-map", rich_help_panel="Inspection")
+def vulnerability_map_cmd(path=".", format="compact"):
+    from vocab.reports import vulnerability_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = vulnerability_report(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'Don-touch: {len(data.get("don_touch",[]))}  Churn: {len(data.get("churn_hubs",[]))}  Critical: {len(data.get("critical",[]))}')
+
+@cli.command(name="health-score", rich_help_panel="CI")
+def health_score_cmd(path=".", format="compact"):
+    from vocab.reports import repo_health as health_score
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = health_score(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    coupling = "coupled" if data.get("excess_porosity", 0) < 0 else "sparse"
+    mod = "gapped" if data.get("spectral_gap", 0) >= 2 else ("moderate" if data.get("spectral_gap", 0) >= 1 else "flat")
+    typer.echo(f'{coupling} + {mod}')
+
 if __name__ == "__main__":
     main()
 
-
-
-@cli.command(name="negentropy", rich_help_panel="Inspection")
-def negentropy_cmd(path=".", format="compact"):
-    from vocab.reports import negentropy_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = negentropy_report(path=p)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Avg PMI: {data["avg_pmi"]} — top pairs:')
-    for pair in data.get("pairs", [])[:3]:
-        typer.echo(f'  {pair["pair"][0]} <-> {pair["pair"][1]} ({pair["pmi"]})')
-
-@cli.command(name="bathymetry", rich_help_panel="Inspection")
-def bathymetry_cmd(path=".", format="compact"):
-    from vocab.reports import bathymetry_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = bathymetry_report(path=p)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Profile: {data.get("profile_str","")}')
-
-
-@cli.command(name="tensegrity", rich_help_panel="Inspection")
-def tensegrity_cmd(path=".", format="compact"):
-    from vocab.reports import tensegrity_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = tensegrity_report(path=p)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    for tp in data.get("tensegrity_pairs", [])[:3]:
-        typer.echo(f'  {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} im)')
-
-@cli.command(name="criticality", rich_help_panel="Inspection")
-def criticality_cmd(path=".", file="", format="compact"):
-    from vocab.reports import criticality_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = criticality_report(path=p, file_path=file)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    for s in data.get("scores", [])[:5]:
-        typer.echo(f'  {s["file"]}: k={s["k"]} ({s["class"]})')
