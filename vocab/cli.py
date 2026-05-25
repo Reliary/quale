@@ -4325,59 +4325,31 @@ def bathymetry_cmd(path=".", format="compact"):
         typer.echo(json.dumps(data, indent=2)); return
     typer.echo(f'Profile: {data.get("profile_str","")}')
 
-@cli.command(name="porosity", rich_help_panel="CI")
-def porosity_cmd(path=".", format="compact"):
-    from vocab.reports import porosity_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = porosity_report(path=p)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Porosity: {data.get("porosity",0):.6f} — {"more coupled" if data.get("excess_porosity",0) < 0 else "less coupled"} than random')
 
-@cli.command(name="thylacine", rich_help_panel="Inspection")
-def thylacine_cmd(path=".", format="compact"):
-    from vocab.reports import thylacine_report
+@cli.command(name="tensegrity", rich_help_panel="Inspection")
+def tensegrity_cmd(path=".", format="compact"):
+    from vocab.reports import tensegrity_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = thylacine_report(path=p)
+    data = tensegrity_report(path=p)
     if "error" in data:
         typer.echo(data["error"], err=True); raise typer.Exit(1)
     if format == "json":
         typer.echo(json.dumps(data, indent=2)); return
-    thy = data.get("thylacines", [])
-    typer.echo(f'Extinct exports: {len(thy)}')
-    for t in thy[:3]:
-        typer.echo(f'  {t["identifier"]} ({t["files"]} files)')
+    for tp in data.get("tensegrity_pairs", [])[:3]:
+        typer.echo(f'  {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} im)')
 
-@cli.command(name="dendro", rich_help_panel="Inspection")
-def dendro_cmd(path=".", format="compact"):
-    from vocab.reports import dendro_report
+@cli.command(name="criticality", rich_help_panel="Inspection")
+def criticality_cmd(path=".", file="", format="compact"):
+    from vocab.reports import criticality_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = dendro_report(path=p)
+    data = criticality_report(path=p, file_path=file)
     if "error" in data:
         typer.echo(data["error"], err=True); raise typer.Exit(1)
     if format == "json":
         typer.echo(json.dumps(data, indent=2)); return
-    for c in data.get("cohorts", [])[:3]:
-        typer.echo(f'  Cohort {c["bucket"]}: {c["count"]} survivors ({", ".join(c["survivors"][:3])})')
-
-@cli.command(name="vermillon", rich_help_panel="Inspection")
-def vermillon_cmd(path=".", format="compact"):
-    from vocab.reports import vermillon_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = vermillon_report(path=p)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    gaps = data.get("missing_tiers", [])
-    typer.echo(f'Missing tiers: {gaps} — {"healthy" if not gaps else "abstraction gaps"}' if gaps else "All tiers populated — healthy")
+    for s in data.get("scores", [])[:5]:
+        typer.echo(f'  {s["file"]}: k={s["k"]} ({s["class"]})')
