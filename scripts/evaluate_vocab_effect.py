@@ -164,15 +164,11 @@ CASES: tuple[Case, ...] = (
 
 DISCOVERY_CONDITIONS = ("baseline", "bootstrap_summary", "bootstrap_checklist", "repo-map", "route_policy", "module_isolate")
 PREFLIGHT_CONDITIONS = (
-    "candidate_baseline", "diff_preflight", "cartridge", "verify_entangle",
+    "candidate_baseline", "diff_preflight", "verify_packet", "verify_entangle",
     "route_policy", "null_route", "deterministic_only", "fragment_route",
-    "verify_scope", "verify_classify", "negotiate_simple", "ask",
-    "cascade", "forced_choice", "cohesion_skip",
-    "veto_verify", "progressive_verify", "veto_cascade",
-    "multi_turn_progressive",
-    "hybrid_progressive",
-    "exon_preflight",
-    "crack_naming",
+    "verify_scope", "verify_classify", "cohesion_skip",
+    "edit_context_tool", "edit_context_tool_guard", "edit_context_compact",
+    "contract",
 )
 
 
