@@ -3330,33 +3330,6 @@ def metamorphic_mask_report(source_path: str, target_path: str,
     }
 
 
-_NUCLEATION_WORDLIST: set[str] | None = None
-
-
-def nucleation_report(path: str = ".", top_n: int = 10) -> dict:
-    """Nucleation sites — stable, tiling phrases that anchor the codebase."""
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    from vocab.scanner import scan_codebase
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-    from collections import Counter
-    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
-    phrase_files: Counter[str] = Counter()
-    for fv in analysis.file_vocabs:
-        for phrase in fv.vocabulary:
-            for m in token_re.finditer(phrase):
-                phrase_files[m.group()] += 1
-    total = max(len(analysis.file_vocabs), 1)
-    # Stable = appears in >40% of files (tilings)
-    stable = [(p, c) for p, c in phrase_files.most_common(200) if c >= total * 0.4]
-    return {"type": "nucleation", "phrases_tracked": len(phrase_files),
-            "nucleation_sites": [{"phrase": p, "files": c} for p, c in stable[:top_n]]}
-
-
 def capillary_report(path: str = ".", top_n: int = 5) -> dict:
     """Capillary action — high-edge-count files (brittle coupling)."""
     if not vgit.is_repo(path):
@@ -3368,8 +3341,12 @@ def capillary_report(path: str = ".", top_n: int = 5) -> dict:
     except Exception as e:
         return {"error": f"scan failed: {e}"}
     token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    code_exts = frozenset({".go", ".ts", ".js", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h", ".zig", ".ex", ".exs", ".nix", ".jl"})
     file_tokens: dict[str, set[str]] = {}
     for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in code_exts:
+            continue
         tokens: set[str] = set()
         for phrase in fv.vocabulary:
             for m in token_re.finditer(phrase):
@@ -3379,12 +3356,10 @@ def capillary_report(path: str = ".", top_n: int = 5) -> dict:
     scores: list[tuple[str, int, float]] = []
     for path_a, ta in file_tokens.items():
         edges = sum(1 for pb, tb in file_tokens.items() if pb != path_a and ta & tb)
-        ratio = edges / max(total, 1)
-        # Barrel filter: skip re-export files (import/export dominated)
-        scores.append((path_a, edges, ratio))
+        scores.append((path_a, edges, round(edges / max(total, 1), 3)))
     scores.sort(key=lambda x: -x[1])
     return {"type": "capillary", "files_scanned": total,
-            "capillaries": [{"file": p, "edges": e, "ratio": round(r, 3)} for p, e, r in scores[:top_n]]}
+            "capillaries": [{"file": p, "edges": e, "ratio": r} for p, e, r in scores[:top_n]]}
 
 
 def spectral_gap_report(path: str = ".") -> dict:
@@ -3422,6 +3397,8 @@ def phantom_report(path: str = ".") -> dict:
                   "tailwind": 0, "bootstrap": 0, "jquery": 0, "lodash": 0, "redux": 0,
                   "zustand": 0, "sqlalchemy": 0, "gorm": 0, "sqlx": 0}
     for fv in analysis.file_vocabs:
+        if "lock" in fv.path.lower():
+            continue
         ext = fv.path.rsplit(".", 1)[-1].lower() if "." in fv.path else ""
         for phrase in fv.vocabulary:
             pl = phrase.lower().replace('"', "").replace("'", "")
@@ -3430,62 +3407,6 @@ def phantom_report(path: str = ".") -> dict:
                     frameworks[fw] += 1
     detected = {k: v for k, v in frameworks.items() if v >= 2}
     return {"type": "phantom", "frameworks_detected": detected}
-
-
-def lichen_report(path: str = ".", lookback_commits: int = 100) -> dict:
-    """Lichen growth — low-cohesion files at fracture sites."""
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    from vocab.scanner import scan_codebase
-    from collections import Counter
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
-    file_tokens: dict[str, set[str]] = {}
-    for fv in analysis.file_vocabs:
-        tokens: set[str] = set()
-        for phrase in fv.vocabulary:
-            for m in token_re.finditer(phrase):
-                tokens.add(m.group())
-        file_tokens[fv.path] = tokens
-    # Co-change history
-    log = vgit.ref_log(path, count=lookback_commits)
-    co_change_counts: Counter[tuple[str, str]] = Counter()
-    for ref in log:
-        try:
-            diffs = vgit.diff_refs(path, f"{ref.sha}^", ref.sha)
-        except Exception:
-            continue
-        if len(diffs) < 2 or len(diffs) > 20:
-            continue
-        for i in range(len(diffs)):
-            for j in range(i + 1, len(diffs)):
-                a, b = (diffs[i], diffs[j]) if diffs[i] < diffs[j] else (diffs[j], diffs[i])
-                co_change_counts[(a, b)] += 1
-    # Low-cohesion: shared <10% vocabulary AND co-changed <2 times
-    fractures = []
-    for path_a, ta in file_tokens.items():
-        for path_b, tb in file_tokens.items():
-            if path_a >= path_b:
-                continue
-            union = len(ta | tb)
-            if union == 0:
-                continue
-            overlap = len(ta & tb) / union
-            pair = (path_a, path_b) if path_a < path_b else (path_b, path_a)
-            co = co_change_counts.get(pair, 0)
-            if overlap < 0.1 and co < 2:
-                fractures.append({"files": [path_a, path_b], "vocab_overlap": round(overlap, 3),
-                                  "co_changes": co})
-                if len(fractures) >= 5:
-                    break
-        if len(fractures) >= 5:
-            break
-    fractures.sort(key=lambda x: x["vocab_overlap"])
-    return {"type": "lichen", "fractures": fractures[:5]}
 
 
 def parity_bit_report(path: str = ".", ref_a: str = "", ref_b: str = "") -> dict:
