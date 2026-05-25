@@ -1742,23 +1742,6 @@ def guide_cmd(path=".", file="", format="compact"):
     c = data.get("confidence", "")
     typer.echo(f"{g} [{c}]")
 
-@cli.command(name="moire", rich_help_panel="Inspection")
-def moire_cmd(path=".", source_file="", format="compact"):
-    from vocab.reports import moire_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not source_file:
-        typer.echo("provide --source-file", err=True); raise typer.Exit(1)
-    data = moire_report(path=p, source_file=source_file)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(str(data.get("total_mismatches", 0)) + " mismatches")
-    for m in data.get("mismatches", [])[:3]:
-        typer.echo("  " + m["test_file"] + ": missing " + ", ".join(m["missing_concepts"][:3]))
-
 @cli.command(name="mirage", rich_help_panel="Inspection")
 def mirage_cmd(path=".", test_file="", format="compact"):
     from vocab.reports import mirage_report
@@ -1768,50 +1751,6 @@ def mirage_cmd(path=".", test_file="", format="compact"):
     if not test_file:
         typer.echo("provide --test-file", err=True); raise typer.Exit(1)
     data = mirage_report(path=p, test_file=test_file)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(str(data.get("mirage_count", 0)) + " mirages")
-    for o in data.get("overlaps", [])[:3]:
-        tag = " MIRAGE" if o.get("mirage") else ""
-        typer.echo("  " + o["source_file"] + " (" + str(o["overlap_count"]) + " shared)" + tag)
-
-@cli.command(name="chirality", rich_help_panel="Inspection")
-def chirality_cmd(path=".", format="compact"):
-    from vocab.reports import chirality_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = chirality_report(path=p)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    for e in data.get("enantiomers", [])[:3]:
-        typer.echo("  " + e["files"][0] + " <-> " + e["files"][1] + " (" + str(e["overlap"]) + ")")
-
-@cli.command(name="parity-module", rich_help_panel="CI")
-def parity_module_cmd(path=".", module_dir="", ref_a="", ref_b="", format="compact"):
-    from vocab.reports import parity_module_hash
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not module_dir or not ref_a or not ref_b:
-        typer.echo("provide --module-dir, --ref-a, --ref-b", err=True); raise typer.Exit(1)
-    data = parity_module_hash(path=p, module_dir=module_dir, ref_a=ref_a, ref_b=ref_b)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    u = data.get("unchanged", False)
-    typer.echo("Module hash " + ("UNCHANGED" if u else "CHANGED"))
-
-@cli.command(name="catalytic-crack", rich_help_panel="Utilities")
-def catalytic_crack_cmd(path=".", file="", format="compact"):
-    from vocab.reports import catalytic_crack_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
     if not file:
         typer.echo("provide --file", err=True); raise typer.Exit(1)
