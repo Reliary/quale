@@ -1659,6 +1659,38 @@ def metamorphic_cmd(from_repo="", to_repo="", ref="HEAD~1", format="compact"):
         typer.echo(f'  {c["file"]} ({c["coupling_label"]}, {c["impact_count"]} hits)')
     typer.echo(f'  {data.get("migration_order","")}')
 
+@cli.command(name="interferometer", rich_help_panel="Inspection")
+def interferometer_cmd(path=".", target="", aperture: int = 2, format="compact"):
+    from vocab.reports import interferometer_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not target:
+        typer.echo("provide --target", err=True); raise typer.Exit(1)
+    data = interferometer_report(path=p, target=target, aperture=int(aperture))
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'{len(data.get("arrays",[]))} arrays, ~{data.get("estimated_tokens",0)} tok')
+    for a in data.get("arrays", [])[:4]:
+        typer.echo(f'  {a["file"]}:{a["line"]} | {a["context"][:80].strip()}')
+
+@cli.command(name="wave-collapse", rich_help_panel="Inspection")
+def wave_collapse_cmd(path=".", dir="", out="", format="compact"):
+    from vocab.reports import wave_collapse_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not dir:
+        typer.echo("provide --dir", err=True); raise typer.Exit(1)
+    data = wave_collapse_report(path=p, directory=dir, out_file=out)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    for c in data.get("constraints", []):
+        typer.echo(f'  {c}')
 
 @cli.command(name="catalytic-crack", rich_help_panel="Utilities")
 def catalytic_crack_cmd(path=".", file="", format="compact"):
