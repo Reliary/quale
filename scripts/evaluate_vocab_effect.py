@@ -173,8 +173,6 @@ PREFLIGHT_CONDITIONS = (
     "hybrid_progressive",
     "exon_preflight",
     "crack_naming",
-    "interferometer",
-    "wave_collapse",
 )
 
 
@@ -554,28 +552,6 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 guidance = json.dumps({"task": f"Name {len(frags)} code fragments", "fragments": frags}, separators=(",",":"))
             else:
                 guidance = "No fragments detected."
-        except (json.JSONDecodeError, TypeError):
-            guidance = ""
-    elif condition == "interferometer":
-        raw = run_vocab(case.path, ["interferometer", "--path", case.path, "--target", case.task.split()[-1], "--format", "json"])
-        try:
-            p = json.loads(raw) if raw.strip() else {}
-            arrs = p.get("arrays", [])
-            if arrs:
-                text = "\n".join(f"[{a['file']}:{a['line']}] {a['context'][:120].strip()}" for a in arrs[:6])
-                guidance = f"Interferometry array for '{p.get('target','')}':\n{text}"
-            else:
-                guidance = "No arrays found."
-        except (json.JSONDecodeError, TypeError):
-            guidance = ""
-    elif condition == "wave_collapse":
-        # Use dirname of edit_file as directory
-        dirname = "/".join(case.edit_file.split("/")[:-1]) if "/" in case.edit_file else "."
-        raw = run_vocab(case.path, ["wave-collapse", "--path", case.path, "--dir", dirname, "--format", "json"])
-        try:
-            p = json.loads(raw) if raw.strip() else {}
-            cs = p.get("constraints", [])
-            guidance = "\n".join(cs) if cs else "No constraints detected."
         except (json.JSONDecodeError, TypeError):
             guidance = ""
     elif condition in {"contract_oneline", "contract_prompt", "contract_checkplan"}:
@@ -1029,23 +1005,6 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             "Each fragment contains related phrases. Choose names that describe the fragment's purpose. "
             "Return exactly one compact JSON object. "
             "Use keys: fragment_names (dict mapping 'File X' to a descriptive name string)."
-        )
-    if condition == "interferometer":
-        system = (
-            "You are diagnosing a cross-file data flow using a sparse interferometry array. "
-            "You are shown 2 lines above/below each occurrence of a target phrase across "
-            "multiple files. Diagnose the issue using only the sparse array. "
-            "If you need wider context, specify which file:line to widen. "
-            "Return exactly one compact JSON object. "
-            "Use keys: defect_found (boolean), target_file (str), reason (str)."
-        )
-    if condition == "wave_collapse":
-        system = (
-            "You are generating code under wave-function collapse constraints. "
-            "The architectural conventions have been pre-determined from the surrounding directory. "
-            "You must satisfy all constraints exactly. "
-            "Return exactly one compact JSON object. "
-            "Use keys: constraints_satisfied (boolean), generated_methods (list)."
         )
     if condition == "null_route":
         system = "You are verifying a candidate edit. Return exactly one compact JSON object. Use keys: verify (array), should_edit_candidate (boolean). Consider route guidance first."
