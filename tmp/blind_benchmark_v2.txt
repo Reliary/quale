@@ -1,0 +1,461 @@
+======================================================================
+BLIND STRUCTURAL BENCHMARK v2
+3 models × 10 cases = 60 trials (shuffled A/B)
+Judge each: which output is the CORRECT test file?
+Reply: "A", "B", "BOTH", or "NEITHER"
+======================================================================
+
+--- Case 1 ---
+Source: OTP: binary.c → Erlang SUITE
+Model: Qwen3-Max
+Tokens: base=73, vocab=95
+Known test locations: ['erts/emulator/test/binary_SUITE.erl']
+
+  Output A: erts/emulator/test/binary_SUITE.erl
+  Output B: erts/emulator/test/binary_SUITE.erl
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 2 ---
+Source: OTP: binary.c → Erlang SUITE
+Model: DeepSeek-V4-Pro
+Tokens: base=75, vocab=97
+Known test locations: ['erts/emulator/test/binary_SUITE.erl']
+
+  Output A: erts/emulator/test/binary_SUITE.erl
+  Output B: erts/emulator/test/binary_SUITE.erl
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 3 ---
+Source: OTP: binary.c → Erlang SUITE
+Model: phi-4
+Tokens: base=83, vocab=104
+Known test locations: ['erts/emulator/test/binary_SUITE.erl']
+
+  Output A: test/beam_SUITE_data/binary_SUITE_data/binary_match_SUITE_data
+  Output B: test/beam_SUITE_data/binary_SUITE_data/binary_matching_SUITE.erl
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 4 ---
+Source: Redis: t_string.c → Tcl test
+Model: Qwen3-Max
+Tokens: base=63, vocab=119
+Known test locations: ['tests/unit/type/string.tcl']
+
+  Output A: test/t_string_test.c
+  Output B: deps/jemalloc/test/include/test/SFMT.h
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 5 ---
+Source: Redis: t_string.c → Tcl test
+Model: DeepSeek-V4-Pro
+Tokens: base=62, vocab=121
+Known test locations: ['tests/unit/type/string.tcl']
+
+  Output A: deps/jemalloc/test/include/test/SFMT.h
+  Output B: tests/unit/t_string.c
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 6 ---
+Source: Redis: t_string.c → Tcl test
+Model: phi-4
+Tokens: base=66, vocab=123
+Known test locations: ['tests/unit/type/string.tcl']
+
+  Output A: deps/jemalloc/test/include/test/SFMT.h
+  Output B: tests/test_string.c
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 7 ---
+Source: Redis: cluster.c → 3 Tcl test dirs
+Model: Qwen3-Max
+Tokens: base=62, vocab=103
+Known test locations: ['tests/cluster/tests/02-failover.tcl', 'tests/unit/cluster/03-failover-loop.tcl']
+
+  Output A: tests/cluster/cluster.tcl
+  Output B: tests/test_cluster.c
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 8 ---
+Source: Redis: cluster.c → 3 Tcl test dirs
+Model: DeepSeek-V4-Pro
+Tokens: base=70, vocab=103
+Known test locations: ['tests/cluster/tests/02-failover.tcl', 'tests/unit/cluster/03-failover-loop.tcl']
+
+  Output A: tests/cluster/cluster.tcl
+  Output B: tests/cluster/tests/22-replica-in-sync.tcl
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 9 ---
+Source: Redis: cluster.c → 3 Tcl test dirs
+Model: phi-4
+Tokens: base=69, vocab=107
+Known test locations: ['tests/cluster/tests/02-failover.tcl', 'tests/unit/cluster/03-failover-loop.tcl']
+
+  Output A: tests/cluster_failover_test.c
+  Output B: tests/cluster/cluster.tcl
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 10 ---
+Source: Nim: compiler/ast.nim → tests/ast/
+Model: Qwen3-Max
+Tokens: base=66, vocab=76
+Known test locations: ['tests/ast/']
+
+  Output A: tests/ast/tast.nim
+  Output B: tests/ast/tast.nim
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 11 ---
+Source: Nim: compiler/ast.nim → tests/ast/
+Model: DeepSeek-V4-Pro
+Tokens: base=64, vocab=74
+Known test locations: ['tests/ast/']
+
+  Output A: tests/ast/tast.nim
+  Output B: tests/ast/tast.nim
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 12 ---
+Source: Nim: compiler/ast.nim → tests/ast/
+Model: phi-4
+Tokens: base=72, vocab=81
+Known test locations: ['tests/ast/']
+
+  Output A: tests/ast/test_new_ast_node.nim
+  Output B: tests/ast/new_node_test.nim
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 13 ---
+Source: Agent: claim.ts (flattened subdir)
+Model: Qwen3-Max
+Tokens: base=74, vocab=112
+Known test locations: ['packages/cli/tests/claim.test.ts']
+
+  Output A: packages/cli/src/commands/__tests__/claim.test.ts
+  Output B: packages/cli/tests/claim.test.ts
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 14 ---
+Source: Agent: claim.ts (flattened subdir)
+Model: DeepSeek-V4-Pro
+Tokens: base=77, vocab=124
+Known test locations: ['packages/cli/tests/claim.test.ts']
+
+  Output A: packages/cli/src/commands/__tests__/claim.test.ts
+  Output B: packages/cli/tests/claim.test.ts
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 15 ---
+Source: Agent: claim.ts (flattened subdir)
+Model: phi-4
+Tokens: base=76, vocab=116
+Known test locations: ['packages/cli/tests/claim.test.ts']
+
+  Output A: packages/cli/tests/claim.test.ts
+  Output B: packages/cli/test/commands/claim.test.ts
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 16 ---
+Source: Agent: opencode.ts → opencode-tool.test.ts
+Model: Qwen3-Max
+Tokens: base=74, vocab=114
+Known test locations: ['packages/cli/tests/opencode-tool.test.ts']
+
+  Output A: packages/cli/src/tools/__tests__/opencode.test.ts
+  Output B: packages/cli/tests/opencode-tool.test.ts
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 17 ---
+Source: Agent: opencode.ts → opencode-tool.test.ts
+Model: DeepSeek-V4-Pro
+Tokens: base=76, vocab=132
+Known test locations: ['packages/cli/tests/opencode-tool.test.ts']
+
+  Output A: packages/cli/tests/opencode-tool.test.ts
+  Output B: packages/cli/src/tools/opencode.test.ts
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 18 ---
+Source: Agent: opencode.ts → opencode-tool.test.ts
+Model: phi-4
+Tokens: base=75, vocab=118
+Known test locations: ['packages/cli/tests/opencode-tool.test.ts']
+
+  Output A: packages/cli/tests/opencode-tool.test.ts
+  Output B: packages/cli/test/tools/opencode.test.ts
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 19 ---
+Source: Server: ingest.go (dual location)
+Model: Qwen3-Max
+Tokens: base=71, vocab=113
+Known test locations: ['internal/handlers/ingest_test.go']
+
+  Output A: tests/integration/ingest_test.go
+  Output B: internal/handlers/ingest_test.go
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 20 ---
+Source: Server: ingest.go (dual location)
+Model: DeepSeek-V4-Pro
+Tokens: base=70, vocab=116
+Known test locations: ['internal/handlers/ingest_test.go']
+
+  Output A: tests/integration/ingest_test.go
+  Output B: internal/handlers/ingest_test.go
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 21 ---
+Source: Server: ingest.go (dual location)
+Model: phi-4
+Tokens: base=76, vocab=117
+Known test locations: ['internal/handlers/ingest_test.go']
+
+  Output A: tests/integration/ingest_test.go
+  Output B: internal/tests/handlers/ingest_test.go
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 22 ---
+Source: Server: diagnosis.go → tests/unit/
+Model: Qwen3-Max
+Tokens: base=69, vocab=111
+Known test locations: ['tests/unit/services/diagnosis_test.go']
+
+  Output A: tests/unit/services/diagnosis_test.go
+  Output B: internal/services/diagnosis_test.go
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 23 ---
+Source: Server: diagnosis.go → tests/unit/
+Model: DeepSeek-V4-Pro
+Tokens: base=67, vocab=113
+Known test locations: ['tests/unit/services/diagnosis_test.go']
+
+  Output A: internal/services/diagnosis_test.go
+  Output B: tests/unit/services/diagnosis_test.go
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 24 ---
+Source: Server: diagnosis.go → tests/unit/
+Model: phi-4
+Tokens: base=73, vocab=115
+Known test locations: ['tests/unit/services/diagnosis_test.go']
+
+  Output A: internal/tests/diagnosis_test.go
+  Output B: tests/unit/services/diagnosis_test.go
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 25 ---
+Source: serde: lib.rs → test_suite
+Model: Qwen3-Max
+Tokens: base=68, vocab=110
+Known test locations: ['test_suite/tests/test_annotations.rs', 'test_suite/tests/regression.rs']
+
+  Output A: test_suite/tests/macros/mod.rs
+  Output B: serde/tests/test_derive_deserialize.rs
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 26 ---
+Source: serde: lib.rs → test_suite
+Model: DeepSeek-V4-Pro
+Tokens: base=67, vocab=122
+Known test locations: ['test_suite/tests/test_annotations.rs', 'test_suite/tests/regression.rs']
+
+  Output A: serde_derive/src/lib.rs
+  Output B: test_suite/tests/macros/mod.rs
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 27 ---
+Source: serde: lib.rs → test_suite
+Model: phi-4
+Tokens: base=69, vocab=112
+Known test locations: ['test_suite/tests/test_annotations.rs', 'test_suite/tests/regression.rs']
+
+  Output A: test_suite/tests/macros/mod.rs
+  Output B: serde/tests/derive.rs
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 28 ---
+Source: Prometheus: rules/manager.go
+Model: Qwen3-Max
+Tokens: base=64, vocab=98
+Known test locations: ['rules/alerting_test.go', 'rules/manager_test.go']
+
+  Output A: rules/manager_test.go
+  Output B: rules/manager_test.go
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 29 ---
+Source: Prometheus: rules/manager.go
+Model: DeepSeek-V4-Pro
+Tokens: base=62, vocab=97
+Known test locations: ['rules/alerting_test.go', 'rules/manager_test.go']
+
+  Output A: rules/manager_test.go
+  Output B: rules/manager_test.go
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+--- Case 30 ---
+Source: Prometheus: rules/manager.go
+Model: phi-4
+Tokens: base=69, vocab=102
+Known test locations: ['rules/alerting_test.go', 'rules/manager_test.go']
+
+  Output A: tests/alerting_rule_test.go
+  Output B: rules/manager_test.go
+
+  Your judgment (A/B/BOTH/NEITHER): ____
+
+  Notes: ___________________________
+
+--------------------------------------------------
+
+
+======================================================================
+END
+======================================================================

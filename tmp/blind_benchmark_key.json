@@ -1,0 +1,254 @@
+[
+  {
+    "case_id": 0,
+    "label": "OTP: binary.c \u2192 Erlang SUITE",
+    "model": "Qwen3-Max-Thinking",
+    "known_tests": [
+      "erts/emulator/test/binary_SUITE.erl"
+    ],
+    "A": "erts/emulator/test/binary_SUITE.erl",
+    "B": "erts/emulator/test/binary_SUITE.erl",
+    "A_cond": "baseline",
+    "B_cond": "vocab"
+  },
+  {
+    "case_id": 1,
+    "label": "OTP: binary.c \u2192 Erlang SUITE",
+    "model": "MiMo-V2.5-Pro",
+    "known_tests": [
+      "erts/emulator/test/binary_SUITE.erl"
+    ],
+    "A": "",
+    "B": "",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 2,
+    "label": "Redis: t_string.c \u2192 Tcl test",
+    "model": "Qwen3-Max-Thinking",
+    "known_tests": [
+      "tests/unit/type/string.tcl"
+    ],
+    "A": "test/t_string_test.c",
+    "B": "test/t_string_test.c",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 3,
+    "label": "Redis: t_string.c \u2192 Tcl test",
+    "model": "MiMo-V2.5-Pro",
+    "known_tests": [
+      "tests/unit/type/string.tcl"
+    ],
+    "A": "",
+    "B": "",
+    "A_cond": "baseline",
+    "B_cond": "vocab"
+  },
+  {
+    "case_id": 4,
+    "label": "Redis: cluster.c \u2192 3 Tcl test dirs",
+    "model": "Qwen3-Max-Thinking",
+    "known_tests": [
+      "tests/cluster/tests/02-failover.tcl",
+      "tests/unit/cluster/03-failover-loop.tcl",
+      "tests/integration/redis-cli.tcl"
+    ],
+    "A": "tests/cluster/cluster.tcl",
+    "B": "test/cluster_test.c",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 5,
+    "label": "Redis: cluster.c \u2192 3 Tcl test dirs",
+    "model": "MiMo-V2.5-Pro",
+    "known_tests": [
+      "tests/cluster/tests/02-failover.tcl",
+      "tests/unit/cluster/03-failover-loop.tcl",
+      "tests/integration/redis-cli.tcl"
+    ],
+    "A": "",
+    "B": "",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 6,
+    "label": "Nim: compiler/ast.nim \u2192 tests/ast/",
+    "model": "Qwen3-Max-Thinking",
+    "known_tests": [
+      "tests/ast/"
+    ],
+    "A": "tests/test_ast.nim",
+    "B": "compiler/ast_test.nim",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 7,
+    "label": "Nim: compiler/ast.nim \u2192 tests/ast/",
+    "model": "MiMo-V2.5-Pro",
+    "known_tests": [
+      "tests/ast/"
+    ],
+    "A": "",
+    "B": "",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 8,
+    "label": "Agent: claim.ts (flattened subdir)",
+    "model": "Qwen3-Max-Thinking",
+    "known_tests": [
+      "packages/cli/tests/claim.test.ts"
+    ],
+    "A": "packages/cli/src/commands/claim.test.ts",
+    "B": "packages/cli/tests/claim.test.ts",
+    "A_cond": "baseline",
+    "B_cond": "vocab"
+  },
+  {
+    "case_id": 9,
+    "label": "Agent: claim.ts (flattened subdir)",
+    "model": "MiMo-V2.5-Pro",
+    "known_tests": [
+      "packages/cli/tests/claim.test.ts"
+    ],
+    "A": "packages/cli/tests/claim.test.ts",
+    "B": "",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 10,
+    "label": "Agent: opencode.ts \u2192 opencode-tool.test.ts",
+    "model": "Qwen3-Max-Thinking",
+    "known_tests": [
+      "packages/cli/tests/opencode-tool.test.ts"
+    ],
+    "A": "packages/cli/src/tools/opencode.test.ts",
+    "B": "packages/cli/tests/opencode-tool.test.ts",
+    "A_cond": "baseline",
+    "B_cond": "vocab"
+  },
+  {
+    "case_id": 11,
+    "label": "Agent: opencode.ts \u2192 opencode-tool.test.ts",
+    "model": "MiMo-V2.5-Pro",
+    "known_tests": [
+      "packages/cli/tests/opencode-tool.test.ts"
+    ],
+    "A": "",
+    "B": "",
+    "A_cond": "baseline",
+    "B_cond": "vocab"
+  },
+  {
+    "case_id": 12,
+    "label": "Server: ingest.go (dual location)",
+    "model": "Qwen3-Max-Thinking",
+    "known_tests": [
+      "internal/handlers/ingest_test.go"
+    ],
+    "A": "internal/handlers/ingest_test.go",
+    "B": "tests/integration/ingest_test.go",
+    "A_cond": "baseline",
+    "B_cond": "vocab"
+  },
+  {
+    "case_id": 13,
+    "label": "Server: ingest.go (dual location)",
+    "model": "MiMo-V2.5-Pro",
+    "known_tests": [
+      "internal/handlers/ingest_test.go"
+    ],
+    "A": "",
+    "B": "tests/integration/ingest_test.go",
+    "A_cond": "baseline",
+    "B_cond": "vocab"
+  },
+  {
+    "case_id": 14,
+    "label": "Server: diagnosis.go \u2192 tests/unit/",
+    "model": "Qwen3-Max-Thinking",
+    "known_tests": [
+      "tests/unit/services/diagnosis_test.go"
+    ],
+    "A": "tests/unit/services/diagnosis_test.go",
+    "B": "internal/services/diagnosis_test.go",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 15,
+    "label": "Server: diagnosis.go \u2192 tests/unit/",
+    "model": "MiMo-V2.5-Pro",
+    "known_tests": [
+      "tests/unit/services/diagnosis_test.go"
+    ],
+    "A": "",
+    "B": "tests/unit/services/diagnosis_test.go",
+    "A_cond": "baseline",
+    "B_cond": "vocab"
+  },
+  {
+    "case_id": 16,
+    "label": "serde: lib.rs \u2192 test_suite",
+    "model": "Qwen3-Max-Thinking",
+    "known_tests": [
+      "test_suite/tests/test_annotations.rs",
+      "test_suite/tests/regression.rs",
+      "test_suite/tests/compiletest.rs"
+    ],
+    "A": "tests/test_derive_deserialize.rs",
+    "B": "serde/tests/test_deserialize.rs",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 17,
+    "label": "serde: lib.rs \u2192 test_suite",
+    "model": "MiMo-V2.5-Pro",
+    "known_tests": [
+      "test_suite/tests/test_annotations.rs",
+      "test_suite/tests/regression.rs",
+      "test_suite/tests/compiletest.rs"
+    ],
+    "A": "",
+    "B": "",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 18,
+    "label": "Prometheus: rules/manager.go",
+    "model": "Qwen3-Max-Thinking",
+    "known_tests": [
+      "rules/alerting_test.go",
+      "rules/manager_test.go",
+      "rules/group_test.go"
+    ],
+    "A": "rules/manager_test.go",
+    "B": "rules/manager_test.go",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  },
+  {
+    "case_id": 19,
+    "label": "Prometheus: rules/manager.go",
+    "model": "MiMo-V2.5-Pro",
+    "known_tests": [
+      "rules/alerting_test.go",
+      "rules/manager_test.go",
+      "rules/group_test.go"
+    ],
+    "A": "",
+    "B": "",
+    "A_cond": "vocab",
+    "B_cond": "baseline"
+  }
+]

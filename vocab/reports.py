@@ -324,8 +324,8 @@ def _cascade_analysis(file: str, analysis, blast: list[dict]) -> dict | None:
     }
 
 
-def _hough_concerns(file: str, analysis) -> list[dict]:
-    """Cross-cutting concern detection via Hough parameter-space voting.
+def _cross_cutting_concerns(file: str, analysis) -> list[dict]:
+    """Cross-cutting concern detection via identifier-cluster voting.
     Each identifier votes for every (cluster, file) pair it appears in.
     Peaks = identifiers spanning ≥2 clusters with ≥4 total files.
     """
@@ -508,9 +508,9 @@ def _boundary_entropy(file: str, analysis) -> dict | None:
     }
 
 
-def _eversion_analysis(file: str, analysis) -> dict | None:
+def _module_exposure_analysis(file: str, analysis) -> dict | None:
     """Inside-out module boundary: identifiers the file reaches for
-    outside its own module. High eversion = misplaced file."""
+    outside its own module. High exposure = misplaced file."""
     from vocab.scanner import _extract_identifiers
     scs = analysis.structure_clusters
     if not scs:
@@ -560,9 +560,9 @@ def _eversion_analysis(file: str, analysis) -> dict | None:
     }
 
 
-def _shear_ranking(changed: list[str], blast: list[dict], mirror: dict) -> list[str]:
-    """Affine shear ranking: fuse blast + mirror into one list.
-    sheared_score = blast + mirror + 2*b*m  (files high in both get super-linear)."""
+def _fused_priority_ranking(changed: list[str], blast: list[dict], mirror: dict) -> list[str]:
+    """Fused blast + mirror ranking into one list.
+    score = blast + mirror + 2*b*m  (files high in both get super-linear)."""
     blast_scores: dict[str, int] = {}
     for item in blast:
         blast_scores[item.get("file", "")] = item.get("shared_concepts", 1)
@@ -779,12 +779,12 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
             spectrum_map[primary] = _spectrum_analysis(primary, analysis)
             deficit_map[primary] = _deficit_analysis(primary, analysis)
             cascade_map[primary] = _cascade_analysis(primary, analysis, blast)
-            cross_cutting = _hough_concerns(primary, analysis)
+            cross_cutting = _cross_cutting_concerns(primary, analysis)
             risk_vector = _risk_vector(stable_touched, blast, cascade_map.get(primary), deficit_map.get(primary))
             acceleration = _change_acceleration(primary, path)
             boundary = _boundary_entropy(primary, analysis)
-            eversion = _eversion_analysis(primary, analysis)
-            fused_first = _shear_ranking(changed, blast, mirror)
+            eversion = _module_exposure_analysis(primary, analysis)
+            fused_first = _fused_priority_ranking(changed, blast, mirror)
         except Exception:
             pass
 
@@ -831,7 +831,7 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         "risk_vector": risk_vector,
         "acceleration": acceleration,
         "boundary": boundary,
-        "eversion": eversion,
+        "module_exposure": eversion,
         "fused_first": fused_first,
         "capability_boundary": capability,
         "guardrails": {

@@ -1,0 +1,249 @@
+[
+  {
+    "model": "Qwen/Qwen3-Max",
+    "label": "Qwen3-Max",
+    "baseline": {
+      "ok": false,
+      "json": true,
+      "tokens": 72,
+      "time": 2.3802413940429688,
+      "content": "{\"verify\": \"packages/cli/src/commands/claim.test.ts\"}"
+    },
+    "vocab": {
+      "ok": true,
+      "json": true,
+      "tokens": 107,
+      "time": 2.0332632064819336,
+      "content": "{\"verify\": \"packages/cli/tests/claim.test.ts\"}"
+    },
+    "note": ""
+  },
+  {
+    "model": "Qwen/Qwen3.5-35B-A3B",
+    "label": "Qwen3.5-35B-A3B",
+    "baseline": {
+      "ok": false,
+      "json": false,
+      "tokens": 361,
+      "time": 9.70571494102478,
+      "content": ""
+    },
+    "vocab": {
+      "ok": false,
+      "json": false,
+      "tokens": 398,
+      "time": 5.042545318603516,
+      "content": ""
+    },
+    "note": ""
+  },
+  {
+    "model": "google/gemma-3-27b-it",
+    "label": "gemma-3-27b-it",
+    "baseline": {
+      "ok": false,
+      "json": true,
+      "tokens": 81,
+      "time": 1.9635727405548096,
+      "content": "{\"verify\": \"packages/cli/test/commands/claim.test.ts\"}"
+    },
+    "vocab": {
+      "ok": true,
+      "json": false,
+      "tokens": 136,
+      "time": 1.8506855964660645,
+      "content": "```json\n{\"verify\": \"packages/cli/tests/claim.test.ts\"}\n```"
+    },
+    "note": ""
+  },
+  {
+    "model": "microsoft/phi-4",
+    "label": "phi-4",
+    "baseline": {
+      "ok": false,
+      "json": false,
+      "tokens": 76,
+      "time": 0.7838840484619141,
+      "content": "```json\n{\"verify\": \"packages/cli/test/commands/claim.test.ts\"}\n```"
+    },
+    "vocab": {
+      "ok": true,
+      "json": false,
+      "tokens": 111,
+      "time": 0.6867003440856934,
+      "content": "```json\n{\"verify\": \"packages/cli/tests/claim.test.ts\"}\n```"
+    },
+    "note": ""
+  },
+  {
+    "model": "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+    "label": "Mistral-Small-3.2-24B-Instruct-2506",
+    "baseline": {
+      "ok": false,
+      "json": false,
+      "tokens": 76,
+      "time": 29.774095058441162,
+      "content": "```json\n{\"verify\": \"packages/cli/src/__tests__/commands/claim.test.ts\"}\n```"
+    },
+    "vocab": {
+      "ok": true,
+      "json": false,
+      "tokens": 109,
+      "time": 2.1041131019592285,
+      "content": "```json\n{\"verify\": \"packages/cli/tests/claim.test.ts\"}\n```"
+    },
+    "note": ""
+  },
+  {
+    "model": "moonshotai/Kimi-K2.5",
+    "label": "Kimi-K2.5",
+    "baseline": {
+      "ok": false,
+      "json": false,
+      "tokens": 357,
+      "time": 14.776679754257202,
+      "content": ""
+    },
+    "vocab": {
+      "ok": true,
+      "json": true,
+      "tokens": 278,
+      "time": 11.041094779968262,
+      "content": " {\"verify\": \"packages/cli/tests/claim.test.ts\"}"
+    },
+    "note": ""
+  },
+  {
+    "model": "google/gemini-2.5-pro",
+    "label": "gemini-2.5-pro",
+    "baseline": {
+      "ok": false,
+      "json": false,
+      "tokens": 349,
+      "time": 5.603495359420776,
+      "content": "<think>\nOkay, I've been asked to find the test file that verifies a new CLI `claim` subcommand that was added to `packag"
+    },
+    "vocab": {
+      "ok": true,
+      "json": false,
+      "tokens": 401,
+      "time": 5.001302719116211,
+      "content": "<think>\nOkay, I'm analyzing this request, and my first thought is to break down what the user is asking of me. They've p"
+    },
+    "note": ""
+  },
+  {
+    "model": "deepseek-ai/DeepSeek-V3.1",
+    "label": "DeepSeek-V3.1",
+    "baseline": {
+      "ok": false,
+      "json": true,
+      "tokens": 76,
+      "time": 2.463670015335083,
+      "content": "{\"verify\": \"packages/cli/tests/commands/claim.test.ts\"}"
+    },
+    "vocab": {
+      "ok": true,
+      "json": true,
+      "tokens": 121,
+      "time": 1.9534029960632324,
+      "content": "{\"verify\": \"packages/cli/tests/claim.test.ts\"}"
+    },
+    "note": ""
+  },
+  {
+    "model": "deepseek-ai/DeepSeek-V4-Pro",
+    "label": "DeepSeek-V4-Pro",
+    "baseline": {
+      "ok": false,
+      "json": true,
+      "tokens": 77,
+      "time": 1.2269823551177979,
+      "content": "{\"verify\": \"packages/cli/src/commands/__tests__/claim.test.ts\"}"
+    },
+    "vocab": {
+      "ok": true,
+      "json": true,
+      "tokens": 119,
+      "time": 1.1788063049316406,
+      "content": "{\"verify\": \"packages/cli/tests/claim.test.ts\"}"
+    },
+    "note": ""
+  },
+  {
+    "model": "Qwen/Qwen3-235B-A22B-Thinking-2507",
+    "label": "Qwen3-235B-A22B-Thinking-2507",
+    "baseline": {
+      "ok": false,
+      "json": false,
+      "tokens": 358,
+      "time": 11.023703336715698,
+      "content": ""
+    },
+    "vocab": {
+      "ok": true,
+      "json": true,
+      "tokens": 382,
+      "time": 10.990309715270996,
+      "content": "\n\n{\"verify\": \"packages/cli/tests/claim.test.ts\"}"
+    },
+    "note": ""
+  },
+  {
+    "model": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B",
+    "label": "NVIDIA-Nemotron-3-Super-120B-A12B",
+    "baseline": {
+      "ok": false,
+      "json": true,
+      "tokens": 283,
+      "time": 9.414631605148315,
+      "content": "\n\n{\"verify\": \"packages/cli/src/commands/claim.test.ts\"}"
+    },
+    "vocab": {
+      "ok": true,
+      "json": true,
+      "tokens": 205,
+      "time": 4.4008965492248535,
+      "content": "\n\n{\"verify\": \"packages/cli/tests/claim.test.ts\"}"
+    },
+    "note": ""
+  },
+  {
+    "model": "moonshotai/Kimi-K2.6",
+    "label": "EXTRAS: Kimi-K2.6",
+    "baseline": {
+      "ok": false,
+      "json": false,
+      "tokens": 357,
+      "time": 15.051955938339233,
+      "content": ""
+    },
+    "vocab": {
+      "ok": true,
+      "json": true,
+      "tokens": 253,
+      "time": 8.068164110183716,
+      "content": " {\"verify\": \"packages/cli/tests/claim.test.ts\"}"
+    },
+    "note": ""
+  },
+  {
+    "model": "deepseek-ai/DeepSeek-V3.1-Terminus",
+    "label": "EXTRAS: DeepSeek-V3.1-Terminus",
+    "baseline": {
+      "ok": false,
+      "json": true,
+      "tokens": 74,
+      "time": 1.3706963062286377,
+      "content": "{\"verify\": \"packages/cli/tests/commands/claim.test.ts\"}"
+    },
+    "vocab": {
+      "ok": true,
+      "json": true,
+      "tokens": 119,
+      "time": 1.363184928894043,
+      "content": "{\"verify\": \"packages/cli/tests/claim.test.ts\"}"
+    },
+    "note": ""
+  }
+]
