@@ -4149,34 +4149,6 @@ def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
     return f"Verification confidence is {level}; structurally conservative."
 
 
-@cli.command(name="stigmergy", rich_help_panel="Inspection")
-def stigmergy_cmd(path=".", format="compact"):
-    from vocab.reports import stigmergy_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = stigmergy_report(path=p)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    for t in data.get("trails", [])[:3]:
-        typer.echo(f'  {", ".join(t["authors"])}: {", ".join(t["shared_patterns"][:1])}')
-@cli.command(name="fracture", rich_help_panel="Inspection")
-def fracture_cmd(path=".", concept="", format="compact"):
-    from vocab.reports import fracture_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not concept:
-        typer.echo("provide --concept", err=True); raise typer.Exit(1)
-    data = fracture_report(path=p, concept=concept)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    for p2 in data.get("propagation", [])[:5]:
-        typer.echo(f'  {p2["directory"]}: {p2["weeks_present"]} weeks')
 @cli.command(name="escape-velocity", rich_help_panel="Inspection")
 def escape_velocity_cmd(path=".", format="compact"):
     from vocab.reports import escape_velocity_report
@@ -4190,19 +4162,6 @@ def escape_velocity_cmd(path=".", format="compact"):
         typer.echo(json.dumps(data, indent=2)); return
     for t in data.get("tagged", [])[:5]:
         typer.echo(f'  {t["phrase"]}: {t["label"]}')
-@cli.command(name="pleach", rich_help_panel="Inspection")
-def pleach_cmd(path=".", format="compact"):
-    from vocab.reports import pleach_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = pleach_report(path=p)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    for pair in data.get("pairs", [])[:3]:
-        typer.echo(f'  {pair["file_a"]} <-> {pair["file_b"]} ({pair["co_refactors"]} refactors)')
 if __name__ == "__main__":
     main()
 
