@@ -36,17 +36,20 @@ from vocab.config import load_config
 
 cli = typer.Typer(
     help="""
-    vocab — grammar-free structural codebase analyzer.
+    vocab — structural codebase analysis. No parsers, no config, any language.
 
     Orients you, catches hidden dependencies, and reveals architecture without parsers.
 
     Workflow groups (common uses):
-      ORIENTATION    agent-bootstrap, explore, modules, repo-map, inspect
-      PREFLIGHT      edit-context, contract, check-plan, verify-scope, diff-structural, route, negotiate
-      HISTORY        timeline, lifecycle, stable, provenance, origins
-      CROSS-REPO     compare, search, coupling, anomalies
-      CI/GATES       ci-report, pr-report, gate
-      UTILITIES      analyze, diff, fingerprints, vocabulary-trend, patterns, stop, help-agent, ask, calibration
+      GETTING STARTED    analyze, diff, search, explore, inspect, repo-map, modules, help-agent, init
+      AGENT SAFETY       edit-context, guard, contract, check-plan, route, verify-packet, verify-scope, veto-cascade, cascade-verify, zk-proof, fold, guide, isolate, triangulate
+      CODE ANALYSIS      capillary, phantom, mirage, trap, hub-risk, complexity-ratio, coupling-chain, criticality, latent-deps, porosity, spectral-gap
+      HISTORY            timeline, lifecycle, stable, provenance, delta
+      MAINTENANCE        extinct-exports, safe-islands, migration-pairs, decay, escape-velocity, entropy, solve, deflate, concept-flow, file-epochs, concept-fragments, cleanup-list, vulnerability-map, patterns, vocabulary-trend, anomalies
+      CI                 blast, ci-report, pr-report, check-pr, check-diff, parity-bit, drift-check, health-score, forecast
+      CROSS-REPO         compare, coupling
+      VERIFICATION       verify, verify-bonds, reverse-verify, verify-classify, verify-drift, test-gaps, co-change
+      UTILITIES          fingerprint, orphans, stop, ask, calibration, agent-bootstrap, skeleton, orient, clone, landmarks
     """
 )
 
@@ -109,7 +112,7 @@ def _validate_refs(path: str, *refs: str) -> None:
         raise ValueError(f"Unknown git ref(s): {', '.join(missing)}")
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(rich_help_panel="Getting Started")
 def analyze(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json, html, quick")] = "terminal",
@@ -144,7 +147,7 @@ def analyze(
         typer.echo(format_terminal(analysis))
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(rich_help_panel="Getting Started")
 def diff(
     ref_a: Annotated[str, typer.Argument(help="Base git ref")],
     ref_b: Annotated[str, typer.Argument(help="Target git ref")],
@@ -210,7 +213,7 @@ def diff(
         typer.echo(_why_diff(data, ref_a, ref_b))
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(rich_help_panel="Getting Started")
 def search(
     phrase: Annotated[str, typer.Argument(help="Phrase to search for")],
     paths: Annotated[list[str], typer.Argument(help="Repo paths to search")] = ["."],
@@ -333,7 +336,7 @@ def blast(
         typer.echo(format_blast_radius(pr_files, results, ref_a, ref_b))
 
 
-@cli.command(name="edit-context",  rich_help_panel="Agent")
+@cli.command(name="edit-context",  rich_help_panel="Agent Safety")
 def preflight(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
@@ -477,7 +480,7 @@ def preflight(
         typer.echo(_why_edit_context(data))
 
 
-@cli.command(rich_help_panel="Agent")
+@cli.command(rich_help_panel="Agent Safety")
 def contract(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Allowed edit file(s); repeat or comma-separate")] = None,
@@ -510,7 +513,7 @@ def contract(
     typer.echo(json.dumps(data, separators=(",", ":")))
 
 
-@cli.command(name="check-plan",  rich_help_panel="Agent")
+@cli.command(name="check-plan",  rich_help_panel="Agent Safety")
 def check_plan(
     contract_file: Annotated[Path, typer.Option("--contract", "-c", help="Contract JSON file")],
     proposal_file: Annotated[Path | None, typer.Option("--proposal", "-p", help="Proposal JSON file; stdin when omitted")] = None,
@@ -546,7 +549,7 @@ def check_plan(
         typer.echo(json.dumps(result, separators=(",", ":")))
 
 
-@cli.command(name="repo-map",  rich_help_panel="Inspection")
+@cli.command(name="repo-map",  rich_help_panel="Getting Started")
 def crystallography(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -830,7 +833,7 @@ def deserts(
     typer.echo("")
 
 
-@cli.command(name="co-change",  rich_help_panel="Inspection")
+@cli.command(name="co-change",  rich_help_panel="Verification")
 def entangle(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     lookback: Annotated[int, typer.Option("--lookback", "-n", help="Commits to scan")] = 200,
@@ -862,14 +865,14 @@ def entangle(
         typer.echo(f"  {p['file_a']:45s} ↔ {p['file_b']:45s}  count={p['co_change_count']:3d} prob={p['co_change_probability']:.2f}{marker}")
 
 
-@cli.command(name="cascade-verify", rich_help_panel="Agent")
+@cli.command(name="cascade-verify", rich_help_panel="Agent Safety")
 def cascade_verify_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     why: Annotated[bool, typer.Option("--why", help="Show cascade trace")] = False,
 ):
-    """Cascade verifier — hierarchical verification pipeline.
+    """Multi-strategy verification pipeline.
 
     Tier 1: Cohesion check (0 tokens) — high cohesion = safe to skip LLM.
     Tier 2: Memory B-Cell cache (0 tokens) — same content hash reuses past outcome.
@@ -912,7 +915,7 @@ def cascade_verify_cmd(
                     f"{'(safe to skip LLM)' if data.get('cohesion', 0) >= 0.7 else '(needs LLM)'}")
 
 
-@cli.command(name="veto-cascade", rich_help_panel="Agent")
+@cli.command(name="veto-cascade", rich_help_panel="Agent Safety")
 def veto_cascade_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s)")] = [],
@@ -953,7 +956,7 @@ def veto_cascade_cmd(
         typer.echo(f"Veto cascade: progressive  Candidates: {len(cands)}  Tokens: {tok}  Cohesion: {coh}")
 
 
-@cli.command(name="isolate", rich_help_panel="Agent")
+@cli.command(name="isolate", rich_help_panel="Agent Safety")
 def isolate_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     task: Annotated[str, typer.Option("--task", "-t", help="Task description")] = "",
@@ -1028,7 +1031,7 @@ def isolate_cmd(
     typer.echo(prompt)
 
 
-@cli.command(name="fold", rich_help_panel="Agent")
+@cli.command(name="fold", rich_help_panel="Agent Safety")
 def fold_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     file: Annotated[str, typer.Option("--file", help="File to fold")] = "",
@@ -1036,7 +1039,7 @@ def fold_cmd(
     threshold: Annotated[float, typer.Option("--threshold", help="Minimum score to keep a block")] = 0.02,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Fractional distillation — fold task-irrelevant code blocks.
+    """Replace low-signal blocks with annotations.
 
     Indentation-aware block folding preserves syntax while removing
     structural noise. 40-80% token reduction on large files.
@@ -1064,7 +1067,7 @@ def drift_check_cmd(
     snapshot: Annotated[bool, typer.Option("--snapshot", help="Take initial baseline snapshot")] = False,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Structural drift IMU — detect anomaly velocity in codebase.
+    """Structural anomaly velocity across directories.
 
     Takes vocabulary snapshots per-file. On check, compares current
     state against baseline and alerts on velocity spikes.
@@ -1100,7 +1103,7 @@ def drift_check_cmd(
         typer.echo(f"Drift stable. Velocity: {vel:.3f}")
 
 
-@cli.command(name="mycorrhiza", rich_help_panel="Inspection")
+@cli.command(name="latent-deps", rich_help_panel="Code Analysis")
 def mycorrhiza_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="File(s) to map hidden deps for")] = [],
@@ -1150,7 +1153,7 @@ def mycorrhiza_cmd(
                 typer.echo(f"    {_color('TOLERANCE VIOLATION:', 'red')} {v}")
 
 
-@cli.command(name="solve", rich_help_panel="Inspection")
+@cli.command(name="solve", rich_help_panel="Maintenance")
 def solve_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     top_n: Annotated[int, typer.Option("--top", help="Number of cipher keys to extract")] = 20,
@@ -1174,7 +1177,7 @@ def solve_cmd(
         typer.echo(f"  {i+1}. {p['phrase']} (freq={p['frequency']}) — {', '.join(p['top_files'][:2])}")
 
 
-@cli.command(name="deflate", rich_help_panel="Inspection")
+@cli.command(name="deflate", rich_help_panel="Maintenance")
 def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact"):
     from vocab.reports import deflate_report
     p = os.path.abspath(path)
@@ -1209,7 +1212,7 @@ def forecast_cmd(
     seismic: Annotated[bool, typer.Option("--seismic", help="S-Wave mode: exclude P-wave files, isolate latent regression risks")] = False,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Doppler Defect Radar — forecast regression risk from structural shifts.
+    """Forecast regression risk from co-change shifts.
 
     Scans git history for bugfix commits. For each file changed,
     emits historically bug-prone neighbors with regression probability.
@@ -1256,13 +1259,13 @@ def forecast_cmd(
         typer.echo(_color("  Seismic mode: P-wave files excluded. Only S-wave risks shown.", "yellow"))
 
 
-@cli.command(name="triangulate", rich_help_panel="Agent")
+@cli.command(name="triangulate", rich_help_panel="Agent Safety")
 def triangulate_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     task: Annotated[str, typer.Option("--task", "-t", help="Task description")] = "",
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Byzantine Triangulation — intersect 3 structural probes for target anchor.
+    """Intersect three structural probes to find the task anchor.
 
     Runs 3 structural views (repo-map, recent diffs, distinctive identifiers)
     without reading source code. Collects 5 phrases per view. Computes
@@ -1295,13 +1298,13 @@ def triangulate_cmd(
     typer.echo(f"  Probe C (distinctive ids): {', '.join(data.get('probe_c', []))}")
 
 
-@cli.command(name="strata", rich_help_panel="Inspection")
+@cli.command(name="file-epochs", rich_help_panel="Maintenance")
 def strata_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     file: Annotated[str, typer.Option("--file", help="File to analyze")] = "",
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Tectonic Fault Lines — carbon-date phrase epochs.
+    """Map file lines to epoch-age buckets.
 
     Maps file content by phrase entry age. Emits fault lines where
     epochs of different ages collide — the most brittle code boundaries.
@@ -1336,13 +1339,13 @@ def strata_cmd(
         typer.echo(f"  {data.get('note', 'no datable content')}")
 
 
-@cli.command(name="epidemiology", rich_help_panel="Inspection")
+@cli.command(name="concept-flow", rich_help_panel="Maintenance")
 def epidemiology_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", help="History lookback")] = 12,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Viral R0 Contact Tracing — track phrase spread and displacement.
+    """Track phrase spread across weekly snapshots.
 
     Computes R0 for each phrase. Classifies as antigen (displacing debt),
     pathogen (spreading without displacement), or endemic (stable).
@@ -1374,7 +1377,7 @@ def epidemiology_cmd(
         typer.echo(f"All stable. {data['total_tracked']} phrases tracked.")
 
 
-@cli.command(name="orient", rich_help_panel="Agent")
+@cli.command(name="orient", rich_help_panel="Utilities")
 def orient_cmd(path=".", task="", format="compact"):
     from vocab.reports import pipeline_orient
     p = os.path.abspath(path)
@@ -1395,9 +1398,11 @@ def orient_cmd(path=".", task="", format="compact"):
 
 
 @cli.command(name="health", rich_help_panel="CI")
-def health_cmd(path=".",
+def health_cmd(
+    path=".",
                balance: Annotated[bool, typer.Option("--balance", help="Phototropism: check root-to-shoot vocabulary ratio")] = False,
                format="compact"):
+    """0-1 health from stability, mirror, churn, concept age. """
     from vocab.reports import structural_health_score
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1418,32 +1423,7 @@ def health_cmd(path=".",
         typer.echo(f"  {data.get('phototropism_note', '')}")
 
 
-@cli.command(name="pulsar", rich_help_panel="Inspection")
-def pulsar_cmd(path=".", file="", format="compact"):
-    from vocab.reports import pulsar_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not file:
-        typer.echo("provide --file", err=True); raise typer.Exit(1)
-    data = pulsar_report(path=p, file_path=file)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    anchors = data.get("pulsar_anchors", [])
-    missing = data.get("missing_anchors", [])
-    typer.echo(f'{data.get("file","")}: {len(anchors)} pulsar anchors, {data.get("total_tokens",0)} tokens')
-    if missing:
-        typer.echo(f'  {_color("CLOCK DRIFT ANOMALY", "red")}')
-        for m in missing[:3]:
-            typer.echo(f'    Missing anchor: {m}')
-        typer.echo(f'  Mandate: {data.get("mandate","")}')
-    else:
-        typer.echo(f'  Pulsar rhythm stable.')
-
-
-@cli.command(name="heisenberg", rich_help_panel="Inspection")
+@cli.command(name="heisenberg", rich_help_panel="Maintenance")
 def heisenberg_cmd(path=".", file="", diff="", format="compact"):
     from vocab.reports import heisenberg_check
     p = os.path.abspath(path)
@@ -1465,7 +1445,7 @@ def heisenberg_cmd(path=".", file="", diff="", format="compact"):
         typer.echo(f'  Heisenberg principle respected.')
 
 
-@cli.command(name="traffic-control", rich_help_panel="Inspection")
+@cli.command(name="traffic-control", rich_help_panel="Maintenance")
 def traffic_control_cmd(path=".", file="", intended_import="", format="compact"):
     from vocab.reports import traffic_control_report
     p = os.path.abspath(path)
@@ -1488,180 +1468,7 @@ def traffic_control_cmd(path=".", file="", intended_import="", format="compact")
         typer.echo(f'  Import route clear. ({src} -> {dst})')
 
 
-@cli.command(name="splice-exons", rich_help_panel="Inspection")
-def splice_exons_cmd(path=".", file="", format="compact"):
-    from vocab.reports import splice_exons_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not file:
-        typer.echo("provide --file", err=True); raise typer.Exit(1)
-    data = splice_exons_report(path=p, file_path=file)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    pct = data.get("compression_pct", 0)
-    typer.echo(f'{data.get("file","")}: {pct}% reduction ({data.get("exon_count",0)} exons from {data.get("original_lines",0)} lines)')
-    for e in data.get("exons", [])[:5]:
-        typer.echo(f'  L{e["line"]}: {e["text"]} [{e["type"]}]')
-
-
-@cli.command(name="project-hologram", rich_help_panel="Inspection")
-def hologram_cmd(path=".", dir="", format="compact"):
-    from vocab.reports import hologram_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not dir:
-        typer.echo("provide --dir", err=True); raise typer.Exit(1)
-    data = hologram_report(path=p, directory=dir)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(data.get("hologram", ""))
-    typer.echo(f'  Imports: {", ".join(data.get("imports",[])[:5])}')
-    typer.echo(f'  Exports: {", ".join(data.get("exports",[])[:5])}')
-    typer.echo(f'  Hidden: {data.get("hidden_summary","")}')
-
-
-@cli.command(name="shard-context", rich_help_panel="Inspection")
-def shard_context_cmd(path=".", files="", task="", shards: int = 3, format="compact"):
-    from vocab.reports import shard_context_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not files or not task:
-        typer.echo("provide --files and --task", err=True); raise typer.Exit(1)
-    file_list = [f.strip() for f in files.split(",") if f.strip()]
-    data = shard_context_report(path=p, files=file_list, task=task, shard_count=shards)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'{len(file_list)} files -> {data.get("shard_count",0)} shards')
-    for s in data.get("shards", []):
-        typer.echo(f'  Shard {s["shard_index"]}: {", ".join(s["files"])}')
-        for b in s.get("boundary_hologram", [])[:2]:
-            typer.echo(f'    hologram: {b}')
-    typer.echo(f'  Workflow: {data.get("shard_workflow","")}')
-
-
-@cli.command(name="sentinel", rich_help_panel="Agent")
-def sentinel_cmd(path=".", task="", format="compact"):
-    from vocab.reports import sentinel_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not task:
-        typer.echo("provide --task", err=True); raise typer.Exit(1)
-    data = sentinel_report(path=p, task=task)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Sentinels: {", ".join(data.get("sentinels",[]))}')
-    typer.echo(f'  {data.get("detection","")}')
-
-
-@cli.command(name="dark-matter", rich_help_panel="CI")
-def dark_matter_cmd(repo_a="", repo_b="", format="compact"):
-    from vocab.reports import dark_matter_report
-    if not repo_a or not repo_b:
-        typer.echo("provide --repo-a and --repo-b", err=True); raise typer.Exit(1)
-    data = dark_matter_report(repo_a=repo_a, repo_b=repo_b)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Dark matter: {data.get("dark_matter_count",0)} orphan phrases in A that bind to B')
-    for b in data.get("bindings", [])[:5]:
-        typer.echo(f'  {b["phrase"]}: {b.get("a_file","")} -> {b["b_file_count"]} files in B')
-
-
-@cli.command(name="supernova", rich_help_panel="Inspection")
-def supernova_cmd(path=".", threshold: float = 0.90, format="compact"):
-    from vocab.reports import supernova_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = supernova_report(path=p, overlap_threshold=threshold)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(data.get("summary", ""))
-    for r in data.get("condensates", [])[:3]:
-        typer.echo(f'  {r["trend"]}: {r["action"]} ({", ".join(r["files"])})')
-
-
-@cli.command(name="chrono-lock", rich_help_panel="Inspection")
-def chrono_lock_cmd(path=".", file="", diff="", max_gap: int = 2, format="compact"):
-    from vocab.reports import chrono_lock_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not file or not diff:
-        typer.echo("provide --file and --diff", err=True); raise typer.Exit(1)
-    data = chrono_lock_report(path=p, file_path=file, proposed_diff=diff, max_age_gap=max_gap)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    if data.get("chrono_anomaly"):
-        typer.echo(f'  {_color("TEMPORAL VIOLATION", "red")}')
-        typer.echo(f'  Center of mass: {data.get("center_of_mass_year","?")}')
-        typer.echo(f'  Diff introduces: {data.get("max_diff_year","?")}')
-        typer.echo(f'  {data.get("mandate","")}')
-    else:
-        typer.echo(f'  Chrono-lock OK (center of mass: {data.get("center_of_mass_year","?")})')
-
-
-@cli.command(name="necrotic", rich_help_panel="Inspection")
-def necrotic_cmd(path=".", file="", format="compact"):
-    from vocab.reports import necrotic_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not file:
-        typer.echo("provide --file", err=True); raise typer.Exit(1)
-    data = necrotic_report(path=p, file_path=file)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    if data.get("necrotic"):
-        typer.echo(f'  {_color("NECROTIC TISSUE", "red")}')
-        typer.echo(f'  Blast radius: {data.get("reverse_blast_radius",0)}')
-        typer.echo(f'  Orphans: {len(data.get("orphan_phrases",[]))}')
-        typer.echo(f'  Lifecycle: {data.get("lifecycle_state","")}')
-        typer.echo(f'  {data.get("mandate","")}')
-    else:
-        typer.echo(f'  File healthy (blast radius: {data.get("reverse_blast_radius",0)})')
-
-
-@cli.command(name="metamorphic", rich_help_panel="CI")
-def metamorphic_cmd(from_repo="", to_repo="", ref="HEAD~1", format="compact"):
-    from vocab.reports import metamorphic_mask_report
-    if not from_repo or not to_repo:
-        typer.echo("provide --from-repo and --to-repo", err=True); raise typer.Exit(1)
-    data = metamorphic_mask_report(source_path=from_repo, target_path=to_repo, source_ref=ref)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Mask: {data.get("mask_count",0)} phrase transformations')
-    for m in data.get("mask", [])[:5]:
-        typer.echo(f'  {m["from"]} -> {m["to"]}')
-    typer.echo(f'Craters: {len(data.get("craters",[]))} impacted files')
-    for c in data.get("craters", [])[:3]:
-        typer.echo(f'  {c["file"]} ({c["coupling_label"]}, {c["impact_count"]} hits)')
-    typer.echo(f'  {data.get("migration_order","")}')
-
-    typer.echo(f'Nucleation: {", ".join(sites)}')
-
-@cli.command(name="capillary", rich_help_panel="Inspection")
+@cli.command(name="capillary", rich_help_panel="Code Analysis")
 def capillary_cmd(path=".", format="compact"):
     from vocab.reports import capillary_report
     p = os.path.abspath(path)
@@ -1675,7 +1482,7 @@ def capillary_cmd(path=".", format="compact"):
     for c in data.get("capillaries", [])[:3]:
         typer.echo(f'  {c["file"]} ({c["edges"]} edges)')
 
-@cli.command(name="spectral-gap", rich_help_panel="Utilities")
+@cli.command(name="spectral-gap", rich_help_panel="Code Analysis")
 def spectral_gap_cmd(path=".", format="compact"):
     from vocab.reports import spectral_gap_report
     p = os.path.abspath(path)
@@ -1690,7 +1497,7 @@ def spectral_gap_cmd(path=".", format="compact"):
     m = data.get("modularity", "?")
     typer.echo(f'Gap: {g} ({m})')
 
-@cli.command(name="phantom", rich_help_panel="Inspection")
+@cli.command(name="phantom", rich_help_panel="Code Analysis")
 def phantom_cmd(path=".", format="compact"):
     from vocab.reports import phantom_report
     p = os.path.abspath(path)
@@ -1710,6 +1517,7 @@ def phantom_cmd(path=".", format="compact"):
 
 @cli.command(name="parity-bit", rich_help_panel="CI")
 def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact"):
+    """SHA-1 hash of a module phrase set: CHANGED/UNCHANGED CI gate. """
     from vocab.reports import parity_bit_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1725,8 +1533,9 @@ def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact"):
     typer.echo(f'Mirror {"UNCHANGED" if u else "CHANGED"}')
 
 
-@cli.command(name="guide", rich_help_panel="Agent")
+@cli.command(name="guide", rich_help_panel="Agent Safety")
 def guide_cmd(path=".", file="", format="compact"):
+    """One-token file locator for a file. """
     from vocab.reports import guide_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1742,7 +1551,7 @@ def guide_cmd(path=".", file="", format="compact"):
     c = data.get("confidence", "")
     typer.echo(f"{g} [{c}]")
 
-@cli.command(name="mirage", rich_help_panel="Inspection")
+@cli.command(name="mirage", rich_help_panel="Code Analysis")
 def mirage_cmd(path=".", test_file="", format="compact"):
     from vocab.reports import mirage_report
     p = os.path.abspath(path)
@@ -1768,7 +1577,7 @@ def mirage_cmd(path=".", test_file="", format="compact"):
             typer.echo(f'  LLM name: {name} = [{", ".join(phrases)}]')
 
 
-@cli.command(name="decay", rich_help_panel="Inspection")
+@cli.command(name="decay", rich_help_panel="Maintenance")
 def decay_cmd(path=".", file="", weeks=12, half_life=30,
               metabolism: Annotated[bool, typer.Option("--metabolism", help="Active Metabolism: verify pattern declining repo-wide")] = False,
               format="compact"):
@@ -1793,13 +1602,13 @@ def decay_cmd(path=".", file="", weeks=12, half_life=30,
         typer.echo(f'{data.get("file","")}: clean — no decaying patterns')
 
 
-@cli.command(name="entropy", rich_help_panel="Inspection")
+@cli.command(name="entropy", rich_help_panel="Maintenance")
 def entropy_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", help="History lookback")] = 12,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Isothermal Limit — track directory-level structural entropy.
+    """Dir-level vocabulary fragmentation vs 30-commit baseline.
 
     Measures vocabulary cluster dispersion per directory. When entropy
     exceeds the 30-commit rolling baseline, the limit is tripped.
@@ -1828,14 +1637,14 @@ def entropy_cmd(
         typer.echo(f"  [{label}] {d['directory']:30s} entropy={d['entropy']:.2f} baseline={d['baseline']:.2f}")
 
 
-@cli.command(name="zk-proof", rich_help_panel="Agent")
+@cli.command(name="zk-proof", rich_help_panel="Agent Safety")
 def zk_proof_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     file: Annotated[str, typer.Option("--file", help="Schema file (source of truth)")] = "",
     code: Annotated[str, typer.Option("--code", help="LLM-generated code to verify")] = "",
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Zk-Vocabulary Prover — verify generated code uses only allowed identifiers.
+    """Verify generated code identifiers against allowed set.
 
     Extracts identifiers from the schema file. Scans generated code.
     Rejects any identifier not in the allowed set with alternatives.
@@ -1869,13 +1678,13 @@ def zk_proof_cmd(
             typer.echo(f"  '{v['identifier']}' not in schema. Did you mean: {alts}?")
 
 
-@cli.command(name="lagrange", rich_help_panel="Inspection")
+@cli.command(name="safe-islands", rich_help_panel="Maintenance")
 def lagrange_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     file: Annotated[str, typer.Option("--file", help="File to analyze")] = "",
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Lagrange Points — detect structurally isolated blocks safe to edit.
+    """Structurally isolated blocks safe to edit.
 
     Finds blocks with zero co-occurrence edges to the file's primary
     clusters. Editing these blocks has zero blast radius.
@@ -1909,14 +1718,14 @@ def lagrange_cmd(
         typer.echo(f"No Lagrange Points: {note}")
 
 
-@cli.command(name="phase-shift", rich_help_panel="Inspection")
+@cli.command(name="migration-pairs", rich_help_panel="Maintenance")
 def phase_shift_cmd(
     repo_a: Annotated[str, typer.Option("--repo-a", help="Pre-migration repo path")] = "",
     repo_b: Annotated[str, typer.Option("--repo-b", help="Post-migration repo path")] = "",
     min_freq: Annotated[int, typer.Option("--min-freq", help="Minimum frequency to include")] = 2,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Phase-Vocoder Differential Mask — deterministic migration substitution pairs.
+    """Deterministic phrase substitution from two-repo comparison.
 
     Scans two repos (pre/post migration). Extracts phrase-level delta.
     Output is a deterministic replacement task: apply these substitutions.
@@ -1940,13 +1749,13 @@ def phase_shift_cmd(
         typer.echo(f"  {s['from'][:40]} -> {s['to'][:40]}")
 
 
-@cli.command(name="shrapnel", rich_help_panel="Inspection")
+@cli.command(name="concept-fragments", rich_help_panel="Maintenance")
 def shrapnel_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", help="History lookback")] = 12,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
-    """Dead-Water Shrapnel — find phrases stranded by cavitated neighbors.
+    """Phrases coupled to now-deleted neighbors.
 
     Scans git history for phrases that appeared, then disappeared
     (cavitated). Finds remaining phrases uniquely entangled with them.
@@ -1973,7 +1782,7 @@ def shrapnel_cmd(
         typer.echo(f"  '{s['cavitated'][:30]}' -> '{s['stranded'][:30]}' in {s['file']}")
 
 
-@cli.command(name="verify-packet",  rich_help_panel="Agent")
+@cli.command(name="verify-packet",  rich_help_panel="Agent Safety")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -2064,7 +1873,7 @@ def check_diff(
             raise typer.Exit(1)
 
 
-@cli.command(rich_help_panel="Agent")
+@cli.command(rich_help_panel="Agent Safety")
 def route(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     task: Annotated[str | None, typer.Option("--task", "-t", help="Task description")] = None,
@@ -2110,7 +1919,7 @@ def route(
     typer.echo("")
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(rich_help_panel="Utilities")
 def clone(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     threshold: Annotated[float, typer.Option("--threshold", "-t", help="Similarity threshold (0-1)")] = 0.85,
@@ -2135,7 +1944,7 @@ def clone(
             typer.echo(f"    {f}")
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(rich_help_panel="Utilities")
 def landmarks(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     limit: Annotated[int, typer.Option("--limit", "-l", help="Max results")] = 10,
@@ -2271,7 +2080,7 @@ def stable(
     typer.echo(c(f"\n  {len([x for x in data if x['persistence'] >= 0.8])} stable files, {len([x for x in data if x['persistence'] <= 0.3])} churn hotspots", "gray"))
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(rich_help_panel="Getting Started")
 def explore(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
@@ -2635,7 +2444,7 @@ def _print_preflight_checklist(data: dict) -> None:
     typer.echo(c("  Report-only. Stop and inspect manually if risk is high or the changed file is unexpected.", "subheader"))
 
 
-@cli.command(name="agent-bootstrap",  rich_help_panel="Agent")
+@cli.command(name="agent-bootstrap",  rich_help_panel="Utilities")
 def agent_bootstrap(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description to find related files")] = None,
@@ -2817,7 +2626,7 @@ def agent_bootstrap(
         typer.echo("")
 
 
-@cli.command(rich_help_panel="Agent")
+@cli.command(rich_help_panel="Utilities")
 def skeleton(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -2859,7 +2668,7 @@ def delta(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
-    """Dead reckoning: show structural changes since last vocab init scan.
+    """Structural changes since last vocab init scan.
 
     Requires a cached scan from `vocab init` or `vocab repo-map --save`.
     """
@@ -3049,7 +2858,7 @@ def ci_report_cmd(
         typer.echo(_why_ci_report(data, ref_a, ref_b))
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(rich_help_panel="Getting Started")
 def inspect(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -3185,7 +2994,7 @@ def inspect(
         typer.echo(_why_inspect(data))
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(rich_help_panel="Getting Started")
 def modules(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
@@ -3198,7 +3007,7 @@ def modules(
         typer.echo(format_modules(data))
 
 
-@cli.command(name="help-agent",  rich_help_panel="Utilities")
+@cli.command(name="help-agent",  rich_help_panel="Getting Started")
 def help_agent(task: Annotated[str, typer.Argument(help="Engineering task description")]):
     """Recommend useful vocab commands for an agent task."""
     task_lower = task.lower()
@@ -3349,7 +3158,7 @@ def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo pat
     typer.echo(f"Phrases: {vocab.size} unique / {len(seg_result.phrases)} total")
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(rich_help_panel="Utilities")
 def orphans(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
@@ -3479,7 +3288,7 @@ def main():
     cli()
 
 
-@cli.command(name="anomalies",  rich_help_panel="Inspection")
+@cli.command(name="anomalies",  rich_help_panel="Maintenance")
 def lattice(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     base_ref: Annotated[str | None, typer.Option("--base", help="Base git ref (default: HEAD~1)")] = None,
@@ -3550,7 +3359,7 @@ def lattice(
         typer.echo("")
 
 
-@cli.command(rich_help_panel="Inspection")
+@cli.command(rich_help_panel="Maintenance")
 def patterns(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     base_ref: Annotated[str | None, typer.Option("--base", help="Base git ref (default: HEAD~1)")] = None,
@@ -3679,7 +3488,7 @@ def stop(
     typer.echo("")
 
 
-@cli.command(name="vocabulary-trend",  rich_help_panel="Inspection")
+@cli.command(name="vocabulary-trend",  rich_help_panel="Maintenance")
 def entropy(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks to analyze")] = 12,
@@ -3726,7 +3535,7 @@ def entropy(
         typer.echo("")
 
 
-@cli.command(name="origins",  rich_help_panel="History")
+@cli.command(name="origins",  rich_help_panel="Maintenance")
 def genesis(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     top: Annotated[int, typer.Option("--top", "-n", help="Max results per category")] = 20,
@@ -3858,7 +3667,7 @@ def bond(
         typer.echo("")
 
 
-@cli.command(name="diff-structural",  rich_help_panel="Inspection")
+@cli.command(name="diff-structural",  rich_help_panel="Maintenance")
 def diff_structural(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
     ref_a: Annotated[str | None, typer.Option("--before", help="Base ref (default: HEAD~1)")] = None,
@@ -3974,7 +3783,7 @@ def ask(
     typer.echo(c(f"  {cap}", "gray"))
 
 
-@cli.command(name="verify-scope",  rich_help_panel="Agent")
+@cli.command(name="verify-scope",  rich_help_panel="Agent Safety")
 def verify_scope(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Expected/contract files; repeat or comma-separate")] = None,
@@ -4149,7 +3958,7 @@ def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
     return f"Verification confidence is {level}; structurally conservative."
 
 
-@cli.command(name="escape-velocity", rich_help_panel="Inspection")
+@cli.command(name="escape-velocity", rich_help_panel="Maintenance")
 def escape_velocity_cmd(path=".", format="compact"):
     from vocab.reports import escape_velocity_report
     p = os.path.abspath(path)
@@ -4162,7 +3971,7 @@ def escape_velocity_cmd(path=".", format="compact"):
         typer.echo(json.dumps(data, indent=2)); return
     for t in data.get("tagged", [])[:5]:
         typer.echo(f'  {t["phrase"]}: {t["label"]}')
-@cli.command(name="trap", rich_help_panel="CI")
+@cli.command(name="trap", rich_help_panel="Code Analysis")
 def trap_cmd(path=".", file_a="", file_b="", format="compact"):
     from vocab.reports import trap_report
     p = os.path.abspath(path)
@@ -4177,7 +3986,7 @@ def trap_cmd(path=".", file_a="", file_b="", format="compact"):
         typer.echo(json.dumps(data, indent=2)); return
     typer.echo(f'Overlap: {data["overlap"]:.1%} — {data["label"]}')
 
-@cli.command(name="thanatosis", rich_help_panel="Inspection")
+@cli.command(name="hub-risk", rich_help_panel="Code Analysis")
 def thanatosis_cmd(path=".", format="compact"):
     from vocab.reports import thanatosis_report
     p = os.path.abspath(path)
@@ -4191,7 +4000,7 @@ def thanatosis_cmd(path=".", format="compact"):
     for f in data.get("files", [])[:3]:
         typer.echo(f'  {f["file"]}: cent={f["centrality"]} edits={f["edits"]} risk={f["risk_ratio"]}')
 
-@cli.command(name="trompe", rich_help_panel="Inspection")
+@cli.command(name="complexity-ratio", rich_help_panel="Code Analysis")
 def trompe_cmd(path=".", file="", format="compact"):
     from vocab.reports import trompe_report
     p = os.path.abspath(path)
@@ -4206,7 +4015,7 @@ def trompe_cmd(path=".", file="", format="compact"):
         typer.echo(json.dumps(data, indent=2)); return
     typer.echo(f'Trompe: {data.get("trompe_ratio",0)} — {data.get("label","")}')
 
-@cli.command(name="porosity", rich_help_panel="CI")
+@cli.command(name="porosity", rich_help_panel="Code Analysis")
 def porosity_cmd(path=".", format="compact"):
     from vocab.reports import porosity_report
     p = os.path.abspath(path)
@@ -4219,7 +4028,7 @@ def porosity_cmd(path=".", format="compact"):
         typer.echo(json.dumps(data, indent=2)); return
     typer.echo(f'Porosity: {data.get("porosity",0):.6f}')
 
-@cli.command(name="thylacine", rich_help_panel="Inspection")
+@cli.command(name="extinct-exports", rich_help_panel="Maintenance")
 def thylacine_cmd(path=".", format="compact"):
     from vocab.reports import thylacine_report
     p = os.path.abspath(path)
@@ -4235,21 +4044,7 @@ def thylacine_cmd(path=".", format="compact"):
     for t in thy[:3]:
         typer.echo(f'  {t["identifier"]} ({t["files"]} files)')
 
-@cli.command(name="rogue-wave", rich_help_panel="Inspection")
-def rogue_wave_cmd(path=".", threshold: float = 2.5, format="compact"):
-    from vocab.reports import rogue_wave_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = rogue_wave_report(path=p, threshold=threshold)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    for rw in data.get("rogue_waves", [])[:3]:
-        typer.echo(f'  {rw["file"]}: z={rw["z_score"]}')
-
-@cli.command(name="tensegrity", rich_help_panel="Inspection")
+@cli.command(name="coupling-chain", rich_help_panel="Code Analysis")
 def tensegrity_cmd(path=".", format="compact"):
     from vocab.reports import tensegrity_report
     p = os.path.abspath(path)
@@ -4263,22 +4058,7 @@ def tensegrity_cmd(path=".", format="compact"):
     for tp in data.get("tensegrity_pairs", [])[:3]:
         typer.echo(f'  {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} im)')
 
-@cli.command(name="implicature", rich_help_panel="Inspection")
-def implicature_cmd(path=".", file="", format="compact"):
-    from vocab.reports import implicature_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = implicature_report(path=p, file_path=file)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    for v in data.get("violations", [])[:5]:
-        fl = "".join("Q" if v[k] else "-" for k in ["quantity","quality","relation","manner"])
-        typer.echo(f'  {v["file"]}: {fl}')
-
-@cli.command(name="criticality", rich_help_panel="Inspection")
+@cli.command(name="criticality", rich_help_panel="Code Analysis")
 def criticality_cmd(path=".", file="", format="compact"):
     from vocab.reports import criticality_report
     p = os.path.abspath(path)
@@ -4293,8 +4073,9 @@ def criticality_cmd(path=".", file="", format="compact"):
         typer.echo(f'  {s["file"]}: k={s["k"]} ({s["class"]})')
 
 
-@cli.command(name="guard", rich_help_panel="Agent")
+@cli.command(name="guard", rich_help_panel="Agent Safety")
 def guard_cmd(path=".", file="", task="", format="compact"):
+    """Combined safety packet: guide + hub-risk + complexity + criticality. """
     from vocab.reports import guard_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -4310,6 +4091,7 @@ def guard_cmd(path=".", file="", task="", format="compact"):
 
 @cli.command(name="check-pr", rich_help_panel="CI")
 def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact"):
+    """CI PR summary: parity-bit + trap + diff. """
     from vocab.reports import check_pr_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -4323,7 +4105,7 @@ def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact"):
     for tp in data.get("trap", [])[:2]:
         typer.echo(f'  {tp.get("file_a","")} <-> {tp.get("file_b","")}: {tp.get("label","")}')
 
-@cli.command(name="cleanup-list", rich_help_panel="Inspection")
+@cli.command(name="cleanup-list", rich_help_panel="Maintenance")
 def cleanup_list_cmd(path=".", format="compact"):
     from vocab.reports import cleanup_list_report
     p = os.path.abspath(path)
@@ -4338,7 +4120,7 @@ def cleanup_list_cmd(path=".", format="compact"):
     for i in data.get("items", [])[:5]:
         typer.echo(f'  {i["identifier"]}: {i["effort"]} ({i["files"]} files)')
 
-@cli.command(name="vulnerability-map", rich_help_panel="Inspection")
+@cli.command(name="vulnerability-map", rich_help_panel="Maintenance")
 def vulnerability_map_cmd(path=".", format="compact"):
     from vocab.reports import vulnerability_report
     p = os.path.abspath(path)
@@ -4353,6 +4135,7 @@ def vulnerability_map_cmd(path=".", format="compact"):
 
 @cli.command(name="health-score", rich_help_panel="CI")
 def health_score_cmd(path=".", format="compact"):
+    """2-axis health: coupling density x modularity. """
     from vocab.reports import repo_health as health_score
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
