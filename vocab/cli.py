@@ -1659,6 +1659,98 @@ def metamorphic_cmd(from_repo="", to_repo="", ref="HEAD~1", format="compact"):
         typer.echo(f'  {c["file"]} ({c["coupling_label"]}, {c["impact_count"]} hits)')
     typer.echo(f'  {data.get("migration_order","")}')
 
+@cli.command(name="nucleation", rich_help_panel="Inspection")
+def nucleation_cmd(path=".", format="compact"):
+    from vocab.reports import nucleation_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = nucleation_report(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    sites = [s["phrase"] for s in data.get("nucleation_sites", [])[:5]]
+    typer.echo(f'Nucleation: {", ".join(sites)}')
+
+@cli.command(name="capillary", rich_help_panel="Inspection")
+def capillary_cmd(path=".", format="compact"):
+    from vocab.reports import capillary_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = capillary_report(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    for c in data.get("capillaries", [])[:3]:
+        typer.echo(f'  {c["file"]} ({c["edges"]} edges)')
+
+@cli.command(name="spectral-gap", rich_help_panel="Utilities")
+def spectral_gap_cmd(path=".", format="compact"):
+    from vocab.reports import spectral_gap_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = spectral_gap_report(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    g = data.get("spectral_gap", 0)
+    m = data.get("modularity", "?")
+    typer.echo(f'Gap: {g} ({m})')
+
+@cli.command(name="phantom", rich_help_panel="Inspection")
+def phantom_cmd(path=".", format="compact"):
+    from vocab.reports import phantom_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = phantom_report(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    d = data.get("frameworks_detected", {})
+    if d:
+        typer.echo(f'  {" ".join(f"{k}({v})" for k,v in sorted(d.items(), key=lambda x:-x[1])[:5])}')
+    else:
+        typer.echo('  none detected')
+
+@cli.command(name="lichen", rich_help_panel="Inspection")
+def lichen_cmd(path=".", format="compact"):
+    from vocab.reports import lichen_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = lichen_report(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    f = data.get("fractures", [])
+    typer.echo(f'Fractures: {len(f)}')
+    for x in f[:2]:
+        typer.echo(f'  {x["files"][0]} <-> {x["files"][1]} (vocab {x["vocab_overlap"]})')
+
+@cli.command(name="parity-bit", rich_help_panel="CI")
+def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact"):
+    from vocab.reports import parity_bit_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not ref_a or not ref_b:
+        typer.echo("provide --ref-a and --ref-b", err=True); raise typer.Exit(1)
+    data = parity_bit_report(path=p, ref_a=ref_a, ref_b=ref_b)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    u = data.get("mirror_unchanged", False)
+    typer.echo(f'Mirror {"UNCHANGED" if u else "CHANGED"}')
+
 @cli.command(name="catalytic-crack", rich_help_panel="Utilities")
 def catalytic_crack_cmd(path=".", file="", format="compact"):
     from vocab.reports import catalytic_crack_report

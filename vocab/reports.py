@@ -3330,6 +3330,193 @@ def metamorphic_mask_report(source_path: str, target_path: str,
     }
 
 
+_NUCLEATION_WORDLIST: set[str] | None = None
+
+
+def nucleation_report(path: str = ".", top_n: int = 10) -> dict:
+    """Nucleation sites — stable, tiling phrases that anchor the codebase."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    from collections import Counter
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    phrase_files: Counter[str] = Counter()
+    for fv in analysis.file_vocabs:
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                phrase_files[m.group()] += 1
+    total = max(len(analysis.file_vocabs), 1)
+    # Stable = appears in >40% of files (tilings)
+    stable = [(p, c) for p, c in phrase_files.most_common(200) if c >= total * 0.4]
+    return {"type": "nucleation", "phrases_tracked": len(phrase_files),
+            "nucleation_sites": [{"phrase": p, "files": c} for p, c in stable[:top_n]]}
+
+
+def capillary_report(path: str = ".", top_n: int = 5) -> dict:
+    """Capillary action — high-edge-count files (brittle coupling)."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    file_tokens: dict[str, set[str]] = {}
+    for fv in analysis.file_vocabs:
+        tokens: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                tokens.add(m.group())
+        file_tokens[fv.path] = tokens
+    total = len(file_tokens)
+    scores: list[tuple[str, int, float]] = []
+    for path_a, ta in file_tokens.items():
+        edges = sum(1 for pb, tb in file_tokens.items() if pb != path_a and ta & tb)
+        ratio = edges / max(total, 1)
+        # Barrel filter: skip re-export files (import/export dominated)
+        scores.append((path_a, edges, ratio))
+    scores.sort(key=lambda x: -x[1])
+    return {"type": "capillary", "files_scanned": total,
+            "capillaries": [{"file": p, "edges": e, "ratio": round(r, 3)} for p, e, r in scores[:top_n]]}
+
+
+def spectral_gap_report(path: str = ".") -> dict:
+    """Spectral gap — cluster-size distribution ratio (modularity score)."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    from vocab.scanner import scan_codebase
+    from vocab.bootstrap import compute_modules
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    mods = compute_modules(path, analysis=analysis)
+    mod_list = mods.get("modules", []) if isinstance(mods, dict) else []
+    sizes = sorted([m.get("size", 0) for m in mod_list], reverse=True)
+    gap = round(sizes[0] / max(sizes[1] if len(sizes) > 1 else 1, 1), 2) if sizes else 0
+    return {"type": "spectral_gap", "total_clusters": len(sizes),
+            "cluster_sizes": sizes[:5], "spectral_gap": gap,
+            "modularity": "high" if gap >= 3 else ("moderate" if gap >= 1.5 else "low")}
+
+
+def phantom_report(path: str = ".") -> dict:
+    """Phantom patterns — framework/library detection from import phrases."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    frameworks = {"react": 0, "vue": 0, "svelte": 0, "angular": 0, "django": 0, "flask": 0,
+                  "express": 0, "spring": 0, "rails": 0, "laravel": 0, "next": 0, "nuxt": 0,
+                  "tailwind": 0, "bootstrap": 0, "jquery": 0, "lodash": 0, "redux": 0,
+                  "zustand": 0, "sqlalchemy": 0, "gorm": 0, "sqlx": 0}
+    for fv in analysis.file_vocabs:
+        ext = fv.path.rsplit(".", 1)[-1].lower() if "." in fv.path else ""
+        for phrase in fv.vocabulary:
+            pl = phrase.lower().replace('"', "").replace("'", "")
+            for fw in frameworks:
+                if fw in pl:
+                    frameworks[fw] += 1
+    detected = {k: v for k, v in frameworks.items() if v >= 2}
+    return {"type": "phantom", "frameworks_detected": detected}
+
+
+def lichen_report(path: str = ".", lookback_commits: int = 100) -> dict:
+    """Lichen growth — low-cohesion files at fracture sites."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    from vocab.scanner import scan_codebase
+    from collections import Counter
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    file_tokens: dict[str, set[str]] = {}
+    for fv in analysis.file_vocabs:
+        tokens: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                tokens.add(m.group())
+        file_tokens[fv.path] = tokens
+    # Co-change history
+    log = vgit.ref_log(path, count=lookback_commits)
+    co_change_counts: Counter[tuple[str, str]] = Counter()
+    for ref in log:
+        try:
+            diffs = vgit.diff_refs(path, f"{ref.sha}^", ref.sha)
+        except Exception:
+            continue
+        if len(diffs) < 2 or len(diffs) > 20:
+            continue
+        for i in range(len(diffs)):
+            for j in range(i + 1, len(diffs)):
+                a, b = (diffs[i], diffs[j]) if diffs[i] < diffs[j] else (diffs[j], diffs[i])
+                co_change_counts[(a, b)] += 1
+    # Low-cohesion: shared <10% vocabulary AND co-changed <2 times
+    fractures = []
+    for path_a, ta in file_tokens.items():
+        for path_b, tb in file_tokens.items():
+            if path_a >= path_b:
+                continue
+            union = len(ta | tb)
+            if union == 0:
+                continue
+            overlap = len(ta & tb) / union
+            pair = (path_a, path_b) if path_a < path_b else (path_b, path_a)
+            co = co_change_counts.get(pair, 0)
+            if overlap < 0.1 and co < 2:
+                fractures.append({"files": [path_a, path_b], "vocab_overlap": round(overlap, 3),
+                                  "co_changes": co})
+                if len(fractures) >= 5:
+                    break
+        if len(fractures) >= 5:
+            break
+    fractures.sort(key=lambda x: x["vocab_overlap"])
+    return {"type": "lichen", "fractures": fractures[:5]}
+
+
+def parity_bit_report(path: str = ".", ref_a: str = "", ref_b: str = "") -> dict:
+    """Parity bit — XOR hash of test mirror for CI gate."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not ref_a or not ref_b:
+        return {"error": "provide --ref-a and --ref-b"}
+    from vocab.scanner import scan_codebase
+    import hashlib
+    try:
+        analysis_a = scan_codebase(path, git_ref=ref_a, quiet=True, max_files=2500, max_seconds=30)
+        analysis_b = scan_codebase(path, git_ref=ref_b, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    def _mirror_hash(analysis):
+        phrases: set[str] = set()
+        for fv in analysis.file_vocabs:
+            if "/test" in fv.path.lower() or "tests/" in fv.path.lower() or "_test." in fv.path or ".test." in fv.path:
+                for p in fv.vocabulary:
+                    phrases.add(p)
+        m = hashlib.sha256()
+        for p in sorted(phrases):
+            m.update(p.encode())
+        return m.hexdigest()[:16]
+    h_a, h_b = _mirror_hash(analysis_a), _mirror_hash(analysis_b)
+    return {"type": "parity_bit", "ref_a": ref_a, "ref_b": ref_b,
+            "hash_a": h_a, "hash_b": h_b, "mirror_unchanged": h_a == h_b}
+
+
 def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
                        max_results: int = 20) -> dict:
     """Bose-Einstein Condensation — find structurally identical files.
