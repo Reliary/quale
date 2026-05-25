@@ -3254,8 +3254,8 @@ def metamorphic_mask_report(source_path: str, target_path: str,
 
     # Scan source before and after to find changed phrases
     try:
-        before = scan_codebase(source_path, git_ref=source_ref, quiet=True, max_files=500, max_seconds=15)
-        after = scan_codebase(source_path, quiet=True, max_files=500, max_seconds=15)
+        before = scan_codebase(source_path, git_ref=f"{source_ref}^", quiet=True, max_files=500, max_seconds=15)
+        after = scan_codebase(source_path, git_ref=source_ref, quiet=True, max_files=500, max_seconds=15)
     except Exception as e:
         return {"error": f"source scan failed: {e}"}
 
@@ -3276,26 +3276,30 @@ def metamorphic_mask_report(source_path: str, target_path: str,
     removed = phrases_before - phrases_after
     added = phrases_after - phrases_before
 
-    # Build mask: for each removed phrase, find the most similar added phrase
-    mask: list[dict] = []
-    for r in sorted(removed)[:20]:
-        best = max(added, key=lambda a: sum(1 for x, y in zip(a, r) if x == y), default=None)
-        if best:
-            mask.append({"from": r, "to": best})
+    # Build mask: new identifiers introduced by the commit
+    mask: list[dict] = [{"from": "", "to": a} for a in sorted(added)[:20]]
 
-    # Step 2: Project onto target repo — find impact craters
+    # Step 2: Project onto target repo — find files that need updating
+    # Look for files in target that contain conceptually similar concepts
+    # but haven't been updated to use the new identifiers yet
     try:
         target = scan_codebase(target_path, quiet=True, max_files=2500, max_seconds=30)
     except Exception as e:
         return {"error": f"target scan failed: {e}"}
 
-    # Find files in target containing the removed phrases
+    # Find files in target that share conceptual overlap with the added phrases
     crater_files: Counter[str] = Counter()
+    target_phrase_sets: dict[str, set[str]] = {}
+    token_re2 = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
     for fv in target.file_vocabs:
+        tokens: set[str] = set()
         for phrase in fv.vocabulary:
-            for m in token_re.finditer(phrase):
-                if m.group() in removed:
-                    crater_files[fv.path] += 1
+            for m in token_re2.finditer(phrase):
+                tokens.add(m.group())
+        target_phrase_sets[fv.path] = tokens
+        for a_phrase in added:
+            if a_phrase in tokens or any(a_phrase.lower()[:5] in t.lower() for t in tokens):
+                crater_files[fv.path] += 1
 
     # Rank by coupling (number of shared phrases)
     craters: list[dict] = []
