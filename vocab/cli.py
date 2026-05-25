@@ -38,18 +38,25 @@ cli = typer.Typer(
     help="""
     vocab — structural codebase analysis. No parsers, no config, any language.
 
-    Orients you, catches hidden dependencies, and reveals architecture without parsers.
+    Find the right command for you:
+      HUMAN  explore (what's here), inspect (deep tour), hub-risk (don't touch),
+             extinct-exports (cleanup), edit-context (what breaks?)
+      CI     ci-report [GATE], check-diff [GATE], parity-bit [GATE], check-pr [INFO], pr-report [INFO]
+      AGENT  edit-context, guard, contract, verify
 
-    Workflow groups (common uses):
-      GETTING STARTED    analyze, diff, search, explore, inspect, repo-map, modules, help-agent, init
-      AGENT SAFETY       edit-context, guard, contract, check-plan, route, verify-packet, verify-scope, veto-cascade, cascade-verify, zk-proof, fold, guide, isolate, triangulate
-      CODE ANALYSIS      capillary, phantom, mirage, trap, hub-risk, complexity-ratio, coupling-chain, criticality, latent-deps, porosity, spectral-gap
-      HISTORY            timeline, lifecycle, stable, provenance, delta
-      MAINTENANCE        extinct-exports, safe-islands, migration-pairs, decay, escape-velocity, entropy, solve, deflate, concept-flow, file-epochs, concept-fragments, cleanup-list, vulnerability-map, patterns, vocabulary-trend, anomalies
-      CI                 blast, ci-report, pr-report, check-pr, check-diff, parity-bit, drift-check, health-score, forecast
-      CROSS-REPO         compare, coupling
-      VERIFICATION       verify, verify-bonds, reverse-verify, verify-classify, verify-drift, test-gaps, co-change
-      UTILITIES          fingerprint, orphans, stop, ask, calibration, agent-bootstrap, skeleton, orient, clone, landmarks
+    Run ``vocab help-agent "your task"`` if you're not sure which command.
+
+    By question (all commands):
+      WHAT'S HERE?        explore, inspect, analyze, repo-map, modules, skeleton
+      WHAT WILL BREAK?    edit-context, guard, hub-risk, coupling-chain, criticality, capillary, latent-deps
+      WHERE ARE TESTS?    verify, verify-packet, verify-scope, test-gaps, reverse-verify, mirage
+      WHAT CHANGED?       diff, blast, ci-report, check-pr, check-diff, parity-bit, pr-report, delta
+      WHAT TO CLEAN?      extinct-exports, escape-velocity, cleanup-list, decay, safe-islands
+      WHAT'S THE STORY?   timeline, lifecycle, stable, provenance, origins, patterns, file-epochs, concept-flow
+      ARE REPOS DRIFTING? compare, coupling, migration-pairs, concept-fragments
+      ADVANCED            capillary, phantom, trap, porosity, spectral-gap, complexity-ratio, escape-velocity,
+                          entropy, solve, deflate, heisenberg, traffic-control, anomalies, vocabulary-trend,
+                          diff-structural, fingerprint, orphans, stop, ask, calibration, orient, clone, landmarks
     """
 )
 
@@ -122,6 +129,8 @@ def analyze(
     no_color: Annotated[bool, typer.Option("--no-color", help="Disable colored output")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Only output on error")] = False,
 ):
+
+    """List all phrases, languages, files — first-pass structural scan."""
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
@@ -155,6 +164,8 @@ def diff(
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
     why: Annotated[bool, typer.Option("--why", help="Show why this diff matters structurally")] = False,
 ):
+
+    """Compare vocabulary between two git refs."""
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
@@ -220,6 +231,8 @@ def search(
     related: Annotated[bool, typer.Option("--related", "-r", help="Show co-occurring concepts")] = False,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json, compact")] = "terminal",
 ):
+
+    """Find files containing a phrase or concept."""
     results = search_cross_repo_ranked(phrase, paths)
     if not results:
         if format == "json":
@@ -275,6 +288,8 @@ def lifecycle(
     signal: Annotated[str | None, typer.Option("--signal", "-s", help="Filter by signal type: DEAD, GROWING, STABLE, etc.")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
 ):
+
+    """Classify phrases as growing, stable, decaying, dead, seasonal."""
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
@@ -305,6 +320,8 @@ def blast(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
 ):
+
+    """Vocabulary overlap with changed files."""
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
@@ -1160,6 +1177,8 @@ def solve_cmd(
     focus: Annotated[str, typer.Option("--focus", help="Gravitational Lensing: filter cipher keys to those orbiting a specific concept")] = "",
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
 ):
+    """Surface cipher keys: non-dictionary identifiers to learn a repo."""
+
     from vocab.reports import solve_report
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
@@ -1179,6 +1198,8 @@ def solve_cmd(
 
 @cli.command(name="deflate", rich_help_panel="Maintenance")
 def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact"):
+    """Cap net-new identifiers per edit."""
+
     from vocab.reports import deflate_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1379,6 +1400,8 @@ def epidemiology_cmd(
 
 @cli.command(name="orient", rich_help_panel="Utilities")
 def orient_cmd(path=".", task="", format="compact"):
+    """One-call orientation: solve + triangulate + isolate."""
+
     from vocab.reports import pipeline_orient
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1425,6 +1448,8 @@ def health_cmd(
 
 @cli.command(name="heisenberg", rich_help_panel="Maintenance")
 def heisenberg_cmd(path=".", file="", diff="", format="compact"):
+    """Mixed refactor/feature edits that must be split."""
+
     from vocab.reports import heisenberg_check
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1447,6 +1472,8 @@ def heisenberg_cmd(path=".", file="", diff="", format="compact"):
 
 @cli.command(name="traffic-control", rich_help_panel="Maintenance")
 def traffic_control_cmd(path=".", file="", intended_import="", format="compact"):
+    """Zone files by graph centrality percentile."""
+
     from vocab.reports import traffic_control_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1470,6 +1497,8 @@ def traffic_control_cmd(path=".", file="", intended_import="", format="compact")
 
 @cli.command(name="capillary", rich_help_panel="Code Analysis")
 def capillary_cmd(path=".", format="compact"):
+    """Files with the most inter-file vocabulary edges."""
+
     from vocab.reports import capillary_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1484,6 +1513,8 @@ def capillary_cmd(path=".", format="compact"):
 
 @cli.command(name="spectral-gap", rich_help_panel="Code Analysis")
 def spectral_gap_cmd(path=".", format="compact"):
+    """Modularity score: largest cluster / second largest."""
+
     from vocab.reports import spectral_gap_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1499,6 +1530,8 @@ def spectral_gap_cmd(path=".", format="compact"):
 
 @cli.command(name="phantom", rich_help_panel="Code Analysis")
 def phantom_cmd(path=".", format="compact"):
+    """Detect framework/library from import/export vocabulary."""
+
     from vocab.reports import phantom_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1517,7 +1550,7 @@ def phantom_cmd(path=".", format="compact"):
 
 @cli.command(name="parity-bit", rich_help_panel="CI")
 def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact"):
-    """SHA-1 hash of a module phrase set: CHANGED/UNCHANGED CI gate. """
+    """SHA-1 of module phrase set. [GATE: CHANGED vs UNCHANGED]"""
     from vocab.reports import parity_bit_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1553,6 +1586,8 @@ def guide_cmd(path=".", file="", format="compact"):
 
 @cli.command(name="mirage", rich_help_panel="Code Analysis")
 def mirage_cmd(path=".", test_file="", format="compact"):
+    """Tests whose vocab mismatches the function name claim."""
+
     from vocab.reports import mirage_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1581,6 +1616,8 @@ def mirage_cmd(path=".", test_file="", format="compact"):
 def decay_cmd(path=".", file="", weeks=12, half_life=30,
               metabolism: Annotated[bool, typer.Option("--metabolism", help="Active Metabolism: verify pattern declining repo-wide")] = False,
               format="compact"):
+    """Legacy patterns; --metabolism for active decline."""
+
     from vocab.reports import decay_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -1925,6 +1962,8 @@ def clone(
     threshold: Annotated[float, typer.Option("--threshold", "-t", help="Similarity threshold (0-1)")] = 0.85,
     min_files: Annotated[int, typer.Option("--min-files", "-m", help="Minimum files per clone group")] = 2,
 ):
+
+    """Structural clone detection via fingerprint overlap."""
     try:
         analysis = scan_codebase(path, deep=True, clones=True)
     except Exception as e:
@@ -1949,6 +1988,8 @@ def landmarks(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     limit: Annotated[int, typer.Option("--limit", "-l", help="Max results")] = 10,
 ):
+
+    """Phrases that distinguish a file from all others."""
     try:
         analysis = scan_codebase(path, deep=True)
     except Exception as e:
@@ -1970,6 +2011,8 @@ def timeline(
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 12,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
 ):
+
+    """Track phrases through git history."""
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
@@ -3181,7 +3224,7 @@ def pr_report(
     ref_b: Annotated[str, typer.Argument(help="Target git ref")],
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
 ):
-    """Generate a consolidated PR structural report (markdown)."""
+    """PR structural report in markdown. [INFO: always exits 0]"""
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
@@ -3960,6 +4003,8 @@ def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
 
 @cli.command(name="escape-velocity", rich_help_panel="Maintenance")
 def escape_velocity_cmd(path=".", format="compact"):
+    """Phrase removal difficulty: ESCAPED / BOUND / DEEP."""
+
     from vocab.reports import escape_velocity_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -3973,6 +4018,8 @@ def escape_velocity_cmd(path=".", format="compact"):
         typer.echo(f'  {t["phrase"]}: {t["label"]}')
 @cli.command(name="trap", rich_help_panel="Code Analysis")
 def trap_cmd(path=".", file_a="", file_b="", format="compact"):
+    """Identifier overlap between two concurrently-edited files."""
+
     from vocab.reports import trap_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -3988,6 +4035,8 @@ def trap_cmd(path=".", file_a="", file_b="", format="compact"):
 
 @cli.command(name="hub-risk", rich_help_panel="Code Analysis")
 def thanatosis_cmd(path=".", format="compact"):
+    """High-centrality files with zero edits."""
+
     from vocab.reports import thanatosis_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -3999,9 +4048,12 @@ def thanatosis_cmd(path=".", format="compact"):
         typer.echo(json.dumps(data, indent=2)); return
     for f in data.get("files", [])[:3]:
         typer.echo(f'  {f["file"]}: cent={f["centrality"]} edits={f["edits"]} risk={f["risk_ratio"]}')
+    typer.echo('  \033[90mNext: vocab guard --file <file> | vocab edit-context --files <file>\033[0m')
 
 @cli.command(name="complexity-ratio", rich_help_panel="Code Analysis")
 def trompe_cmd(path=".", file="", format="compact"):
+    """Apparent lines vs unique identifiers."""
+
     from vocab.reports import trompe_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -4017,6 +4069,8 @@ def trompe_cmd(path=".", file="", format="compact"):
 
 @cli.command(name="porosity", rich_help_panel="Code Analysis")
 def porosity_cmd(path=".", format="compact"):
+    """Sparse coupling estimate without computing co-occurrence."""
+
     from vocab.reports import porosity_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -4030,6 +4084,8 @@ def porosity_cmd(path=".", format="compact"):
 
 @cli.command(name="extinct-exports", rich_help_panel="Maintenance")
 def thylacine_cmd(path=".", format="compact"):
+    """Multi-file exports never imported externally."""
+
     from vocab.reports import thylacine_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -4043,9 +4099,13 @@ def thylacine_cmd(path=".", format="compact"):
     typer.echo(f'Extinct exports: {len(thy)}')
     for t in thy[:3]:
         typer.echo(f'  {t["identifier"]} ({t["files"]} files)')
+    if thy:
+        typer.echo('  \033[90mNext: vocab cleanup-list | vocab escape-velocity\033[0m')
 
 @cli.command(name="coupling-chain", rich_help_panel="Code Analysis")
 def tensegrity_cmd(path=".", format="compact"):
+    """Indirect coupling with no direct edge."""
+
     from vocab.reports import tensegrity_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -4060,6 +4120,8 @@ def tensegrity_cmd(path=".", format="compact"):
 
 @cli.command(name="criticality", rich_help_panel="Code Analysis")
 def criticality_cmd(path=".", file="", format="compact"):
+    """2-hop amplification ratio: changes amplify or dampen."""
+
     from vocab.reports import criticality_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -4091,7 +4153,7 @@ def guard_cmd(path=".", file="", task="", format="compact"):
 
 @cli.command(name="check-pr", rich_help_panel="CI")
 def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact"):
-    """CI PR summary: parity-bit + trap + diff. """
+    """CI PR summary: parity-bit + trap + diff. [INFO: always exits 0]"""
     from vocab.reports import check_pr_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -4107,6 +4169,8 @@ def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact"):
 
 @cli.command(name="cleanup-list", rich_help_panel="Maintenance")
 def cleanup_list_cmd(path=".", format="compact"):
+    """Prioritized cleanup: extinct-exports x escape-velocity."""
+
     from vocab.reports import cleanup_list_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
@@ -4122,6 +4186,8 @@ def cleanup_list_cmd(path=".", format="compact"):
 
 @cli.command(name="vulnerability-map", rich_help_panel="Maintenance")
 def vulnerability_map_cmd(path=".", format="compact"):
+    """Overlap of hub-risk and capillary."""
+
     from vocab.reports import vulnerability_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
