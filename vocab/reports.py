@@ -3472,77 +3472,6 @@ def parity_bit_report(path: str = ".", ref_a: str = "", ref_b: str = "") -> dict
             "hash_a": h_a, "hash_b": h_b, "mirror_unchanged": h_a == h_b}
 
 
-def precedent_report(path: str = ".", module_dir: str = "") -> dict:
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    if not module_dir:
-        return {"error": "provide --module-dir"}
-    from vocab.scanner import scan_codebase
-    from collections import Counter
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
-    dp = module_dir.rstrip("/") + "/"
-    mod_files = [fv for fv in analysis.file_vocabs if fv.path.startswith(dp)]
-    if len(mod_files) < 5:
-        return {"error": "module needs >=10 files"}
-    fc: Counter[str] = Counter()
-    for fv in mod_files:
-        seen = set()
-        for phrase in fv.vocabulary:
-            for m in token_re.finditer(phrase):
-                seen.add(m.group())
-        for t in seen:
-            fc[t] += 1
-    total = len(mod_files)
-    stable = [(p, c) for p, c in fc.most_common(100) if c >= total * 0.6 and len(p) >= 3]
-    return {"module": module_dir, "precedents": [{"phrase": p, "files": c} for p, c in stable[:8]]}
-
-
-def flocking_report(path: str = ".", module_dir: str = "") -> dict:
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    if not module_dir:
-        return {"error": "provide --module-dir"}
-    from vocab.scanner import scan_codebase
-    from vocab.bootstrap import compute_modules
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
-    dp = module_dir.rstrip("/") + "/"
-    mod_files = [fv.path for fv in analysis.file_vocabs if fv.path.startswith(dp)]
-    if len(mod_files) < 5:
-        return {"error": "module needs >=5 files"}
-    pd = precedent_report(path, module_dir)
-    precedents = set(p["phrase"] for p in pd.get("precedents", []))
-    mt = {}
-    for fv in analysis.file_vocabs:
-        if fv.path in mod_files:
-            s = set()
-            for phrase in fv.vocabulary:
-                for m in token_re.finditer(phrase):
-                    s.add(m.group())
-            mt[fv.path] = s
-    sep = sum(1 for i, a in enumerate(mod_files) for j, b in enumerate(mod_files) if i < j and len(mt.get(a,set()) & mt.get(b,set())) >= 5)
-    alg = 0
-    if precedents:
-        for i, a in enumerate(mod_files):
-            for j, b in enumerate(mod_files):
-                if i < j and abs(len(precedents & mt.get(a,set())) - len(precedents & mt.get(b,set()))) >= 3:
-                    alg += 1
-    mods = compute_modules(path, analysis=analysis)
-    ml = mods.get("modules", []) if isinstance(mods, dict) else []
-    coh = sum(1 for m in ml if any(f in m.get("files", []) for f in mod_files))
-    return {"module": module_dir, "separated": "good" if sep == 0 else f"{sep} crowded",
-            "aligned": "good" if alg == 0 else f"{alg} misaligned", "cohesion": coh}
-
-
 def trap_report(path: str = ".", file_a: str = "", file_b: str = "") -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -3613,54 +3542,6 @@ def thanatosis_report(path: str = ".") -> dict:
             res.append({"file": f, "centrality": c, "edits": freq, "risk_ratio": ratio})
     res.sort(key=lambda x: -x["risk_ratio"])
     return {"files": res[:8], "count": len(res)}
-
-
-def atavism_report(path: str = ".", file_path: str = "") -> dict:
-    if not vgit.is_repo(path):
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    if not file_path:
-        return {"error": "provide --file"}
-    from vocab.scanner import scan_codebase
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
-    ft: set[str] = set()
-    for fv in analysis.file_vocabs:
-        if fv.path == file_path:
-            for phrase in fv.vocabulary:
-                for m in token_re.finditer(phrase):
-                    ft.add(m.group())
-    if not ft:
-        return {"error": "no tokens"}
-    log = vgit.ref_log(path, count=200)
-    pa = {}
-    for ref in reversed(log):
-        try:
-            rf = scan_codebase(path, git_ref=ref.sha, quiet=True, max_files=1500, max_seconds=15)
-        except Exception:
-            continue
-        for fv in rf.file_vocabs:
-            for phrase in fv.vocabulary:
-                for m in token_re.finditer(phrase):
-                    if m.group() not in pa:
-                        try:
-                            pa[m.group()] = ref.timestamp[:10]
-                        except Exception:
-                            pa[m.group()] = "2024"
-    if not pa:
-        return {"error": "insufficient provenance"}
-    ages = sorted(set(pa.values()))
-    if len(ages) < 3:
-        return {"error": "need >=3 strata"}
-    ancient_t = ages[:2]
-    modern_t = ages[-2:]
-    ancient_used = [t for t in ft if t in pa and pa[t] in ancient_t]
-    modern_used = [t for t in ft if t in pa and pa[t] in modern_t]
-    return {"file": file_path, "ancient": ancient_used[:8], "modern": modern_used[:8],
-            "atavistic": len(ancient_used) >= 3 and len(modern_used) == 0}
 
 
 def trompe_report(path: str = ".", file_path: str = "") -> dict:

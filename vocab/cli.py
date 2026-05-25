@@ -4162,36 +4162,6 @@ def escape_velocity_cmd(path=".", format="compact"):
         typer.echo(json.dumps(data, indent=2)); return
     for t in data.get("tagged", [])[:5]:
         typer.echo(f'  {t["phrase"]}: {t["label"]}')
-@cli.command(name="precedent", rich_help_panel="Inspection")
-def precedent_cmd(path=".", module_dir="", format="compact"):
-    from vocab.reports import precedent_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not module_dir:
-        typer.echo("provide --module-dir", err=True); raise typer.Exit(1)
-    data = precedent_report(path=p, module_dir=module_dir)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Precedents: {", ".join(p["phrase"] for p in data.get("precedents",[])[:5])}')
-
-@cli.command(name="flocking", rich_help_panel="Inspection")
-def flocking_cmd(path=".", module_dir="", format="compact"):
-    from vocab.reports import flocking_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not module_dir:
-        typer.echo("provide --module-dir", err=True); raise typer.Exit(1)
-    data = flocking_report(path=p, module_dir=module_dir)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Sep: {data.get("separated", "?")}  Align: {data.get("aligned", "?")}  Coh: {data.get("cohesion", "?")}')
-
 @cli.command(name="trap", rich_help_panel="CI")
 def trap_cmd(path=".", file_a="", file_b="", format="compact"):
     from vocab.reports import trap_report
@@ -4220,21 +4190,6 @@ def thanatosis_cmd(path=".", format="compact"):
         typer.echo(json.dumps(data, indent=2)); return
     for f in data.get("files", [])[:3]:
         typer.echo(f'  {f["file"]}: cent={f["centrality"]} edits={f["edits"]} risk={f["risk_ratio"]}')
-
-@cli.command(name="atavism", rich_help_panel="Inspection")
-def atavism_cmd(path=".", file="", format="compact"):
-    from vocab.reports import atavism_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not file:
-        typer.echo("provide --file", err=True); raise typer.Exit(1)
-    data = atavism_report(path=p, file_path=file)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Atavistic: {data.get("atavistic",False)} — {data.get("note","")}')
 
 @cli.command(name="trompe", rich_help_panel="Inspection")
 def trompe_cmd(path=".", file="", format="compact"):
