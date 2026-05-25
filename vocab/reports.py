@@ -3472,6 +3472,175 @@ def parity_bit_report(path: str = ".", ref_a: str = "", ref_b: str = "") -> dict
             "hash_a": h_a, "hash_b": h_b, "mirror_unchanged": h_a == h_b}
 
 
+def stigmergy_report(path: str = ".", min_authors: int = 2, lookback_commits: int = 500) -> dict:
+    """Implicit work protocols — file-edit sequences repeated across developers."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    log = vgit.ref_log(path, count=lookback_commits * 2)
+    if len(log) < 50:
+        return {"error": "need ≥50 commits for stigmergy detection"}
+    author_seq: dict[str, list[list[str]]] = {}
+    for ref in log:
+        try:
+            author = subprocess.run(["git", "log", "--format=%an", "-1", ref.sha],
+                capture_output=True, cwd=path, timeout=10, text=True).stdout.strip()
+            diffs = vgit.diff_refs(path, f"{ref.sha}^", ref.sha)
+        except Exception:
+            continue
+        if author not in author_seq:
+            author_seq[author] = []
+        if len(diffs) >= 2 and len(diffs) <= 15:
+            author_seq[author].append(diffs)
+    trails: list[dict] = []
+    all_authors = list(author_seq.keys())
+    for i, a1 in enumerate(all_authors):
+        seq1 = author_seq[a1]
+        if len(seq1) < 3:
+            continue
+        for a2 in all_authors[i+1:]:
+            seq2 = author_seq[a2]
+            if len(seq2) < 3:
+                continue
+            s1_str = [">".join(s[:3]) for s in seq1]
+            s2_str = [">".join(s[:3]) for s in seq2]
+            common = set(s1_str) & set(s2_str)
+            if len(common) >= 2:
+                trails.append({"authors": [a1, a2], "shared_patterns": sorted(common)[:5], "count": len(common)})
+    trails.sort(key=lambda x: -x["count"])
+    return {"trails": trails[:5], "total_shared_patterns": sum(t["count"] for t in trails)}
+
+
+def fracture_report(path: str = ".", concept: str = "", lookback_weeks: int = 12) -> dict:
+    """Concept propagation paths — directory-level spread history."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not concept:
+        return {"error": "provide --concept"}
+    from vocab.scanner import scan_codebase
+    from collections import defaultdict
+    weeks_data = vgit.weekly_commits(path, weeks=lookback_weeks)
+    if len(weeks_data) < 3:
+        return {"error": "insufficient weekly data"}
+    dir_timeline: dict[str, int] = defaultdict(int)
+    for wk in reversed(weeks_data):
+        shas = wk.get("shas", [])
+        if not shas:
+            continue
+        try:
+            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=1500, max_seconds=20)
+        except Exception:
+            continue
+        seen_dirs: set[str] = set()
+        for fv in analysis.file_vocabs:
+            for phrase in fv.vocabulary:
+                if concept.lower() in phrase.lower():
+                    d = os.path.dirname(fv.path) or "/"
+                    seen_dirs.add(d)
+        for d in seen_dirs:
+            dir_timeline[d] += 1
+    sorted_dirs = sorted(dir_timeline.items(), key=lambda x: -x[1])
+    return {"concept": concept, "propagation": [{"directory": d, "weeks_present": c} for d, c in sorted_dirs[:8]]}
+
+
+def escape_velocity_report(path: str = ".", min_freq: int = 3) -> dict:
+    """Weighted removal effort — phrase escape velocity from gravity well."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    from vocab.scanner import scan_codebase
+    from vocab.compare import pr_blast_radius
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    phrase_files: Counter[str] = Counter()
+    for fv in analysis.file_vocabs:
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                phrase_files[m.group()] += 1
+    code_exts = frozenset({".go", ".ts", ".js", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h"})
+    file_phrases: dict[str, list[str]] = {}
+    for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in code_exts:
+            continue
+        tokens: list[str] = []
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                tokens.append(m.group())
+        if tokens:
+            file_phrases[fv.path] = tokens
+    # Average blast radius across repo
+    avg_blast = 0
+    sample = list(file_phrases.keys())[:20]
+    if sample:
+        radius = pr_blast_radius(sample[:1], analysis.file_vocabs, max_results=50)
+        impacts = radius.get("impacts", [])
+        avg_blast = len(impacts) if impacts else 5
+    tagged: list[dict] = []
+    for phrase, count in phrase_files.most_common(100):
+        if count < min_freq:
+            break
+        ev = round((count * avg_blast) / 100, 1)
+        label = "DEEP" if ev > 10 else ("BOUND" if ev > 3 else "ESCAPED")
+        tagged.append({"phrase": phrase, "frequency": count, "escape_velocity": ev, "label": label})
+    return {"tagged": tagged[:20], "thresholds": {"ESCAPED": "<3", "BOUND": "3-10", "DEEP": ">10"}}
+
+
+def pleach_report(path: str = ".", lookback_commits: int = 200) -> dict:
+    """Artificially-maintained coupling — zero vocab, high co-change."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    from vocab.scanner import scan_codebase
+    from collections import Counter
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    file_tokens: dict[str, set[str]] = {}
+    for fv in analysis.file_vocabs:
+        tokens: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                tokens.add(m.group())
+        file_tokens[fv.path] = tokens
+    log = vgit.ref_log(path, count=lookback_commits * 2)
+    co_change: Counter[tuple[str, str]] = Counter()
+    refactor_commits = 0
+    for ref in log:
+        try:
+            diffs = vgit.diff_refs(path, f"{ref.sha}^", ref.sha)
+        except Exception:
+            continue
+        if len(diffs) < 2 or len(diffs) > 20:
+            continue
+        msg = subprocess.run(["git", "log", "--format=%s", "-1", ref.sha],
+            capture_output=True, cwd=path, timeout=10, text=True).stdout.lower()
+        is_refactor = any(w in msg for w in ["refactor", "extract", "consolidate", "split", "migrate"])
+        if is_refactor:
+            refactor_commits += 1
+        for i in range(len(diffs)):
+            for j in range(i + 1, len(diffs)):
+                a, b = (diffs[i], diffs[j]) if diffs[i] < diffs[j] else (diffs[j], diffs[i])
+                if not is_refactor:
+                    continue
+                co_change[(a, b)] += 1
+    pairs = []
+    for (a, b), count in co_change.most_common(30):
+        ta = file_tokens.get(a, set())
+        tb = file_tokens.get(b, set())
+        overlap = len(ta & tb)
+        if overlap == 0 and count >= 2:
+            pairs.append({"file_a": a, "file_b": b, "co_refactors": count, "shared_vocab": 0})
+    return {"pairs": pairs[:5], "refactor_commits_scanned": refactor_commits,
+            "note": "Zero shared vocab but co-refactored. Artificially maintained coupling."}
+
+
 def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
                        max_results: int = 20) -> dict:
     """Bose-Einstein Condensation — find structurally identical files.
