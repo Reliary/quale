@@ -3409,33 +3409,223 @@ def phantom_report(path: str = ".") -> dict:
     return {"type": "phantom", "frameworks_detected": detected}
 
 
-def parity_bit_report(path: str = ".", ref_a: str = "", ref_b: str = "") -> dict:
-    """Parity bit — XOR hash of test mirror for CI gate."""
+def guide_report(path: str = ".", file_path: str = "") -> dict:
+    """Guide RNA — unique-in-repo phrase for 1-token file location."""
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
+    if not file_path:
+        return {"error": "provide --file"}
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    id_file_count: Counter[str] = Counter()
+    file_ids: dict[str, set[str]] = {}
+    for fv in analysis.file_vocabs:
+        tokens: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                tokens.add(m.group())
+        file_ids[fv.path] = tokens
+        for t in tokens:
+            id_file_count[t] += 1
+    from vocab.scanner import _is_generated
+    target_tokens = file_ids.get(file_path, set())
+    unique = [t for t in target_tokens if id_file_count.get(t, 0) == 1 and len(t) >= 5
+              and not _is_generated(file_path) and not all(c.isupper() for c in t)]
+    if unique:
+        return {"guide": unique[0], "file": file_path, "confidence": "unique"}
+    best = sorted(target_tokens, key=lambda t: id_file_count.get(t, 0))[:3]
+    return {"guide": best[0] if best else file_path.split("/")[-1].split(".")[0],
+            "file": file_path, "confidence": "distinctive"}
+
+
+def moire_report(path: str = ".", source_file: str = "") -> dict:
+    """Moiré pattern — find out-of-phase source-test concept pairs."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not source_file:
+        return {"error": "provide --source-file"}
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{4,40}\b')
+    # Get source concepts
+    source_concepts: set[str] = set()
+    for fv in analysis.file_vocabs:
+        if fv.path == source_file:
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    source_concepts.add(m.group())
+    # Find test files for same language/dir
+    source_lang = source_file.rsplit(".", 1)[-1] if "." in source_file else ""
+    source_dir = "/".join(source_file.split("/")[:-1]) if "/" in source_file else ""
+    mismatches: list[dict] = []
+    for fv in analysis.file_vocabs:
+        p = fv.path
+        if not (p.endswith("_test." + source_lang) or p.endswith(".test." + source_lang) or
+                "_test." in p or ".test." in p or "/test" in p or "tests/" in p):
+            continue
+        el = p.rsplit(".", 1)[-1] if "." in p else ""
+        if el != source_lang:
+            continue
+        test_concepts: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                test_concepts.add(m.group())
+        missing = source_concepts - test_concepts
+        if len(missing) >= 1:
+            mismatches.append({"test_file": p, "missing_concepts": sorted(missing)[:5],
+                               "count": len(missing)})
+    mismatches.sort(key=lambda x: -x["count"])
+    return {"source": source_file, "mismatches": mismatches[:5], "total_mismatches": len(mismatches)}
+
+
+def mirage_report(path: str = ".", test_file: str = "") -> dict:
+    """Mirage — tests claiming X but structurally overlapping Y."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not test_file:
+        return {"error": "provide --test-file"}
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{4,40}\b')
+    test_concepts: set[str] = set()
+    for fv in analysis.file_vocabs:
+        if fv.path == test_file:
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    test_concepts.add(m.group())
+    # Extract test name from file
+    test_basename = os.path.splitext(os.path.basename(test_file))[0].lower()
+    test_claims: set[str] = set()
+    for part in test_basename.replace("test_", "").replace("_test", "").replace(".test", "").replace("_spec", "").replace("spec_", "").split("_"):
+        if len(part) >= 3:
+            test_claims.add(part)
+    # Find which source files the test overlaps with
+    source_overlaps: list[dict] = []
+    for fv in analysis.file_vocabs:
+        p = fv.path
+        if "/test" in p.lower() or "tests/" in p.lower() or "_test." in p or ".test." in p:
+            continue
+        source_concepts: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                source_concepts.add(m.group())
+        overlap = test_concepts & source_concepts
+        if len(overlap) >= 3:
+            overlap_claims = set(t.lower() for t in overlap if len(t) >= 3)
+            claim_match = len(overlap_claims & test_claims)
+            source_overlaps.append({"source_file": p, "overlap_count": len(overlap),
+                                    "shared_concepts": sorted(overlap)[:5],
+                                    "claim_match": claim_match > 0,
+                                    "mirage": claim_match == 0 and len(overlap) >= 5})
+    source_overlaps.sort(key=lambda x: (-x["overlap_count"], x["claim_match"]))
+    return {"test": test_file, "test_claims": sorted(test_claims),
+            "overlaps": source_overlaps[:5],
+            "mirage_count": sum(1 for o in source_overlaps if o.get("mirage"))}
+
+
+def chirality_report(path: str = ".", min_overlap: float = 0.80) -> dict:
+    """Chirality — same vocabulary, zero co-change, disjoint callers."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    from vocab.scanner import _is_generated
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    file_sets: list[tuple[str, set[str]]] = []
+    for fv in analysis.file_vocabs:
+        if _is_generated(fv.path):
+            continue
+        tokens: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                tokens.add(m.group())
+        if len(tokens) >= 5:
+            file_sets.append((fv.path, tokens))
+    log = vgit.ref_log(path, count=200)
+    co_change: set[tuple[str, str]] = set()
+    for ref in log:
+        try:
+            diffs = vgit.diff_refs(path, f"{ref.sha}^", ref.sha)
+        except Exception:
+            continue
+        if len(diffs) < 2 or len(diffs) > 20:
+            continue
+        for i in range(len(diffs)):
+            for j in range(i + 1, len(diffs)):
+                a, b = (diffs[i], diffs[j]) if diffs[i] < diffs[j] else (diffs[j], diffs[i])
+                co_change.add((a, b))
+    enantiomers: list[dict] = []
+    for i in range(len(file_sets)):
+        for j in range(i + 1, len(file_sets)):
+            pa, sa = file_sets[i]
+            pb, sb = file_sets[j]
+            union = len(sa | sb)
+            if union == 0:
+                continue
+            overlap = len(sa & sb) / union
+            if overlap >= min_overlap:
+                pair = (pa, pb) if pa < pb else (pb, pa)
+                if pair not in co_change:
+                    enantiomers.append({"files": [pa, pb], "overlap": round(overlap, 3),
+                                        "shared": sorted(sa & sb)[:5]})
+                    if len(enantiomers) >= 5:
+                        break
+        if len(enantiomers) >= 5:
+            break
+    return {"enantiomers": enantiomers, "count": len(enantiomers),
+            "warning": "Same vocabulary, zero co-change. Not a matched set." if enantiomers else "No enantiomers found."}
+
+
+def parity_module_hash(path: str = ".", module_dir: str = "",
+                        ref_a: str = "", ref_b: str = "") -> dict:
+    """Parity — module-level structural checksum for CI gate."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not module_dir:
+        return {"error": "provide --module-dir"}
     if not ref_a or not ref_b:
         return {"error": "provide --ref-a and --ref-b"}
     from vocab.scanner import scan_codebase
     import hashlib
-    try:
-        analysis_a = scan_codebase(path, git_ref=ref_a, quiet=True, max_files=2500, max_seconds=30)
-        analysis_b = scan_codebase(path, git_ref=ref_b, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-    def _mirror_hash(analysis):
+    def _module_hash(analysis, prefix):
         phrases: set[str] = set()
         for fv in analysis.file_vocabs:
-            if "/test" in fv.path.lower() or "tests/" in fv.path.lower() or "_test." in fv.path or ".test." in fv.path:
+            if fv.path.startswith(prefix) and not fv.path.endswith(("lock", "LOCK")):
                 for p in fv.vocabulary:
-                    phrases.add(p)
-        m = hashlib.sha256()
+                    if len(p) >= 3:
+                        phrases.add(p)
+        m = hashlib.sha1()
         for p in sorted(phrases):
             m.update(p.encode())
         return m.hexdigest()[:16]
-    h_a, h_b = _mirror_hash(analysis_a), _mirror_hash(analysis_b)
-    return {"type": "parity_bit", "ref_a": ref_a, "ref_b": ref_b,
-            "hash_a": h_a, "hash_b": h_b, "mirror_unchanged": h_a == h_b}
+    d = module_dir.rstrip("/") + "/"
+    try:
+        aa = scan_codebase(path, git_ref=ref_a, quiet=True, max_files=2500, max_seconds=30)
+        ab = scan_codebase(path, git_ref=ref_b, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan: {e}"}
+    h_a = _module_hash(aa, d)
+    h_b = _module_hash(ab, d)
+    return {"module": module_dir, "hash_a": h_a, "hash_b": h_b,
+            "unchanged": h_a == h_b}
 
 
 def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
