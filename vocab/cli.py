@@ -362,7 +362,7 @@ def preflight(
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), verify, json, checklist, compact, llm, full")] = "tool",
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Show math-heavy signals (SNR, expansion risk details)")] = False,
     why: Annotated[bool, typer.Option("--why", help="Show why each recommendation exists")] = False,
-    enrich: Annotated[bool, typer.Option("--enrich", help="Compute spectrum/deficit/cascade transforms (deep scan — ~14s cold, cached after)")] = False,
+    enrich: Annotated[bool, typer.Option("--enrich", help="Compute spectrum/deficit/cascade + cross-cutting/risk-vector/acceleration/boundary/eversion/shear (single deep scan — ~1s cold)")] = False,
 ):
     """File-scoped edit context and risk card.
 
@@ -432,7 +432,7 @@ def preflight(
             "confidence": data.get("confidence", "unknown"),
             "reason": "; ".join(data.get("reasons", [])),
             "changed_files": data.get("changed_files", []),
-            "read_first": data.get("read_first", []),
+            "read_first": data.get("fused_first", data.get("read_first", [])),
             "verification_mc": {
                 "question": "Which file would verify this change?",
                 "candidates": verify_candidates[:5] if verify_candidates else [],
@@ -447,6 +447,11 @@ def preflight(
             "spectrum": data.get("spectrum"),
             "deficit": data.get("deficit"),
             "cascade": data.get("cascade"),
+            "cross_cutting": data.get("cross_cutting"),
+            "risk_vector": data.get("risk_vector"),
+            "acceleration": data.get("acceleration"),
+            "boundary": data.get("boundary"),
+            "eversion": data.get("eversion"),
         }
         typer.echo(json.dumps(tool_data, separators=(",", ":")))
         return
@@ -464,7 +469,7 @@ def preflight(
             "peer_relative": peer.get("peer_text", ""),
             "reason": "; ".join(data.get("reasons", [])),
             "changed_files": data.get("changed_files", []),
-            "read_first": data.get("read_first", []),
+            "read_first": data.get("fused_first", data.get("read_first", [])),
             "safety_envelope": {
                 "inside": envelope.get("inside", []),
                 "at_boundary": envelope.get("at_boundary", []),
@@ -491,6 +496,11 @@ def preflight(
             "spectrum": data.get("spectrum"),
             "deficit": data.get("deficit"),
             "cascade": data.get("cascade"),
+            "cross_cutting": data.get("cross_cutting"),
+            "risk_vector": data.get("risk_vector"),
+            "acceleration": data.get("acceleration"),
+            "boundary": data.get("boundary"),
+            "eversion": data.get("eversion"),
         }
         typer.echo(json.dumps(tool_data, indent=2))
         return

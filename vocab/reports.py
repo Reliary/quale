@@ -324,6 +324,275 @@ def _cascade_analysis(file: str, analysis, blast: list[dict]) -> dict | None:
     }
 
 
+def _hough_concerns(file: str, analysis) -> list[dict]:
+    """Cross-cutting concern detection via Hough parameter-space voting.
+    Each identifier votes for every (cluster, file) pair it appears in.
+    Peaks = identifiers spanning ≥2 clusters with ≥4 total files.
+    """
+    from vocab.scanner import _extract_identifiers
+    clusters_map: dict[str, set[str]] = {}
+    for sc in (analysis.structure_clusters or []):
+        label = sc.get("label", "?")
+        clusters_map[label] = set(sc.get("top_files", []))
+    if len(clusters_map) < 2:
+        return []
+
+    # For each identifier in the matrix, count clusters + files it spans
+    co = analysis.co_occurrence
+    if not co:
+        return []
+
+    concerns: list[dict] = []
+    seen_ids: set[str] = set()
+    for ident, doc_count in co.phrase_count.items():
+        if doc_count < 3 or ident in seen_ids:
+            continue
+        found_clusters: list[str] = []
+        found_files: set[str] = set()
+        for label, files in clusters_map.items():
+            # Check if any file in this cluster has this identifier
+            for fv in analysis.file_vocabs:
+                if fv.path in files and ident in _extract_identifiers(fv, min_len=4):
+                    found_clusters.append(label)
+                    found_files.add(fv.path)
+                    break
+        if len(found_clusters) >= 2 and len(found_files) >= 4:
+            concerns.append({
+                "id": ident,
+                "cluster_span": len(found_clusters),
+                "file_span": len(found_files),
+                "clusters": found_clusters[:5],
+            })
+            seen_ids.add(ident)
+
+    concerns.sort(key=lambda x: (-x["file_span"], -x["cluster_span"]))
+    return concerns[:5]
+
+
+def _risk_vector(stable_touched: list[dict], blast: list[dict],
+                 cascade: dict | None, deficit: dict | None) -> dict:
+    """Softmax-normalized risk decomposition. Cascade weighted 2× (transitive),
+    stable 1.5× (entrenched), deficit 1.2× (misplacement), blast 1×."""
+    weights = {"cascade": 2.0, "stable": 1.5, "deficit": 1.2, "blast": 1.0}
+    raw = {
+        "cascade": (cascade or {}).get("damped_score", 0) * weights["cascade"],
+        "stable": len(stable_touched) * weights["stable"],
+        "deficit": (deficit or {}).get("missing", 0) * weights["deficit"],
+        "blast": len(blast) * weights["blast"],
+    }
+    total = sum(raw.values()) or 1.0
+    vector = {k: round(v / total, 2) for k, v in raw.items()}
+    dominant = max(vector, key=vector.get)
+    desc_map = {
+        "cascade": "Transitive risk exceeds direct — check expansion scope",
+        "stable": "Stable anchors touched — risk from entrenched code",
+        "deficit": "Missing module identifiers — risk from misplacement",
+        "blast": "Direct blast coupling — risk from immediate dependents",
+    }
+    return {
+        "vector": vector,
+        "dominant": dominant,
+        "description": desc_map.get(dominant, ""),
+        "instruction": f"Primary risk: {desc_map.get(dominant, '')}",
+    }
+
+
+def _change_acceleration(file: str, path: str) -> dict | None:
+    """Second derivative of change frequency: acceleration spike detection.
+    Spike ratio > 3 reliably precedes bug clusters in empirical studies."""
+    if not vgit.is_repo(path):
+        return None
+    try:
+        week_data = vgit.weekly_commits(path, weeks=24)
+    except Exception:
+        return None
+    if len(week_data) < 4:
+        return None
+
+    # Per-week commit count for this file
+    counts: list[int] = []
+    for wk in week_data:
+        cnt = sum(1 for sha in wk.get("shas", [])
+                  if sha and _file_in_commit(file, sha, path))
+        counts.append(cnt)
+
+    # Velocity (first difference), acceleration (second difference)
+    velocity = [counts[i + 1] - counts[i] for i in range(len(counts) - 1)]
+    acceleration = [velocity[i + 1] - velocity[i] for i in range(len(velocity) - 1)]
+
+    if not acceleration:
+        return None
+
+    peak_vel = max(velocity) if velocity else 0
+    mean_abs_vel = sum(abs(v) for v in velocity) / max(len(velocity), 1)
+    spike_ratio = peak_vel / max(mean_abs_vel, 0.01)
+    peak_accel = max(acceleration)
+    recent_trend = sum(acceleration[-3:]) / max(len(acceleration[-3:]), 1) if len(acceleration) >= 3 else 0
+
+    trend = "accelerating" if recent_trend > 0.5 else \
+            "decelerating" if recent_trend < -0.5 else "stable"
+
+    if spike_ratio < 2:
+        return None
+
+    return {
+        "peak_velocity": peak_vel,
+        "spike_ratio": round(spike_ratio, 1),
+        "trend": trend,
+        "instruction": f"Change acceleration spike ({spike_ratio:.1f}× normal) — verify intent before editing" if spike_ratio >= 3 else None,
+    }
+
+
+def _file_in_commit(file: str, sha: str, path: str) -> bool:
+    """Quick check if file changed in a commit via git diff-tree."""
+    try:
+        out = vgit._git_bytes("diff-tree", "--no-commit-id", "-r", "--name-only",
+                               sha, cwd=path)
+        return file.encode() in out.split(b"\n")
+    except Exception:
+        return False
+
+
+def _boundary_entropy(file: str, analysis) -> dict | None:
+    """Shannon entropy of cluster membership probabilities.
+    H > 0.3 means the file sits between modules — edit with caution."""
+    from vocab.scanner import _extract_identifiers
+    scs = analysis.structure_clusters
+    if not scs or len(scs) < 2:
+        return None
+
+    file_ids = set(_extract_identifiers(
+        next((fv for fv in analysis.file_vocabs if fv.path == file), None),
+        min_len=4)) if any(fv.path == file for fv in analysis.file_vocabs) else set()
+    if not file_ids:
+        return None
+
+    # P(module | file) = shared identifiers / total file identifiers
+    probs: list[float] = []
+    cluster_labels_list: list[str] = []
+    for sc in scs:
+        module_files = set(sc.get("top_files", []))
+        module_ids: set[str] = set()
+        for fv in analysis.file_vocabs:
+            if fv.path in module_files:
+                module_ids |= _extract_identifiers(fv, min_len=4)
+        shared = len(file_ids & module_ids)
+        p = shared / max(len(file_ids), 1)
+        if p > 0:
+            probs.append(p)
+            cluster_labels_list.append(sc.get("label", "?"))
+
+    if not probs:
+        return None
+
+    # Normalize to probability distribution
+    total_p = sum(probs)
+    probs = [p / total_p for p in probs]
+    entropy = -sum(p * __import__("math").log2(p) for p in probs)
+
+    # Normalize to [0, 1] using log2(n_clusters)
+    max_entropy = __import__("math").log2(max(len(probs), 1))
+    norm = round(entropy / max_entropy, 2) if max_entropy > 0 else 0.0
+
+    # Top clusters for instruction
+    ranked = sorted(zip(cluster_labels_list, probs), key=lambda x: -x[1])[:3]
+
+    if norm < 0.3:
+        return None
+
+    return {
+        "entropy": norm,
+        "top_clusters": [r[0] for r in ranked],
+        "top_probs": [round(r[1], 2) for r in ranked],
+        "instruction": f"Boundary entropy {norm} — file sits between {', '.join(r[0] for r in ranked)}; verify module before editing",
+    }
+
+
+def _eversion_analysis(file: str, analysis) -> dict | None:
+    """Inside-out module boundary: identifiers the file reaches for
+    outside its own module. High eversion = misplaced file."""
+    from vocab.scanner import _extract_identifiers
+    scs = analysis.structure_clusters
+    if not scs:
+        return None
+
+    # Find this file's module
+    module = None
+    for sc in scs:
+        if file in sc.get("top_files", []):
+            module = sc
+            break
+    if not module:
+        return None
+
+    module_files_list = module.get("top_files", [])
+    if len(module_files_list) < 3:
+        return None
+
+    file_fv = next((fv for fv in analysis.file_vocabs if fv.path == file), None)
+    if not file_fv:
+        return None
+    file_ids = _extract_identifiers(file_fv, min_len=4)
+
+    # Build module-common identifiers (present in ≥50% of module peers)
+    mod_count: Counter = Counter()
+    for fv in analysis.file_vocabs:
+        if fv.path in module_files_list and fv.path != file:
+            for ident in _extract_identifiers(fv, min_len=4):
+                mod_count[ident] += 1
+
+    mod_total = max(len(module_files_list) - 1, 1)
+    common = {ident for ident, cnt in mod_count.items()
+              if cnt / mod_total >= 0.5}
+
+    everted = [i for i in file_ids if i not in common]
+    ratio = len(everted) / max(len(file_ids), 1)
+
+    if ratio < 0.3:
+        return None
+
+    return {
+        "everted_ids": everted[:8],
+        "everted_count": len(everted),
+        "ratio": round(ratio, 2),
+        "module": module.get("label", "?"),
+        "instruction": f"{len(everted)}/{len(file_ids)} identifiers reach outside module ({ratio:.0%}) — check module placement",
+    }
+
+
+def _shear_ranking(changed: list[str], blast: list[dict], mirror: dict) -> list[str]:
+    """Affine shear ranking: fuse blast + mirror into one list.
+    sheared_score = blast + mirror + 2*b*m  (files high in both get super-linear)."""
+    blast_scores: dict[str, int] = {}
+    for item in blast:
+        blast_scores[item.get("file", "")] = item.get("shared_concepts", 1)
+    max_blast = max(blast_scores.values()) if blast_scores else 1
+
+    mirror_files: set[str] = set()
+    if mirror:
+        mirror_files = set(mirror.get("files", []))
+
+    scored: list[tuple[float, str]] = []
+    seen: set[str] = set()
+    for f in changed:
+        seen.add(f)
+    for f, b_score in blast_scores.items():
+        if f in seen:
+            continue
+        seen.add(f)
+        b = b_score / max_blast  # normalize
+        m = 1.0 if f in mirror_files else 0.0
+        sheared = b + m + 2.0 * b * m
+        scored.append((sheared, f))
+    for f in mirror_files:
+        if f not in seen:
+            seen.add(f)
+            scored.append((1.0, f))  # mirror-only
+
+    scored.sort(key=lambda x: -x[0])
+    return [f for _, f in scored]
+
+
 def _file_temperature(file: str, lifecycle_data: list[dict], stability_data: list[dict], entropy_data: dict | None) -> str:
     """Compute single-word temperature for a file: COLD/WARM/HOT."""
     for item in lifecycle_data:
@@ -499,11 +768,23 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     deficit_map: dict[str, dict | None] = {}
     cascade_map: dict[str, dict | None] = {}
     primary = changed[0] if changed else ""
+    cross_cutting: list[dict] = []
+    risk_vector: dict | None = None
+    acceleration: dict | None = None
+    boundary: dict | None = None
+    eversion: dict | None = None
+    fused_first: list[str] | None = None
     if enrich and primary and analysis.co_occurrence:
         try:
             spectrum_map[primary] = _spectrum_analysis(primary, analysis)
             deficit_map[primary] = _deficit_analysis(primary, analysis)
             cascade_map[primary] = _cascade_analysis(primary, analysis, blast)
+            cross_cutting = _hough_concerns(primary, analysis)
+            risk_vector = _risk_vector(stable_touched, blast, cascade_map.get(primary), deficit_map.get(primary))
+            acceleration = _change_acceleration(primary, path)
+            boundary = _boundary_entropy(primary, analysis)
+            eversion = _eversion_analysis(primary, analysis)
+            fused_first = _shear_ranking(changed, blast, mirror)
         except Exception:
             pass
 
@@ -546,6 +827,12 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         "spectrum": spectrum_map.get(primary),
         "deficit": deficit_map.get(primary),
         "cascade": cascade_map.get(primary),
+        "cross_cutting": cross_cutting if enrich else [],
+        "risk_vector": risk_vector,
+        "acceleration": acceleration,
+        "boundary": boundary,
+        "eversion": eversion,
+        "fused_first": fused_first,
         "capability_boundary": capability,
         "guardrails": {
             "mode": "report_only",
