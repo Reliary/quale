@@ -7375,3 +7375,143 @@ def concept_bonds(path: str, top_n: int = 30) -> dict:
         },
         "confidence": "mixed — structural bonds only; no AST or import resolution",
     }
+
+def rogue_wave_report(path: str = ".", threshold: float = 2.5) -> dict:
+    from vocab.scanner import scan_codebase
+    from vocab.bootstrap import compute_modules
+    import re, statistics
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    fs = {}
+    for fv in analysis.file_vocabs:
+        s = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                s.add(m.group())
+        fs[fv.path] = len(s)
+    mods = compute_modules(path, analysis=analysis)
+    ml = mods.get("modules", []) if isinstance(mods, dict) else []
+    flares = []
+    for m in ml:
+        sizes = [fs.get(f, 0) for f in m["files"]]
+        if len(sizes) < 3:
+            continue
+        med = statistics.median(sizes)
+        std = max(statistics.stdev(sizes), 1) if len(sizes) > 1 else 1
+        for f in m["files"]:
+            z = (fs.get(f, 0) - med) / std
+            if z >= threshold:
+                flares.append({"file": f, "z_score": round(z, 2), "vocab_size": fs.get(f, 0), "module_median": round(med)})
+    flares.sort(key=lambda x: -x["z_score"])
+    return {"rogue_waves": flares[:8]}
+
+def tensegrity_report(path: str = ".", min_intermediaries: int = 3) -> dict:
+    from vocab.scanner import scan_codebase
+    from vocab.bootstrap import compute_modules
+    import re
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    ft = {}
+    for fv in analysis.file_vocabs:
+        s = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                s.add(m.group())
+        ft[fv.path] = s
+    mods = compute_modules(path, analysis=analysis)
+    ml = mods.get("modules", []) if isinstance(mods, dict) else []
+    tps = []
+    for m in ml:
+        fs = m["files"]
+        for i, a in enumerate(fs):
+            for j, b in enumerate(fs):
+                if i >= j:
+                    continue
+                if ft.get(a, set()) & ft.get(b, set()):
+                    continue
+                ics = [c for c in fs if c != a and c != b and (ft.get(a, set()) & ft.get(c, set())) and (ft.get(c, set()) & ft.get(b, set()))]
+                if len(ics) >= min_intermediaries:
+                    tps.append({"file_a": a, "file_b": b, "count": len(ics)})
+    tps.sort(key=lambda x: -x["count"])
+    return {"tensegrity_pairs": tps[:5]}
+
+def implicature_report(path: str = ".", file_path: str = "") -> dict:
+    from vocab.scanner import scan_codebase
+    import re, random
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+    targets = [file_path] if file_path else random.sample([fv.path for fv in analysis.file_vocabs if not fv.path.startswith((".", "node_modules"))][:50], min(10, 50))
+    vios = []
+    for tf in targets:
+        full = os.path.join(path, tf)
+        if not os.path.exists(full):
+            continue
+        with open(full) as f:
+            lines = f.readlines()
+        tokens = set()
+        for fv in analysis.file_vocabs:
+            if fv.path == tf:
+                for phrase in fv.vocabulary:
+                    for m in token_re.finditer(phrase):
+                        tokens.add(m.group())
+        qty = len(lines) >= 70 and len(tokens) < 10 and not any(tf.endswith(e) for e in (".json", ".csv", ".xml"))
+        st = [t for t in tokens if any(c.isupper() for c in t)]
+        camel = sum(1 for t in st if t[0].islower() and any(c.isupper() for c in t[1:]))
+        snake = sum(1 for t in st if "_" in t)
+        pascal = sum(1 for t in st if t[0].isupper() and "_" not in t)
+        tot = camel + snake + pascal or 1
+        manner = max(camel, snake, pascal) / tot > 0.7 and min(camel, snake, pascal) > 0
+        vios.append({"file": tf, "quantity": qty, "quality": False, "relation": False, "manner": manner})
+    return {"violations": vios}
+
+def criticality_report(path: str = ".", file_path: str = "") -> dict:
+    from vocab.scanner import scan_codebase
+    import re
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    ft = {}
+    for fv in analysis.file_vocabs:
+        s = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                s.add(m.group())
+        ft[fv.path] = s
+    targets = [file_path] if file_path else list(ft.keys())[:10]
+    scores = []
+    for t in targets:
+        if t not in ft:
+            continue
+        one = [p for p, s in ft.items() if p != t and ft[t] & s]
+        two = set()
+        for oh in one:
+            for p, s in ft.items():
+                if p != t and p not in one and ft.get(oh, set()) & s:
+                    two.add(p)
+        oc = len(one) or 1
+        k = round(len(two) / oc, 2)
+        scores.append({"file": t, "k": k, "one_hop": len(one), "two_hop": len(two), "class": "supercritical" if k > 1.5 else ("critical" if k > 0.5 else "subcritical")})
+    return {"scores": scores}

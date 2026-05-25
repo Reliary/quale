@@ -4234,6 +4234,64 @@ def thylacine_cmd(path=".", format="compact"):
     typer.echo(f'Extinct exports: {len(thy)}')
     for t in thy[:3]:
         typer.echo(f'  {t["identifier"]} ({t["files"]} files)')
+
+@cli.command(name="rogue-wave", rich_help_panel="Inspection")
+def rogue_wave_cmd(path=".", threshold: float = 2.5, format="compact"):
+    from vocab.reports import rogue_wave_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = rogue_wave_report(path=p, threshold=threshold)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    for rw in data.get("rogue_waves", [])[:3]:
+        typer.echo(f'  {rw["file"]}: z={rw["z_score"]}')
+
+@cli.command(name="tensegrity", rich_help_panel="Inspection")
+def tensegrity_cmd(path=".", format="compact"):
+    from vocab.reports import tensegrity_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = tensegrity_report(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    for tp in data.get("tensegrity_pairs", [])[:3]:
+        typer.echo(f'  {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} im)')
+
+@cli.command(name="implicature", rich_help_panel="Inspection")
+def implicature_cmd(path=".", file="", format="compact"):
+    from vocab.reports import implicature_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = implicature_report(path=p, file_path=file)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    for v in data.get("violations", [])[:5]:
+        fl = "".join("Q" if v[k] else "-" for k in ["quantity","quality","relation","manner"])
+        typer.echo(f'  {v["file"]}: {fl}')
+
+@cli.command(name="criticality", rich_help_panel="Inspection")
+def criticality_cmd(path=".", file="", format="compact"):
+    from vocab.reports import criticality_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = criticality_report(path=p, file_path=file)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    for s in data.get("scores", [])[:5]:
+        typer.echo(f'  {s["file"]}: k={s["k"]} ({s["class"]})')
+
 if __name__ == "__main__":
     main()
 
