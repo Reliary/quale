@@ -4190,7 +4190,7 @@ def flocking_cmd(path=".", module_dir="", format="compact"):
         typer.echo(data["error"], err=True); raise typer.Exit(1)
     if format == "json":
         typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Sep: {data["separation"]}  Align: {data["alignment"]}  Coh: {data["cohesion"]}')
+    typer.echo(f'Sep: {data.get("separated", "?")}  Align: {data.get("aligned", "?")}  Coh: {data.get("cohesion", "?")}')
 
 @cli.command(name="trap", rich_help_panel="CI")
 def trap_cmd(path=".", file_a="", file_b="", format="compact"):
