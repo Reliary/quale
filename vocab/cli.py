@@ -1596,6 +1596,70 @@ def supernova_cmd(path=".", threshold: float = 0.90, format="compact"):
         typer.echo(f'  {r["trend"]}: {r["action"]} ({", ".join(r["files"])})')
 
 
+@cli.command(name="chrono-lock", rich_help_panel="Inspection")
+def chrono_lock_cmd(path=".", file="", diff="", max_gap: int = 2, format="compact"):
+    from vocab.reports import chrono_lock_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not file or not diff:
+        typer.echo("provide --file and --diff", err=True); raise typer.Exit(1)
+    data = chrono_lock_report(path=p, file_path=file, proposed_diff=diff, max_age_gap=max_gap)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    if data.get("chrono_anomaly"):
+        typer.echo(f'  {_color("TEMPORAL VIOLATION", "red")}')
+        typer.echo(f'  Center of mass: {data.get("center_of_mass_year","?")}')
+        typer.echo(f'  Diff introduces: {data.get("max_diff_year","?")}')
+        typer.echo(f'  {data.get("mandate","")}')
+    else:
+        typer.echo(f'  Chrono-lock OK (center of mass: {data.get("center_of_mass_year","?")})')
+
+
+@cli.command(name="necrotic", rich_help_panel="Inspection")
+def necrotic_cmd(path=".", file="", format="compact"):
+    from vocab.reports import necrotic_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    if not file:
+        typer.echo("provide --file", err=True); raise typer.Exit(1)
+    data = necrotic_report(path=p, file_path=file)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    if data.get("necrotic"):
+        typer.echo(f'  {_color("NECROTIC TISSUE", "red")}')
+        typer.echo(f'  Blast radius: {data.get("reverse_blast_radius",0)}')
+        typer.echo(f'  Orphans: {len(data.get("orphan_phrases",[]))}')
+        typer.echo(f'  Lifecycle: {data.get("lifecycle_state","")}')
+        typer.echo(f'  {data.get("mandate","")}')
+    else:
+        typer.echo(f'  File healthy (blast radius: {data.get("reverse_blast_radius",0)})')
+
+
+@cli.command(name="metamorphic", rich_help_panel="CI")
+def metamorphic_cmd(from_repo="", to_repo="", ref="HEAD~1", format="compact"):
+    from vocab.reports import metamorphic_mask_report
+    if not from_repo or not to_repo:
+        typer.echo("provide --from-repo and --to-repo", err=True); raise typer.Exit(1)
+    data = metamorphic_mask_report(source_path=from_repo, target_path=to_repo, source_ref=ref)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'Mask: {data.get("mask_count",0)} phrase transformations')
+    for m in data.get("mask", [])[:5]:
+        typer.echo(f'  {m["from"]} -> {m["to"]}')
+    typer.echo(f'Craters: {len(data.get("craters",[]))} impacted files')
+    for c in data.get("craters", [])[:3]:
+        typer.echo(f'  {c["file"]} ({c["coupling_label"]}, {c["impact_count"]} hits)')
+    typer.echo(f'  {data.get("migration_order","")}')
+
+
 @cli.command(name="catalytic-crack", rich_help_panel="Utilities")
 def catalytic_crack_cmd(path=".", file="", format="compact"):
     from vocab.reports import catalytic_crack_report

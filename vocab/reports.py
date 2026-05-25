@@ -3051,6 +3051,281 @@ def supernova_report(path: str = ".", overlap_threshold: float = 0.90,
     }
 
 
+def chrono_lock_report(path: str = ".", file_path: str = "",
+                        proposed_diff: str = "", max_age_gap: int = 2) -> dict:
+    """Chrono-Topological Lock — prevent paradigm mixing in legacy files.
+
+    Calculates temporal center of mass for a file (average phrase entry year).
+    Detects if proposed diff introduces phrases from a significantly
+    different era. Rejects diffs that mix paradigms.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file_path or not proposed_diff:
+        return {"error": "provide --file and --diff"}
+    full = os.path.join(path, file_path)
+    if not os.path.exists(full):
+        return {"error": f"file not found: {file_path}"}
+
+    from vocab.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+
+    # Collect current file phrases
+    file_phrases: set[str] = set()
+    for fv in analysis.file_vocabs:
+        if fv.path == file_path:
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    file_phrases.add(m.group())
+
+    # Get phrase entry years from provenance
+    try:
+        from vocab.git import ref_log, diff_refs
+        log = ref_log(path, count=200)
+        phrase_year: dict[str, int] = {}
+        for ref in reversed(log):
+            sha = ref.sha
+            try:
+                msg = subprocess.run(
+                    ["git", "log", "--format=%ct", "-1", sha],
+                    capture_output=True, cwd=path, timeout=10, text=True
+                ).stdout.strip()
+                year = int(msg[:4]) if len(msg) >= 4 else 2024
+            except Exception:
+                year = 2024
+            # Scan phrases at this ref
+            try:
+                ref_analysis = scan_codebase(path, git_ref=sha, quiet=True, max_files=500, max_seconds=15)
+            except Exception:
+                continue
+            for fv in ref_analysis.file_vocabs:
+                if fv.path == file_path:
+                    for phrase in fv.vocabulary:
+                        for m in token_re.finditer(phrase):
+                            if m.group() not in phrase_year and m.group() in file_phrases:
+                                phrase_year[m.group()] = year
+        if not phrase_year:
+            return {"error": "could not determine phrase entry years"}
+    except Exception as e:
+        return {"error": f"provenance scan failed: {e}"}
+
+    # Calculate temporal center of mass
+    years = list(phrase_year.values())
+    center_of_mass = round(sum(years) / len(years)) if years else 2024
+
+    # Get diff phrases and their entry years
+    diff_phrases = set(token_re.findall(proposed_diff))
+    diff_years: list[int] = []
+    for dp in diff_phrases:
+        if dp in phrase_year:
+            diff_years.append(phrase_year[dp])
+    max_diff_year = max(diff_years) if diff_years else center_of_mass
+    min_diff_year = min(diff_years) if diff_years else center_of_mass
+
+    # Detect anachronisms
+    forward_gap = max_diff_year - center_of_mass
+    backward_gap = center_of_mass - min_diff_year
+    anomaly = forward_gap > max_age_gap or backward_gap > max_age_gap
+
+    return {
+        "file": file_path,
+        "file_phrases_tracked": len(phrase_year),
+        "center_of_mass_year": center_of_mass,
+        "diff_phrases_found": len(diff_years),
+        "max_diff_year": max_diff_year,
+        "min_diff_year": min_diff_year,
+        "max_age_gap_setting": max_age_gap,
+        "chrono_anomaly": anomaly,
+        "mandate": f"Temporal Violation: Center of mass is {center_of_mass}, but diff introduces phrases from {max_diff_year}. Gap of {forward_gap} year(s) exceeds threshold {max_age_gap}. Use era-appropriate paradigm." if anomaly else "Chrono-lock respected.",
+    }
+
+
+def necrotic_report(path: str = ".", file_path: str = "",
+                     lookback_weeks: int = 12) -> dict:
+    """Necrotic Resonance Map — detect zombie code with zero blast radius.
+
+    Combines reverse blast radius (would anyone notice if this was deleted?)
+    with decaying lifecycle state and orphan phrase presence.
+    """
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    if not file_path:
+        return {"error": "provide --file"}
+    full = os.path.join(path, file_path)
+    if not os.path.exists(full):
+        return {"error": f"file not found: {file_path}"}
+
+    from vocab.scanner import scan_codebase
+    from vocab.compare import pr_blast_radius
+
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+
+    # 1. Reverse blast radius: files that would be affected if this file were deleted
+    # We simulate deletion by finding files that ONLY share vocabulary with this file
+    file_tokens: set[str] = set()
+    for fv in analysis.file_vocabs:
+        if fv.path == file_path:
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    file_tokens.add(m.group())
+
+    dependent_files: list[str] = []
+    for fv in analysis.file_vocabs:
+        if fv.path == file_path:
+            continue
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                if m.group() in file_tokens:
+                    dependent_files.append(fv.path)
+                    break
+    dependent_files = list(dict.fromkeys(dependent_files))
+    reverse_blast = len(dependent_files)
+
+    # 2. Orphan phrases in this file
+    id_file_count: Counter[str] = Counter()
+    for fv in analysis.file_vocabs:
+        tokens: set[str] = set()
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                tokens.add(m.group())
+        for t in tokens:
+            id_file_count[t] += 1
+
+    file_orphans: list[str] = []
+    for fv in analysis.file_vocabs:
+        if fv.path == file_path:
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    if id_file_count.get(m.group(), 0) == 1:
+                        file_orphans.append(m.group())
+
+    # 3. Lifecycle signature
+    try:
+        lif = compute_lifecycles(path, lookback_weeks)
+        file_lifecycle = "unknown"
+        for entry in lif:
+            if entry.get("file") == file_path:
+                file_lifecycle = entry.get("lifecycle", "unknown")
+    except Exception:
+        file_lifecycle = "unknown"
+
+    necrotic = reverse_blast == 0 and len(file_orphans) >= 1 and file_lifecycle in ("DECAYING", "DEAD", "unknown")
+
+    return {
+        "file": file_path,
+        "reverse_blast_radius": reverse_blast,
+        "orphan_phrases": file_orphans[:8],
+        "lifecycle_state": file_lifecycle,
+        "necrotic": necrotic,
+        "mandate": f"Necrotic tissue detected. 0 blast radius, {len(file_orphans)} orphans, lifecycle: {file_lifecycle}. DELETE this file." if necrotic else "File is healthy.",
+    }
+
+
+def metamorphic_mask_report(source_path: str, target_path: str,
+                             source_ref: str = "HEAD~1") -> dict:
+    """Metamorphic Compiler — generate structural transformation masks."""
+    from vocab.git import diff_refs
+    if not vgit.is_repo(source_path):
+        return {"error": f"source not a repo: {source_path}"}
+    if not vgit.is_repo(target_path):
+        return {"error": f"target not a repo: {target_path}"}
+
+    from vocab.scanner import scan_codebase
+
+    # Step 1: Extract the transformation mask from the source repo diff
+    try:
+        diff_files = diff_refs(source_path, f"{source_ref}^", source_ref)
+    except Exception:
+        diff_files = []
+    if not diff_files:
+        return {"error": "no diff in source ref"}
+
+    # Scan source before and after to find changed phrases
+    try:
+        before = scan_codebase(source_path, git_ref=source_ref, quiet=True, max_files=500, max_seconds=15)
+        after = scan_codebase(source_path, quiet=True, max_files=500, max_seconds=15)
+    except Exception as e:
+        return {"error": f"source scan failed: {e}"}
+
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+
+    # Build phrase sets
+    def _phrase_set(analysis):
+        result: set[str] = set()
+        for fv in analysis.file_vocabs:
+            for phrase in fv.vocabulary:
+                for m in token_re.finditer(phrase):
+                    result.add(m.group())
+        return result
+
+    phrases_before = _phrase_set(before)
+    phrases_after = _phrase_set(after)
+
+    removed = phrases_before - phrases_after
+    added = phrases_after - phrases_before
+
+    # Build mask: for each removed phrase, find the most similar added phrase
+    mask: list[dict] = []
+    for r in sorted(removed)[:20]:
+        best = max(added, key=lambda a: sum(1 for x, y in zip(a, r) if x == y), default=None)
+        if best:
+            mask.append({"from": r, "to": best})
+
+    # Step 2: Project onto target repo — find impact craters
+    try:
+        target = scan_codebase(target_path, quiet=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"target scan failed: {e}"}
+
+    # Find files in target containing the removed phrases
+    crater_files: Counter[str] = Counter()
+    for fv in target.file_vocabs:
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                if m.group() in removed:
+                    crater_files[fv.path] += 1
+
+    # Rank by coupling (number of shared phrases)
+    craters: list[dict] = []
+    for path, count in crater_files.most_common(30):
+        # Compute coupling score
+        tokens: set[str] = set()
+        for fv2 in target.file_vocabs:
+            if fv2.path == path:
+                for phrase in fv2.vocabulary:
+                    for m in token_re.finditer(phrase):
+                        tokens.add(m.group())
+        coupling_score = round(len(tokens & added) / max(len(added), 1), 3)
+        craters.append({
+            "file": path,
+            "impact_count": count,
+            "coupling": coupling_score,
+            "coupling_label": "tight" if coupling_score > 0.3 else ("loose" if coupling_score > 0.1 else "minimal"),
+        })
+
+    craters.sort(key=lambda x: -x["coupling"])
+    return {
+        "mask_count": len(mask),
+        "mask": mask[:10],
+        "removed_count": len(removed),
+        "added_count": len(added),
+        "craters": craters[:10],
+        "migration_order": "Apply mask to loose craters first, then tight." if craters else "No impact craters found.",
+    }
+
+
 def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
                        max_results: int = 20) -> dict:
     """Bose-Einstein Condensation — find structurally identical files.
