@@ -612,7 +612,8 @@ def crystallography(
     if stable:
         typer.echo(c("  Stable Core:", "subheader"))
         for s in stable[:5]:
-            typer.echo(f"    {c(str(s.get('persistence', 0)), 'green'):>6.0%}  {s['file']}")
+            val = s.get('persistence', 0) or 0
+            typer.echo(f"    {c(f'{val:.0%}', 'green'):>6s}  {s['file']}")
         typer.echo("")
 
     concepts = data.get("core_concepts", [])
@@ -1319,46 +1320,6 @@ def triangulate_cmd(
     typer.echo(f"  Probe C (distinctive ids): {', '.join(data.get('probe_c', []))}")
 
 
-@cli.command(name="file-epochs", rich_help_panel="Maintenance")
-def strata_cmd(
-    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    file: Annotated[str, typer.Option("--file", help="File to analyze")] = "",
-    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
-):
-    """Map file lines to epoch-age buckets.
-
-    Maps file content by phrase entry age. Emits fault lines where
-    epochs of different ages collide — the most brittle code boundaries.
-
-    Example:
-      vocab strata --file src/billing.ts
-    """
-    from vocab.reports import strata_report
-    path_abs = os.path.abspath(path)
-    if not vgit.is_repo(path_abs):
-        typer.echo("Not a git repository.", err=True)
-        raise typer.Exit(1)
-    if not file:
-        typer.echo("provide --file", err=True)
-        raise typer.Exit(1)
-    data = strata_report(path=path_abs, file_path=file)
-    if "error" in data:
-        typer.echo(data["error"], err=True)
-        raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2))
-        return
-    labels = data.get("epoch_labels", [])
-    for e in data.get("epochs", []):
-        bucket = e.get("epoch_bucket", 0)
-        label = labels[bucket] if bucket < len(labels) else f"epoch_{bucket}"
-        typer.echo(f"  Lines {e['start']}-{e['end']}: {label} ({e['age_weeks']}w, {e['lines']} lines)")
-    for fl in data.get("fault_lines", [])[:3]:
-        gap = fl.get("gap", 0)
-        typer.echo(f"  FAULT: lines {fl['older_epoch_start']}/{fl['newer_epoch_start']} gap={gap}w  [{_color('brittle', 'red') if gap > 10 else 'ok'}]")
-    if not data.get("epochs"):
-        typer.echo(f"  {data.get('note', 'no datable content')}")
-
 
 @cli.command(name="concept-flow", rich_help_panel="Maintenance")
 def epidemiology_cmd(
@@ -1584,33 +1545,6 @@ def guide_cmd(path=".", file="", format="compact"):
     c = data.get("confidence", "")
     typer.echo(f"{g} [{c}]")
 
-@cli.command(name="mirage", rich_help_panel="Code Analysis")
-def mirage_cmd(path=".", test_file="", format="compact"):
-    """Tests whose vocab mismatches the function name claim."""
-
-    from vocab.reports import mirage_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not test_file:
-        typer.echo("provide --test-file", err=True); raise typer.Exit(1)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(str(data.get("mirage_count", 0)) + " mirages")
-    for o in data.get("overlaps", [])[:3]:
-        tag = " MIRAGE" if o.get("mirage") else ""
-        typer.echo("  " + o["source_file"] + " (" + str(o["overlap_count"]) + " shared)" + tag)
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'{data.get("file","")}: {data.get("fragments_count",0)} fragments from {data.get("total_lines",0)} lines')
-    for f in data.get("fragments", [])[:3]:
-        typer.echo(f'  Fragment {f["fragment_index"]}: {f["lines"]} lines -> {f["output_file"]}')
-        typer.echo(f'    Phrases: {", ".join(f["cluster_phrases"][:3])}')
-    for fv in data.get("fragment_vocabularies", [])[:3]:
-        for name, phrases in fv.items():
-            typer.echo(f'  LLM name: {name} = [{", ".join(phrases)}]')
-
 
 @cli.command(name="decay", rich_help_panel="Maintenance")
 def decay_cmd(path=".", file="", weeks=12, half_life=30,
@@ -1785,38 +1719,6 @@ def phase_shift_cmd(
     for s in data.get("substitutions", [])[:10]:
         typer.echo(f"  {s['from'][:40]} -> {s['to'][:40]}")
 
-
-@cli.command(name="concept-fragments", rich_help_panel="Maintenance")
-def shrapnel_cmd(
-    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    weeks: Annotated[int, typer.Option("--weeks", help="History lookback")] = 12,
-    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
-):
-    """Phrases coupled to now-deleted neighbors.
-
-    Scans git history for phrases that appeared, then disappeared
-    (cavitated). Finds remaining phrases uniquely entangled with them.
-
-    Example:
-      vocab shrapnel --weeks 12
-    """
-    from vocab.reports import shrapnel_report
-    path_abs = os.path.abspath(path)
-    if not vgit.is_repo(path_abs):
-        typer.echo("Not a git repository.", err=True)
-        raise typer.Exit(1)
-    data = shrapnel_report(path=path_abs, lookback_weeks=weeks)
-    if "error" in data:
-        typer.echo(data["error"], err=True)
-        raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2, default=str))
-        return
-    cav = data.get("cavitated", [])
-    shrap = data.get("shrapnel", [])
-    typer.echo(f"Cavitated phrases: {len(cav)}  Shrapnel fragments: {len(shrap)}")
-    for s in shrap[:5]:
-        typer.echo(f"  '{s['cavitated'][:30]}' -> '{s['stranded'][:30]}' in {s['file']}")
 
 
 @cli.command(name="verify-packet",  rich_help_panel="Agent Safety")

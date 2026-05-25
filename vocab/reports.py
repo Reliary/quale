@@ -1734,8 +1734,12 @@ def solve_report(path: str = ".", top_n: int = 20, focus: str = "") -> dict:
         return {"error": f"scan failed: {e}"}
 
     token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+    code_exts = frozenset({".go", ".ts", ".js", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".scala", ".ml", ".mli", ".ex", ".exs", ".hs", ".lhs", ".zig", ".jl", ".clj", ".cljs", ".nix", ".erl", ".hrl"})
     freq: Counter[str] = Counter()
     for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in code_exts:
+            continue
         for phrase in fv.vocabulary:
             for m in token_re.finditer(phrase):
                 freq[m.group()] += fv.vocabulary[phrase]
@@ -2464,8 +2468,12 @@ def decay_report(path: str = ".", file_path: str = "",
     except Exception as e:
         return {"error": f"scan failed: {e}"}
     token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+    code_exts = frozenset({".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".scala", ".ml", ".mli", ".ex", ".exs", ".hs", ".lhs", ".zig", ".jl", ".clj", ".cljs", ".nix", ".erl", ".hrl"})
     file_tokens: set[str] = set()
     for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in code_exts:
+            continue
         if fv.path == file_path:
             for phrase in fv.vocabulary:
                 for m in token_re.finditer(phrase):
@@ -3587,12 +3595,15 @@ def escape_velocity_report(path: str = ".", min_freq: int = 3) -> dict:
     except Exception as e:
         return {"error": f"scan failed: {e}"}
     token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    code_exts = frozenset({".go", ".ts", ".js", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".scala", ".ml", ".mli", ".ex", ".exs", ".hs", ".lhs", ".zig", ".jl", ".clj", ".cljs", ".nix", ".erl", ".hrl"})
     phrase_files: Counter[str] = Counter()
     for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in code_exts:
+            continue
         for phrase in fv.vocabulary:
             for m in token_re.finditer(phrase):
                 phrase_files[m.group()] += 1
-    code_exts = frozenset({".go", ".ts", ".js", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h"})
     file_phrases: dict[str, list[str]] = {}
     for fv in analysis.file_vocabs:
         ext = os.path.splitext(fv.path)[1].lower()
@@ -5631,62 +5642,70 @@ def _classify_files(
 # ── Stability anchors ─────────────────────────────────────────────
 
 def compute_stability(path: str, weeks: int = 12, min_appearances: int = 4) -> list[dict]:
+    """Per-file stability using git log (single call) instead of N rescans.
+
+    Issues ONE `git log --name-only` call for the entire window, buckets file
+    changes by calendar week, then computes persistence = 1 - (active_weeks / total_weeks).
+    Files with zero changes in the window get max persistence.
+    """
     if not vgit.is_repo(path):
         return []
 
     week_data = vgit.weekly_commits(path, weeks=weeks)
+    total_weeks = len(week_data)
     if not week_data:
         return []
 
     from vocab.scanner import scan_codebase
 
-    file_snapshots: dict[str, list[set[str]]] = defaultdict(list)
+    analysis = scan_codebase(path, quiet=True, max_files=2000, max_seconds=25)
+    if not analysis.file_vocabs:
+        return []
 
-    for wk in week_data:
-        shas = wk.get("shas", [])
-        if not shas:
+    first = week_data[0]
+    last = week_data[-1]
+    first_sha = first.get("shas", [None])[0]
+    last_sha = last.get("shas", [None])[0]
+    if not first_sha or not last_sha:
+        return []
+
+    # Single git log call: get every file change in the window bucketed by week
+    try:
+        out = vgit._git_bytes("log", f"{first_sha}~1..{last_sha}",
+                              "--format=%ai", "--name-only", cwd=path)
+    except RuntimeError:
+        return []
+
+    import datetime
+    file_weeks: dict[str, set[str]] = {}
+    current_week: str | None = None
+    for raw_line in out.split(b"\n"):
+        line = raw_line.decode("utf-8", errors="replace").strip()
+        if not line:
+            current_week = None
             continue
-        try:
-            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=2000, max_seconds=25)
-        except Exception:
-            continue
-        for fv in analysis.file_vocabs:
-            file_snapshots[fv.path].append(set(fv.vocabulary.keys()))
+        if line[0:1].isdigit() and len(line) >= 10 and line[4] == "-" and line[10] == " ":
+            try:
+                current_week = datetime.datetime.strptime(line[:10], "%Y-%m-%d").strftime("%Y-W%W")
+            except ValueError:
+                current_week = None
+        elif current_week and line and not line.startswith(" "):
+            file_weeks.setdefault(line, set()).add(current_week)
 
     results = []
-    for filepath, snapshots in file_snapshots.items():
-        if len(snapshots) < min_appearances:
-            continue
-        if len(snapshots) <= 1:
-            continue
-
-        if not snapshots:
-            continue
-        all_phrases: set[str] = set()
-        for s in snapshots:
-            all_phrases.update(s)
-        preserved = snapshots[0]
-        for s in snapshots[1:]:
-            preserved &= s
-
-        total_unique = len(all_phrases) if all_phrases else 1
-        persistence = len(preserved) / total_unique
-
-        turnover_rates = []
-        for i in range(1, len(snapshots)):
-            if snapshots[i-1]:
-                churn = len(snapshots[i] - snapshots[i-1]) / max(len(snapshots[i-1]), 1)
-                turnover_rates.append(churn)
-
-        avg_turnover = sum(turnover_rates) / max(len(turnover_rates), 1) if turnover_rates else 0
+    for fv in analysis.file_vocabs:
+        weekly_hits = file_weeks.get(fv.path, set())
+        # 0 changes = max persistence
+        persistence = 1.0 - (len(weekly_hits) / max(total_weeks, 1))
+        total_phrases = len(fv.vocabulary)
 
         results.append({
-            "file": filepath,
+            "file": fv.path,
             "persistence": round(persistence, 3),
-            "avg_turnover": round(avg_turnover, 3),
-            "snapshots": len(snapshots),
-            "total_phrases": total_unique,
-            "stable_phrases": len(preserved),
+            "avg_turnover": round(len(weekly_hits) / max(weeks, 1), 3),
+            "snapshots": total_weeks,
+            "total_phrases": total_phrases,
+            "stable_phrases": max(0, total_phrases - len(weekly_hits)),
         })
 
     results.sort(key=lambda x: x["persistence"])
@@ -5710,6 +5729,12 @@ _DEAD_CODE_EXTS = frozenset({
 
 
 def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
+    """Concept lifecycles using git diff (no per-file content reads).
+
+    Scans HEAD once, then uses git diff --unified=0 between weekly pairs to
+    extract added/removed token candidates from the diff text itself, eliminating
+    all per-file `git show` overhead.  O(weeks) git calls vs. O(weeks × files).
+    """
     if not vgit.is_repo(path):
         return []
 
@@ -5718,47 +5743,143 @@ def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
         return []
 
     from vocab.scanner import scan_codebase, _is_lock_file, _is_generated
+    from vocab.segmenter import segment
 
     concept_weeks: dict[str, set[int]] = defaultdict(set)
     _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
-
-    previous_phrases: set[str] = set()
     rename_pairs: list[tuple[str, str, int]] = []
 
-    for week_idx, wk in enumerate(week_data):
-        shas = wk.get("shas", [])
-        if not shas:
-            continue
-        try:
-            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=1500, max_seconds=20)
-        except Exception:
-            continue
+    # Scan HEAD once
+    try:
+        head_analysis = scan_codebase(path, quiet=True, max_files=1500, max_seconds=20)
+    except Exception:
+        head_analysis = None
 
-        current_phrases: set[str] = set()
-        for fv in analysis.file_vocabs:
+    if head_analysis:
+        for fv in head_analysis.file_vocabs:
             ext = os.path.splitext(fv.path)[1].lower()
-            if ext not in _DEAD_CODE_EXTS:
-                continue
-            if _is_lock_file(fv.path) or _is_generated(fv.path):
+            if ext not in _DEAD_CODE_EXTS or _is_lock_file(fv.path) or _is_generated(fv.path):
                 continue
             for phrase in fv.vocabulary:
                 for m in _EXPORT_TOKEN.finditer(phrase):
-                    token = m.group()
-                    current_phrases.add(token)
-                    concept_weeks[token].add(week_idx)
+                    concept_weeks[m.group()].add(len(week_data) - 1)
 
-        if previous_phrases and week_idx > 0:
-            disappeared = previous_phrases - current_phrases
-            appeared = current_phrases - previous_phrases
-            if disappeared and appeared:
-                for old in list(disappeared)[:5]:
-                    old_base = old.replace("V1", "").replace("V2", "").replace("V3", "").replace("V4", "").replace("V5", "")
-                    old_base = old_base.replace("Old", "").replace("Legacy", "")
-                    for new in list(appeared)[:5]:
-                        if old_base and (old_base in new or new.replace("New", "").replace("V2", "").replace("V3", "") == old_base):
-                            rename_pairs.append((old, new, week_idx))
+    shas: list[str] = [wk["shas"][-1] for wk in week_data if wk.get("shas")]
 
-        previous_phrases = current_phrases
+    # Walk backwards through weeks using git diff --unified=0
+    # to extract added/removed tokens without per-file content reads
+    for i in range(len(shas) - 1):
+        week_idx = len(week_data) - i - 1
+        sha_prev = shas[-(i + 2)]
+        sha_curr = shas[-(i + 1)]
+
+        try:
+            diff_text = vgit._git_bytes("diff", "--unified=0", sha_prev, sha_curr, cwd=path)
+        except RuntimeError:
+            continue
+
+        added_tokens: set[str] = set()
+        removed_tokens: set[str] = set()
+        for line in diff_text.decode("utf-8", errors="replace").split("\n"):
+            if line.startswith("+") and not line.startswith("+++"):
+                for m in _EXPORT_TOKEN.finditer(line[1:]):
+                    added_tokens.add(m.group())
+            elif line.startswith("-") and not line.startswith("---"):
+                for m in _EXPORT_TOKEN.finditer(line[1:]):
+                    removed_tokens.add(m.group())
+
+        for token in added_tokens:
+            concept_weeks[token].add(week_idx)
+        for token in removed_tokens:
+            if token not in concept_weeks:
+                concept_weeks[token].add(week_idx - 1)
+
+        if removed_tokens and added_tokens:
+            for old in list(removed_tokens)[:5]:
+                old_base = re.sub(r'(V\d+|Old|Legacy)$', '', old)
+                for new in list(added_tokens)[:5]:
+                    if old_base and (old_base in new or re.sub(r'(New|V\d+)$', '', new) == old_base):
+                        rename_pairs.append((old, new, week_idx))
+
+    total_weeks = len(week_data)
+    lifecycles = []
+
+    _COMMON_TOKEN = re.compile(r'^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|FROM|WHERE|AND|OR|NOT|IN|'
+                               r'COUNT|SUM|AVG|MIN|MAX|ORDER|GROUP|HAVING|LIMIT|OFFSET|JOIN|ON|AS|SET|'
+                               r'Getenv|Printf|Println|Fatal|Close|String|Error|Nil|True|False|None|'
+                               r'Type|Struct|Interface|Return|Import|Package|Func|Const|Var|Int|Int64|Int32|'
+                               r'Float32|Float64|Bool|Byte|Rune|Uint|Uint8|Uint16|Uint32|Uint64|'
+                               r'Get|Set|Has|Is|To|From|New|Make|Append|Copy|Len|Cap|Add|Del|'
+                               r'http|HTTP|URL|JSON|XML|HTML|YAML|Base64|UTF8|ASCII|'
+                               r'Config|Logger|Handler|Router|Server|Client|DB|'
+                               r'WithTimeout|Background|Second|Ping|Database|Identifier|Sanitize|QueryRow|'
+                               r'Scan|Query|Exec|Row|Rows|Desc|GroupBy|OrderBy|'
+                               r'Encoding|Parsing|Formatting|Validating|Reading|Writing|Serializing)$')
+
+    for concept, weeks_present in concept_weeks.items():
+        if _COMMON_TOKEN.match(concept):
+            continue
+        first = min(weeks_present)
+        last = max(weeks_present)
+        age = total_weeks - first
+        stale = total_weeks - last
+        appearances = len(weeks_present)
+        ratio = appearances / max(total_weeks, 1)
+
+        renamed_to = [n for o, n, _ in rename_pairs if o == concept]
+        renamed_from = [o for o, n, _ in rename_pairs if n == concept]
+
+        has_gap = False
+        if len(weeks_present) >= 2:
+            sorted_weeks = sorted(weeks_present)
+            for i in range(len(sorted_weeks) - 1):
+                if sorted_weeks[i + 1] - sorted_weeks[i] > 4:
+                    has_gap = True
+                    break
+
+        if has_gap:
+            signal = "SEASONAL"
+        elif stale >= 8 and appearances <= 3:
+            signal = "DEAD"
+        elif stale >= 4 and age >= 12:
+            signal = "DECAYING"
+        elif appearances <= 2 and stale <= 1:
+            signal = "EMERGING"
+        elif age <= 4 and ratio >= 0.5:
+            signal = "GROWING"
+        elif ratio < 0.3 and age > 8:
+            signal = "SPORADIC"
+        elif first <= 2 and last <= 6 and stale >= 4:
+            signal = "ABANDONED"
+        elif renamed_to:
+            signal = "RENAMED"
+        elif renamed_from:
+            signal = "RENAMED_TO"
+        elif age >= 12 and ratio >= 0.8:
+            signal = "STABLE"
+        else:
+            signal = "ACTIVE"
+
+        item = {
+            "concept": concept,
+            "signal": signal,
+            "age_weeks": age,
+            "stale_weeks": stale,
+            "appearance_ratio": round(ratio, 2),
+            "first_week": first,
+            "last_week": last,
+        }
+        if renamed_to:
+            item["renamed_to"] = renamed_to[0]
+        if renamed_from:
+            item["renamed_from"] = renamed_from[0]
+        lifecycles.append(item)
+
+    lifecycles.sort(key=lambda x: ({"DEAD": 0, "ABANDONED": 1, "DECAYING": 2, "SEASONAL": 3,
+                                    "RENAMED": 4, "GROWING": 5, "EMERGING": 6, "SPORADIC": 7,
+                                    "RENAMED_TO": 8, "ACTIVE": 9, "STABLE": 10}.get(x["signal"], 99),
+                                   -x["age_weeks"]))
+    return lifecycles
 
     total_weeks = len(week_data)
     lifecycles = []
@@ -5849,31 +5970,64 @@ def concept_timeline(path: str, weeks: int = 12) -> list[dict]:
         return []
     weeks_data = vgit.weekly_commits(path, weeks=weeks)
     timeline = []
-    prev_phrases: set[str] = set()
 
     from vocab.scanner import scan_codebase
 
-    for wk in weeks_data:
-        shas = wk.get("shas", [])
-        if not shas:
+    shas = [wk["shas"][-1] for wk in weeks_data if wk.get("shas")]
+    if not shas:
+        return []
+
+    # Scan HEAD once only
+    head_analysis = scan_codebase(path, quiet=True, max_files=1500, max_seconds=20)
+    head_phrases = {phrase for fv in head_analysis.file_vocabs for phrase in fv.vocabulary} if head_analysis else set()
+
+    # Walk backwards from HEAD, using git diff between consecutive SHAs
+    # to detect phrase-level changes without full rescans.
+    current_phrases = head_phrases
+    for i in range(len(shas)):
+        if i == 0:
+            wk = weeks_data[-1]
+            timeline.append({
+                "week": wk["week"],
+                "commits": wk["commit_count"],
+                "new_concepts": 0,
+                "retired_concepts": 0,
+                "stable_concepts": len(current_phrases),
+                "total_concepts": len(current_phrases),
+            })
             continue
+
+        sha_curr = shas[-i]          # more recent
+        sha_prev = shas[-(i + 1)]    # older
+        wk = weeks_data[-(i + 1)]
+
         try:
-            analysis = scan_codebase(path, git_ref=shas[-1], quiet=True, max_files=1500, max_seconds=20)
-        except Exception:
+            diff_text = vgit._git_bytes("diff", "--unified=0", sha_prev, sha_curr, cwd=path)
+        except RuntimeError:
             continue
-        current = {phrase for fv in analysis.file_vocabs for phrase in fv.vocabulary}
-        new_concepts = current - prev_phrases if prev_phrases else set()
-        retired = prev_phrases - current if prev_phrases else set()
-        stable = current & prev_phrases if prev_phrases else current
+
+        added_phrases_fwd: set[str] = set()
+        removed_phrases_fwd: set[str] = set()
+        for line in diff_text.decode("utf-8", errors="replace").split("\n"):
+            if line.startswith("+") and not line.startswith("+++"):
+                added_phrases_fwd.add(line[1:].strip())
+            elif line.startswith("-") and not line.startswith("---"):
+                removed_phrases_fwd.add(line[1:].strip())
+
+        # When walking backwards, forward-added phrases don't exist in the past,
+        # and forward-removed phrases DO exist in the past.
+        current_phrases = (current_phrases - added_phrases_fwd) | removed_phrases_fwd
+
         timeline.append({
             "week": wk["week"],
             "commits": wk["commit_count"],
-            "new_concepts": len(new_concepts),
-            "retired_concepts": len(retired),
-            "stable_concepts": len(stable),
-            "total_concepts": len(current),
+            "new_concepts": len(added_phrases_fwd),
+            "retired_concepts": len(removed_phrases_fwd),
+            "stable_concepts": len(current_phrases),
+            "total_concepts": len(current_phrases),
         })
-        prev_phrases = current
+
+    timeline.reverse()
     return timeline
 
 
@@ -7224,9 +7378,8 @@ def repo_fingerprint(path: str, git_ref: str | None = None) -> dict:
 def entropy_velocity(path: str, weeks: int = 12, interval_weeks: int = 4) -> dict:
     """Shannon entropy of vocabulary distribution over time.
 
-    Measures whether the codebase is accelerating toward chaos or
-    decelerating toward stability. Returns entropy values at each
-    time interval plus the velocity (rate of change) and acceleration.
+    Scans HEAD once, then walks backwards through weekly refs using git diff to
+    reconstruct earlier vocabularies.  O(files) instead of O(files × intervals).
     """
     if not vgit.is_repo(path):
         return {"error": "Not a git repository.", "schema_version": 1}
@@ -7234,43 +7387,83 @@ def entropy_velocity(path: str, weeks: int = 12, interval_weeks: int = 4) -> dic
     from vocab.scanner import scan_codebase
     from math import log2
 
-    # Collect vocabulary snapshots at each interval
-    snapshots: list[dict[str, Any]] = []
-    for i in range(weeks // interval_weeks + 1):
-        age_weeks = i * interval_weeks
-        ref = f"HEAD~{age_weeks * 7}" if age_weeks > 0 else None
-        # Validate ref
-        if age_weeks > 0:
-            try:
-                vgit._git("rev-parse", "--verify", "--quiet", f"HEAD~{age_weeks * 7}^{{commit}}", cwd=path)
-            except Exception:
-                break
+    week_data = vgit.weekly_commits(path, weeks=weeks)
+    total_intervals = max(weeks // interval_weeks, 1) + 1
+    if total_intervals < 2:
+        return {"error": "Not enough history for entropy computation.", "schema_version": 1}
 
-        analysis = scan_codebase(path, quiet=True, git_ref=ref, max_files=2500, max_seconds=30)
-        if not analysis.file_vocabs:
-            break
+    next_stop = total_intervals - 1
+    if next_stop * interval_weeks >= len(week_data):
+        next_stop = len(week_data) - 1
 
-        phrase_counts: Counter = Counter()
-        total_phrases = 0
-        for fv in analysis.file_vocabs:
-            for phrase in fv.vocabulary:
-                phrase_counts[phrase] += 1
-                total_phrases += 1
+    # Scan HEAD once
+    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    if not analysis.file_vocabs:
+        return {"error": "No files scanned.", "schema_version": 1}
 
-        if total_phrases == 0:
-            break
-
-        # Shannon entropy: H = -sum(p_i * log2(p_i))
-        entropy = 0.0
+    # Build current vocabulary
+    def _entropy(phrase_counts: Counter, total: int) -> float:
+        if total == 0:
+            return 0.0
+        h = 0.0
         for count in phrase_counts.values():
-            p = count / total_phrases
-            entropy -= p * log2(p)
+            p = count / total
+            h -= p * log2(p)
+        return h
+
+    current_counts: Counter[str] = Counter()
+    for fv in analysis.file_vocabs:
+        for phrase in fv.vocabulary:
+            current_counts[phrase] += 1
+    current_total = sum(current_counts.values())
+
+    snapshots: list[dict[str, Any]] = [{
+        "age_weeks": 0,
+        "entropy": round(_entropy(current_counts, current_total), 4),
+        "total_phrases": current_total,
+        "unique_phrases": len(current_counts),
+    }]
+
+    # Walk backwards through intervals using git diff
+    shas = [wk["shas"][-1] for wk in week_data if wk.get("shas")]
+    for i in range(1, total_intervals):
+        age_weeks = i * interval_weeks
+        if age_weeks >= len(shas):
+            break
+
+        sha_curr = shas[-age_weeks] if age_weeks > 0 else None
+        sha_prev = shas[-(age_weeks + 1)] if (age_weeks + 1) < len(shas) else shas[-1]
+        if not sha_curr or not sha_prev:
+            continue
+
+        try:
+            diff_text = vgit._git_bytes("diff", "--unified=0", sha_prev, sha_curr, cwd=path)
+        except RuntimeError:
+            continue
+
+        added_phrases_fwd: set[str] = set()
+        removed_phrases_fwd: set[str] = set()
+        for line in diff_text.decode("utf-8", errors="replace").split("\n"):
+            if line.startswith("+") and not line.startswith("+++"):
+                added_phrases_fwd.add(line[1:].strip())
+            elif line.startswith("-") and not line.startswith("---"):
+                removed_phrases_fwd.add(line[1:].strip())
+
+        # Reconstruct past vocabulary: remove additions and re-add removals
+        for phrase in removed_phrases_fwd:
+            current_counts[phrase] = max(current_counts.get(phrase, 0) + 1, 1)
+            current_total += 1
+        for phrase in added_phrases_fwd:
+            current_counts[phrase] = max(current_counts.get(phrase, 1) - 1, 0)
+            if current_counts[phrase] == 0:
+                del current_counts[phrase]
+            current_total = max(current_total - 1, 0)
 
         snapshots.append({
             "age_weeks": age_weeks,
-            "entropy": round(entropy, 4),
-            "total_phrases": total_phrases,
-            "unique_phrases": len(phrase_counts),
+            "entropy": round(_entropy(current_counts, current_total), 4),
+            "total_phrases": current_total,
+            "unique_phrases": len(current_counts),
         })
 
     if len(snapshots) < 2:
