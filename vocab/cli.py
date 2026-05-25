@@ -1660,61 +1660,6 @@ def metamorphic_cmd(from_repo="", to_repo="", ref="HEAD~1", format="compact"):
     typer.echo(f'  {data.get("migration_order","")}')
 
 
-@cli.command(name="noise-cancel", rich_help_panel="Inspection")
-def noise_cancel_cmd(path=".", file="", focus="", format="compact"):
-    from vocab.reports import noise_cancel_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not file:
-        typer.echo("provide --file", err=True); raise typer.Exit(1)
-    data = noise_cancel_report(path=p, file_path=file, focus=focus)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'{data.get("file","")}: {data.get("compression_pct",0)}% noise cancelled ({data.get("signal_lines",0)} signal lines)')
-    typer.echo(data.get("cancelled_text","")[:400])
-    typer.echo("...")
-
-
-@cli.command(name="microdot", rich_help_panel="Inspection")
-def microdot_cmd(path=".",
-                 class_name: Annotated[str, typer.Option("--class", "--class-name", help="Class or interface name to compress")] = "",
-                 format="compact"):
-    from vocab.reports import microdot_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    if not class_name:
-        typer.echo("provide --class", err=True); raise typer.Exit(1)
-    data = microdot_report(path=p, class_name=class_name)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(data.get("microdot", ""))
-    typer.echo(f'  Compression: ~{data.get("compression_ratio","N/A")} (est. {data.get("microdot_tokens_est",0)} vs {data.get("original_file_tokens_est",0)} tokens)')
-
-
-@cli.command(name="fractal-zoom", rich_help_panel="Utilities")
-def fractal_zoom_cmd(path=".", focus="", resolution: int = 1, parent_path="", format="compact"):
-    from vocab.reports import fractal_zoom_report
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
-    data = fractal_zoom_report(path=p, focus=focus, resolution=resolution, parent_path=parent_path)
-    if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
-    typer.echo(f'Resolution {data.get("resolution",1)} — {data.get("focus","")}')
-    typer.echo(data.get("zoom",""))
-    hint = data.get("navigation_hint","")
-    if hint:
-        typer.echo(f'  Hint: {hint}')
-
-
 @cli.command(name="catalytic-crack", rich_help_panel="Utilities")
 def catalytic_crack_cmd(path=".", file="", format="compact"):
     from vocab.reports import catalytic_crack_report
