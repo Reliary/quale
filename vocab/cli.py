@@ -4205,6 +4205,35 @@ def trompe_cmd(path=".", file="", format="compact"):
     if format == "json":
         typer.echo(json.dumps(data, indent=2)); return
     typer.echo(f'Trompe: {data.get("trompe_ratio",0)} — {data.get("label","")}')
+
+@cli.command(name="porosity", rich_help_panel="CI")
+def porosity_cmd(path=".", format="compact"):
+    from vocab.reports import porosity_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = porosity_report(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    typer.echo(f'Porosity: {data.get("porosity",0):.6f}')
+
+@cli.command(name="thylacine", rich_help_panel="Inspection")
+def thylacine_cmd(path=".", format="compact"):
+    from vocab.reports import thylacine_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+    data = thylacine_report(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True); raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2)); return
+    thy = data.get("thylacines", [])
+    typer.echo(f'Extinct exports: {len(thy)}')
+    for t in thy[:3]:
+        typer.echo(f'  {t["identifier"]} ({t["files"]} files)')
 if __name__ == "__main__":
     main()
 
