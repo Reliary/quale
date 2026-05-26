@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 CAPABILITY_FOOTER = (
-    "Vocab sees structure, not semantics. "
+    "Quale sees structure, not semantics. "
     "Cannot verify correctness, detect logic errors, or guarantee test quality. "
     "Trust high-confidence signals more than low-confidence ones."
 )

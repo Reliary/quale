@@ -5,7 +5,7 @@
 6 models tested on 2 private repos (autopsylab-agent, autopsylab). Every model
 without quale guessed the wrong test file. Every model with quale picked the right file.
 
-| Model | Where | Baseline guess | Vocab result |
+| Model | Where | Baseline guess | With quale |
 |-------|-------|---------------|--------------|
 | Qwen/Qwen3-235B-A22B | deepinfra | `src/spool.test.ts` ✗ | `tests/spool.test.ts` ✓ |
 | google/gemma-4-31B-it | deepinfra | `test/spool.test.ts` (wrong dir) ✗ | `tests/spool.test.ts` ✓ |
@@ -45,7 +45,7 @@ Best for weak models: `verify_scope` (verification-only, removes edit decision).
 - **Structured JSON beats prose**: compact oneline JSON doubles verify rate vs narrative
   guidance.
 - **The 17% boundary**: repos without stem-matched tests or co-change history remain
-  structurally ambiguous. Vocab documents this honestly rather than hallucinating.
+  structurally ambiguous. Quale documents this honestly rather than hallucinating.
 
 ## Using the harness
 

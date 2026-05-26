@@ -36,7 +36,7 @@ from quale.config import load_config
 
 cli = typer.Typer(
     help="""
-    vocab — structural codebase analysis. No parsers, no config, any language.
+    quale — structural codebase analysis. No parsers, no config, any language.
 
     Find the right command for you:
       HUMAN  explore (what's here), inspect (deep tour), hub-risk (don't touch),
@@ -44,7 +44,7 @@ cli = typer.Typer(
       CI     ci-report [GATE], check-diff [GATE], parity-bit [GATE], check-pr [INFO], pr-report [INFO]
       AGENT  edit-context, guard, contract, verify
 
-    Run ``vocab help-agent "your task"`` if you're not sure which command.
+    Run ``quale help-agent "your task"`` if you're not sure which command.
 
     By question (all commands):
       WHAT'S HERE?        explore, inspect, analyze, repo-map, modules, skeleton
@@ -413,9 +413,9 @@ def preflight(
     """File-scoped edit context and risk card.
 
     Examples:
-      vocab edit-context --files src/spool.ts --task "change upload behavior"
-      vocab edit-context --diff HEAD~1 --format json
-      vocab edit-context --files src/spool.ts --format tool
+      quale edit-context --files src/spool.ts --task "change upload behavior"
+      quale edit-context --diff HEAD~1 --format json
+      quale edit-context --files src/spool.ts --format tool
     """
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -1126,7 +1126,7 @@ def fold_cmd(
     structural noise. 40-80% token reduction on large files.
 
     Example:
-      vocab fold --file src/billing.ts --task 'fix proration'
+      quale fold --file src/billing.ts --task 'fix proration'
     """
     from quale.fold import fold_file
     path_abs = os.path.abspath(path)
@@ -1154,8 +1154,8 @@ def drift_check_cmd(
     state against baseline and alerts on velocity spikes.
 
     Example:
-      vocab drift-check --file src/billing.ts --snapshot
-      vocab drift-check --file src/billing.ts
+      quale drift-check --file src/billing.ts --snapshot
+      quale drift-check --file src/billing.ts
     """
     from quale.reports import drift_velocity_snapshot
     path_abs = os.path.abspath(path)
@@ -1301,7 +1301,7 @@ def forecast_cmd(
     Zero token cost. All computation from git history.
 
     Example:
-      vocab forecast --files src/billing.ts
+      quale forecast --files src/billing.ts
     """
     from quale.reports import forecast_report, _active_gene_pool
     path_abs = os.path.abspath(path)
@@ -1354,7 +1354,7 @@ def triangulate_cmd(
     overlap anchor. No source code sent to LLM.
 
     Example:
-      vocab triangulate --task 'fix billing proration'
+      quale triangulate --task 'fix billing proration'
     """
     from quale.reports import triangulate_report
     path_abs = os.path.abspath(path)
@@ -1393,7 +1393,7 @@ def epidemiology_cmd(
     pathogen (spreading without displacement), or endemic (stable).
 
     Example:
-      vocab epidemiology --weeks 12
+      quale epidemiology --weeks 12
     """
     from quale.reports import epidemiology_report
     path_abs = os.path.abspath(path)
@@ -1645,7 +1645,7 @@ def entropy_cmd(
     exceeds the 30-commit rolling baseline, the limit is tripped.
 
     Example:
-      vocab entropy --weeks 12
+      quale entropy --weeks 12
     """
     from quale.reports import isothermal_entropy
     path_abs = os.path.abspath(path)
@@ -1681,7 +1681,7 @@ def zk_proof_cmd(
     Rejects any identifier not in the allowed set with alternatives.
 
     Example:
-      vocab zk-proof --file db/types.ts --code 'const q = db.query(...)'
+      quale zk-proof --file db/types.ts --code 'const q = db.query(...)'
     """
     from quale.reports import zk_proof_report
     path_abs = os.path.abspath(path)
@@ -1721,7 +1721,7 @@ def lagrange_cmd(
     clusters. Editing these blocks has zero blast radius.
 
     Example:
-      vocab lagrange --file legacy.ts
+      quale lagrange --file legacy.ts
     """
     from quale.reports import lagrange_report
     path_abs = os.path.abspath(path)
@@ -1762,7 +1762,7 @@ def phase_shift_cmd(
     Output is a deterministic replacement task: apply these substitutions.
 
     Example:
-      vocab phase-shift --repo-a ./pre-migration --repo-b ./post-migration
+      quale phase-shift --repo-a ./pre-migration --repo-b ./post-migration
     """
     from quale.reports import phase_shift_report
     if not repo_a or not repo_b:
@@ -1793,9 +1793,9 @@ def cartridge(
     """Verification packet — compressed scope for LLM verification.
     
     Examples:
-      vocab verify-packet --files src/spool.ts
-      vocab verify-packet --files src/spool.ts --why
-      vocab verify-packet --files src/spool.ts --format json
+      quale verify-packet --files src/spool.ts
+      quale verify-packet --files src/spool.ts --why
+      quale verify-packet --files src/spool.ts --format json
     """
     from quale.reports import cartridge_report
     data = cartridge_report(path=path, files=files or None, diff_ref=diff, task=task)
@@ -2463,8 +2463,8 @@ def agent_bootstrap(
     """One-shot agent bootstrap: explore + modules + stability + related files.
 
     Examples:
-      vocab agent-bootstrap . --task "fix upload" --summary
-      vocab agent-bootstrap . --task "fix upload" --verify-relevance --format json
+      quale agent-bootstrap . --task "fix upload" --summary
+      quale agent-bootstrap . --task "fix upload" --verify-relevance --format json
     """
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -2676,9 +2676,9 @@ def delta(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
-    """Structural changes since last vocab init scan.
+    """Structural changes since last quale init scan.
 
-    Requires a cached scan from `vocab init` or `vocab repo-map --save`.
+    Requires a cached scan from `quale init` or `quale repo-map --save`.
     """
     from quale.reports import repo_delta
 
@@ -2739,10 +2739,10 @@ def ci_report_cmd(
     Designed for CI pipelines that want a summary, not a gate.
 
     Examples:
-      vocab ci-report origin/main HEAD --summary
-      vocab ci-report origin/main HEAD --fail-on-mirror-gap 0.70
-      vocab ci-report origin/main HEAD --fail-on-blast-tier high
-      vocab ci-report origin/main HEAD --fail-on-stable-touched
+      quale ci-report origin/main HEAD --summary
+      quale ci-report origin/main HEAD --fail-on-mirror-gap 0.70
+      quale ci-report origin/main HEAD --fail-on-blast-tier high
+      quale ci-report origin/main HEAD --fail-on-stable-touched
     """
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
@@ -3021,7 +3021,7 @@ def modules(
 
 @cli.command(name="help-agent",  rich_help_panel="Getting Started")
 def help_agent(task: Annotated[str, typer.Argument(help="Engineering task description")]) -> None:
-    """Recommend useful vocab commands for an agent task."""
+    """Recommend useful quale commands for an agent task."""
     task_lower = task.lower()
     commands: list[tuple[str, str, bool]] = []
 
@@ -3065,7 +3065,7 @@ def help_agent(task: Annotated[str, typer.Argument(help="Engineering task descri
                          "[UNMEASURED] Multiple-choice verification candidates.", True))
     if any(word in task_lower for word in ("route", "decide", "whether")):
         commands.append(("quale route --path . --task \"<task>\" --format json",
-                         "[UNMEASURED] Routing logic that decides when to use vocab.", True))
+                         "[UNMEASURED] Routing logic that decides when to use quale.", True))
 
     # Discoverability
     commands.append(("quale explore . --format json --quick",
@@ -3163,11 +3163,11 @@ def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo pat
     with open(target, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
     seg_result = segment(content)
-    vocab = build_vocabulary(seg_result.phrases, seg_result.strategy, seg_result.delimiter)
-    phrase_to_idx = {e.text: e.index for e in vocab.entries}
+    quale = build_vocabulary(seg_result.phrases, seg_result.strategy, seg_result.delimiter)
+    phrase_to_idx = {e.text: e.index for e in quale.entries}
     index_list = [phrase_to_idx[p] for p in seg_result.phrases if p in phrase_to_idx]
     typer.echo(f"Fingerprint: v0-{index_sequence_hash(index_list)}")
-    typer.echo(f"Phrases: {vocab.size} unique / {len(seg_result.phrases)} total")
+    typer.echo(f"Phrases: {quale.size} unique / {len(seg_result.phrases)} total")
 
 
 @cli.command(rich_help_panel="Utilities")
@@ -3230,7 +3230,7 @@ def init(
     target = os.path.join(os.path.abspath(path), ".vocab.yml")
     if not os.path.exists(target):
         os.makedirs(os.path.abspath(path), exist_ok=True)
-        content = """# vocab CI configuration
+        content = """# quale CI configuration
 # Structural checks for CI pipelines.
 
 blast:
@@ -3275,30 +3275,30 @@ def main():
             sys.exit(0)
         typer.echo("quale — grammar-free structural codebase analyzer")
         typer.echo("Start here:")
-        typer.echo("  vocab agent-bootstrap . --task \"fix upload\" --summary")
-        typer.echo("  vocab inspect .")
-        typer.echo("  vocab help-agent \"change API client\"")
+        typer.echo("  quale agent-bootstrap . --task \"fix upload\" --summary")
+        typer.echo("  quale inspect .")
+        typer.echo("  quale help-agent \"change API client\"")
         typer.echo("")
         typer.echo("CI / PR:")
-        typer.echo("  vocab ci-report origin/main HEAD --summary")
-        typer.echo("  vocab ci-report origin/main HEAD --fail-on-blast-tier high")
-        typer.echo("  vocab blast origin/main HEAD")
-        typer.echo("  vocab pr-report origin/main HEAD")
+        typer.echo("  quale ci-report origin/main HEAD --summary")
+        typer.echo("  quale ci-report origin/main HEAD --fail-on-blast-tier high")
+        typer.echo("  quale blast origin/main HEAD")
+        typer.echo("  quale pr-report origin/main HEAD")
         typer.echo("")
         typer.echo("History / structure:")
-        typer.echo("  vocab repo-map .               one-time repo summary (LLM)")
-        typer.echo("  vocab vocabulary-trend --path .                vocabulary diversity over history")
-        typer.echo("  vocab patterns --path .               refactoring pattern hints")
-        typer.echo("  vocab anomalies --path .                structural defect summary")
-        typer.echo("  vocab stable .")
-        typer.echo("  vocab timeline . --format json")
-        typer.echo("  vocab provenance SpoolManager . --format json")
-        typer.echo("  vocab modules .")
-        typer.echo("  vocab fingerprint .")
+        typer.echo("  quale repo-map .               one-time repo summary (LLM)")
+        typer.echo("  quale vocabulary-trend --path .                vocabulary diversity over history")
+        typer.echo("  quale patterns --path .               refactoring pattern hints")
+        typer.echo("  quale anomalies --path .                structural defect summary")
+        typer.echo("  quale stable .")
+        typer.echo("  quale timeline . --format json")
+        typer.echo("  quale provenance SpoolManager . --format json")
+        typer.echo("  quale modules .")
+        typer.echo("  quale fingerprint .")
         typer.echo("")
         typer.echo("Cross-repo / search:")
-        typer.echo("  vocab search SpoolManager ../repo-a ../repo-b")
-        typer.echo("  vocab compare ../repo-a ../repo-b --format json")
+        typer.echo("  quale search SpoolManager ../repo-a ../repo-b")
+        typer.echo("  quale compare ../repo-a ../repo-b --format json")
         typer.echo("")
         typer.echo("Other commands: analyze, diff, lifecycle, explore, clone, landmarks, orphans, init, coupling, origins, stop")
         typer.echo("Tip: most agent-facing commands support --format json.")
@@ -3749,11 +3749,11 @@ def ask(
     """Answer natural-language questions about a repo using existing structural data.
 
     Examples:
-      vocab ask "Is src/spool.ts safe to edit?"
-      vocab ask "What verifies changes to cli.py?"
-      vocab ask "What files share concepts with ingest.go?"
-      vocab ask "Is this repo healthy?"
-      vocab ask "Does this repo have tests?"
+      quale ask "Is src/spool.ts safe to edit?"
+      quale ask "What verifies changes to cli.py?"
+      quale ask "What files share concepts with ingest.go?"
+      quale ask "Is this repo healthy?"
+      quale ask "Does this repo have tests?"
     """
     from quale.reports import answer_question
 
@@ -3797,7 +3797,7 @@ def ask(
     sources = data.get("sources", [])
     if sources:
         typer.echo(c(f"  Sources: {', '.join(sources)}", "gray"))
-    cap = "Vocab sees structure, not semantics. Answers are structural hints only."
+    cap = "Quale sees structure, not semantics. Answers are structural hints only."
     typer.echo(c(f"  {cap}", "gray"))
 
 
@@ -4023,7 +4023,7 @@ def thanatosis_cmd(path=".", format="compact") -> None:
         typer.echo(json.dumps(data, indent=2)); return
     for f in data.get("files", [])[:3]:
         typer.echo(f'  {f["file"]}: cent={f["centrality"]} edits={f["edits"]} risk={f["risk_ratio"]}')
-    typer.echo('  \033[90mNext: vocab guard --file <file> | vocab edit-context --files <file>\033[0m')
+    typer.echo('  \033[90mNext: quale guard --file <file> | quale edit-context --files <file>\033[0m')
 
 @cli.command(name="complexity-ratio", rich_help_panel="Code Analysis")
 def trompe_cmd(path=".", file="", format="compact") -> None:
@@ -4075,7 +4075,7 @@ def thylacine_cmd(path=".", format="compact") -> None:
     for t in thy[:3]:
         typer.echo(f'  {t["identifier"]} ({t["files"]} files)')
     if thy:
-        typer.echo('  \033[90mNext: vocab cleanup-list | vocab escape-velocity\033[0m')
+        typer.echo('  \033[90mNext: quale cleanup-list | quale escape-velocity\033[0m')
 
 @cli.command(name="coupling-chain", rich_help_panel="Code Analysis")
 def tensegrity_cmd(path=".", format="compact") -> None:
