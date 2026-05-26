@@ -93,7 +93,7 @@ def _help_all(ctx: typer.Context) -> None:
         typer.echo(f"\n\033[1m{panel}:\033[0m")
         for name, doc in cmds:
             typer.echo(f"  {name:<25s} {doc[:60]}")
-    raise typer.Exit()
+    sys.exit(0)
 
 
 @cli.callback(invoke_without_command=True)
@@ -3272,7 +3272,7 @@ def main():
     if len(sys.argv) == 1 or "--help-all" in sys.argv:
         if "--help-all" in sys.argv:
             _help_all(None)
-            return
+            sys.exit(0)
         typer.echo("vocab — grammar-free structural codebase analyzer")
         typer.echo("Start here:")
         typer.echo("  vocab agent-bootstrap . --task \"fix upload\" --summary")
