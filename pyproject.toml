@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quale"
-version = "0.7.1"
+version = "0.7.2"
 description = "Structural codebase analysis — no parsers, no config, any language"
 readme = "README.md"
 license = "MIT"
@@ -15,10 +15,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/reliary/quale"
+Homepage = "https://github.com/Reliary/quale"
+Repository = "https://github.com/Reliary/quale"
 
 [project.scripts]
-quale = "quale.cli:main"
+quale = "quale.cli:_entry_main"
 
 [tool.setuptools.packages.find]
 include = ["quale*"]
