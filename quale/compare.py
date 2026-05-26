@@ -32,7 +32,7 @@ def _is_contract_surface(filepath: str) -> bool:
         if norm.endswith(suffix):
             return True
     # Directory-path matches
-    for segment in norm.split("/"):
+    for segment in norm.replace("\\", "/").split("/"):
         if segment in ("types", "api", "client", "contract", "handlers", "models", "routes"):
             return True
     # Monorepo package source: packages/X/src/ contains interface/export files

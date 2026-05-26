@@ -331,7 +331,7 @@ def compute_modules(path: str, analysis: CodebaseAnalysis | None = None) -> dict
 # ── Task planning ─────────────────────────────────────────────────
 
 def _task_file_role(path: str) -> str:
-    parts = [p.lower() for p in path.split("/")]
+    parts = [p.lower() for p in path.replace("\\", "/").split("/")]
     if any(x in parts for x in ("test", "tests", "testdata")):
         from quale.scanner import _is_test_path
         if _is_test_path(path):
@@ -464,7 +464,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
         for item in related:
             filepath = item["file"]
             try:
-                with open(os.path.join(path, filepath), "r", errors="replace") as f:
+                with open(os.path.join(path, filepath), "r", encoding="utf-8", errors="replace") as f:
                     content = f.read().lower()
             except Exception:
                 unverified_files.append(filepath)

@@ -16,7 +16,7 @@ def load_config(path: str) -> dict:
 
     try:
         import yaml
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             user_config = yaml.safe_load(f) or {}
         merged = dict(DEFAULT_CONFIG)
         for section, values in user_config.items():

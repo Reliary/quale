@@ -73,7 +73,7 @@ def _version_callback(show_version: bool) -> None:
 def _help_all(ctx: typer.Context) -> None:
     """Print a compact summary of all commands with first-line descriptions."""
     import re
-    with open(__file__) as f:
+    with open(__file__, encoding="utf-8") as f:
         src = f.read()
     panels: dict[str, list[tuple[str, str]]] = {}
     for c in cli.registered_commands:
@@ -2618,7 +2618,7 @@ def agent_bootstrap(
     if modules:
         typer.echo(c(f"  MODULE BOUNDARIES ({len(modules)} found):", "subheader"))
         for m in modules[:5]:
-            files_preview = ", ".join(f.split("/")[-1] for f in m["files"][:3])
+            files_preview = ", ".join(f.replace("\\", "/").split("/")[-1] for f in m["files"][:3])
             pr = m.get("persistence_range", [1, 2])
             typer.echo(f"    {m['size']} files  thr {pr[0]}→{pr[1]}  {c(files_preview, 'gray')}")
         if len(modules) > 5:
@@ -2959,7 +2959,7 @@ def inspect(
         for m in modules_data.get("modules", [])[:5]:
             pr = m.get("persistence_range", [1, 3])
             bar = _bar((pr[1] - pr[0] + 1) * 10, 10)
-            files_preview = ", ".join(f.split("/")[-1] for f in m["files"][:3])
+            files_preview = ", ".join(f.replace("\\", "/").split("/")[-1] for f in m["files"][:3])
             typer.echo(f"    {bar} {m['size']} files  thr {pr[0]}→{pr[1]}  {c(files_preview, 'gray')}")
         if module_count > 5:
             typer.echo(c(f"    … +{module_count - 5} more modules", "gray"))
@@ -3243,7 +3243,7 @@ lifecycle:
 search:
   common_threshold: 0.8
 """
-        with open(target, "w") as f:
+        with open(target, "w", encoding="utf-8") as f:
             f.write(content)
         typer.echo(f"Created {target}")
 

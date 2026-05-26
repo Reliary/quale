@@ -168,7 +168,7 @@ def diff_refs(path: str, ref_a: str, ref_b: str) -> list[str]:
         if not f:
             continue
         f = _decode_path(f)
-        parts = f.split("/")
+        parts = f.replace("\\", "/").split("/")
         if any(p.endswith(".egg-info") for p in parts):
             continue
         if any(d in parts for d in _skip_parts):
@@ -194,7 +194,7 @@ def diff_worktree(path: str, ref: str) -> list[str]:
         if not f:
             continue
         f = _decode_path(f)
-        parts = f.split("/")
+        parts = f.replace("\\", "/").split("/")
         if any(p.endswith(".egg-info") for p in parts):
             continue
         if any(d in parts for d in _skip_parts):

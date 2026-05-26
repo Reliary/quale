@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
+
+if os.name == 'nt':
+    os.system('')
 
 if TYPE_CHECKING:
     from quale.scanner import CodebaseAnalysis
@@ -127,7 +131,7 @@ def format_quick(analysis: CodebaseAnalysis) -> str:
         if up:
             unique_explanation = f"({up[0][:30]})"
         else:
-            unique_explanation = l['path'].split("/")[-1]
+            unique_explanation = l['path'].replace("\\", "/").split("/")[-1]
 
     lines.append(_color(f"{'━' * 50}", "cyan"))
     lines.append(f"  {analysis.path}")

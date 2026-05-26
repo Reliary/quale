@@ -91,7 +91,7 @@ def _is_binary(path: str) -> bool:
 
 
 def _skip_path(path: str) -> bool:
-    parts = set(path.split("/"))
+    parts = set(path.replace("\\", "/").split("/"))
     if parts & _SKIP_PATH_PARTS:
         return True
     if any(p.endswith(".egg-info") for p in parts):
@@ -327,7 +327,7 @@ def _get_language_common(file_vocabs: list[FileVocab], top_n: int = 20) -> dict[
 
 def _is_test_path(path: str) -> bool:
     base = os.path.basename(path).lower()
-    parts = {p.lower() for p in path.split("/")}
+    parts = {p.lower() for p in path.replace("\\", "/").split("/")}
     return ("test" in parts or "tests" in parts or "testdata" in parts
             or base.endswith("_test.go") or base.endswith(".test.ts")
             or base.endswith(".test.tsx") or base.endswith(".spec.ts")
@@ -455,7 +455,7 @@ def _is_lock_file(path: str) -> bool:
 
 def _is_generated(path: str) -> bool:
     base = os.path.basename(path)
-    parts = set(path.split("/"))
+    parts = set(path.replace("\\", "/").split("/"))
     return (_skip_path(path)
             or base.startswith("zz_") or base == "zz_generated.go"
             or base.endswith(".pb.go") or base.endswith(".pb.ts")

@@ -1464,8 +1464,8 @@ def isolate_modules(path: str = ".", task: str = "") -> dict:
             ents = entanglement_matrix(path, lookback_commits=50).get("pairs", [])
             rare: Counter[str] = Counter()
             for pair in ents[:30]:
-                rare[pair["file_a"].split("/")[-1].split(".")[0]] += pair["co_change_count"]
-                rare[pair["file_b"].split("/")[-1].split(".")[0]] += pair["co_change_count"]
+                rare[pair["file_a"].replace("\\", "/").split("/")[-1].split(".")[0]] += pair["co_change_count"]
+                rare[pair["file_b"].replace("\\", "/").split("/")[-1].split(".")[0]] += pair["co_change_count"]
             for term, _ in rare.most_common(3):
                 injection.append(term)
         except Exception:
@@ -1516,7 +1516,7 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
         basin_path = os.path.join(drift_dir, f"{safe_name}.json")
 
         if snapshot:
-            with open(basin_path, "w") as fp:
+            with open(basin_path, "w", encoding="utf-8") as fp:
                 json.dump({"phrases": sorted(phrases), "count": len(phrases)}, fp)
             results.append({"file": f, "phrases_captured": len(phrases), "snapshot": True})
             continue
@@ -1526,7 +1526,7 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
             continue
 
         try:
-            with open(basin_path) as fp:
+            with open(basin_path, encoding="utf-8") as fp:
                 baseline = json.load(fp)
         except Exception:
             results.append({"file": f, "error": "corrupt baseline", "velocity": 0})
@@ -1563,7 +1563,7 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
             existing: dict = {}
             if os.path.exists(dc_file):
                 try:
-                    with open(dc_file) as fp:
+                    with open(dc_file, encoding="utf-8") as fp:
                         existing = json.load(fp)
                 except Exception:
                     existing = {}
@@ -1581,7 +1581,7 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
                         anomalies.append(f"Vacuum leak (orphan {decoherence_window}+ turns): {p[:50]}")
                     current_orphans.add(p)
 
-            with open(dc_file, "w") as fp:
+            with open(dc_file, "w", encoding="utf-8") as fp:
                 json.dump({"orphan_turns": orphan_history, "timestamp": int(time.time())}, fp)
         else:
             # Clear decoherence tracking when window is 0
@@ -2197,7 +2197,7 @@ def _load_wordlist() -> set[str]:
         import os
         wl_path = os.path.join(os.path.dirname(__file__), "wordlist.txt")
         if os.path.exists(wl_path):
-            with open(wl_path) as f:
+            with open(wl_path, encoding="utf-8") as f:
                 _WORDLIST = set(line.strip().lower() for line in f if line.strip())
             return _WORDLIST
     except Exception:
@@ -2827,7 +2827,7 @@ def anneal_report(path: str = ".", file_path: str = "", task: str = "",
             if f in ftokens and f != file_path:
                 ct |= ftokens[f]
         cluster_tokens[label] = ct
-    with open(full) as f:
+    with open(full, encoding="utf-8") as f:
         lines = f.readlines()
     blocks = _indent_blocks(lines)
     results: list[tuple[int, int, str, int, int]] = []
@@ -3032,7 +3032,7 @@ def heisenberg_check(path: str = ".", file_path: str = "",
     token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
 
     # Current file tokens (the 'position' / historical anchors)
-    with open(full) as f:
+    with open(full, encoding="utf-8") as f:
         current_text = f.read()
     current_tokens = set(token_re.findall(current_text))
 
@@ -3142,7 +3142,7 @@ def splice_exons_report(path: str = ".", file_path: str = "") -> dict:
             for phrase in fv.vocabulary:
                 for m in token_re.finditer(phrase):
                     global_freq[m.group()] += 1
-    with open(full) as f:
+    with open(full, encoding="utf-8") as f:
         lines = f.readlines()
     exons: list[dict] = []
     for i, line in enumerate(lines):
@@ -3175,7 +3175,7 @@ def catalytic_crack_report(path: str = ".", file_path: str = "") -> dict:
     if not os.path.exists(full):
         return {"error": f"file not found: {file_path}"}
     from quale.fold import _indent_blocks
-    with open(full) as f:
+    with open(full, encoding="utf-8") as f:
         lines = f.readlines()
     blocks = _indent_blocks(lines)
     token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
@@ -3936,7 +3936,7 @@ def guide_report(path: str = ".", file_path: str = "") -> dict:
     if unique:
         return {"guide": unique[0], "file": file_path, "confidence": "unique"}
     best = sorted(target_tokens, key=lambda t: id_file_count.get(t, 0))[:3]
-    return {"guide": best[0] if best else file_path.split("/")[-1].split(".")[0],
+    return {"guide": best[0] if best else file_path.replace("\\", "/").split("/")[-1].split(".")[0],
             "file": file_path, "confidence": "distinctive"}
 
 
@@ -4050,7 +4050,7 @@ def trompe_report(path: str = ".", file_path: str = "") -> dict:
     full = os.path.join(path, file_path)
     if not os.path.exists(full):
         return {"error": f"file not found: {file_path}"}
-    with open(full) as f:
+    with open(full, encoding="utf-8") as f:
         lines = f.readlines()
     from quale.scanner import scan_codebase
     try:
@@ -4404,8 +4404,8 @@ def chirality_report(path: str = ".", min_overlap: float = 0.80) -> dict:
             path_a, set_a = file_sets[i]
             path_b, set_b = file_sets[j]
             # Only match across different directories
-            dir_a = "/".join(path_a.split("/")[:-1])
-            dir_b = "/".join(path_b.split("/")[:-1])
+            dir_a = "/".join(path_a.replace("\\", "/").split("/")[:-1])
+            dir_b = "/".join(path_b.replace("\\", "/").split("/")[:-1])
             if dir_a == dir_b:
                 continue
             union = len(set_a | set_b)
@@ -4573,7 +4573,7 @@ def _b_cell_lookup(repo_path: str, file_path: str) -> dict | None:
     for fname in os.listdir(cache_dir):
         if fname.startswith(h):
             try:
-                with open(os.path.join(cache_dir, fname)) as f:
+                with open(os.path.join(cache_dir, fname), encoding="utf-8") as f:
                     return json.load(f)
             except Exception:
                 return None
@@ -4596,7 +4596,7 @@ def _b_cell_store(repo_path: str, file_path: str,
     os.makedirs(cache_dir, exist_ok=True)
     vf_tag = verify_file.replace("/", "_") if verify_file else "desert"
     path = os.path.join(cache_dir, f"{h}_{vf_tag}.json")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(entry, f, indent=2, default=str)
 
 
@@ -4612,11 +4612,11 @@ def _b_cell_hit(repo_path: str, file_path: str):
         if fname.startswith(h):
             try:
                 fp = os.path.join(cache_dir, fname)
-                with open(fp) as f:
+                with open(fp, encoding="utf-8") as f:
                     entry = json.load(f)
                 entry["hits"] += 1
                 entry["last_hit_at"] = time.time()
-                with open(fp, "w") as f:
+                with open(fp, "w", encoding="utf-8") as f:
                     json.dump(entry, f, indent=2, default=str)
             except Exception:
                 pass
@@ -4922,7 +4922,7 @@ def _load_fragment_matrix(path: str = ".") -> dict:
     if not os.path.exists(fp):
         return {}
     try:
-        with open(fp) as f:
+        with open(fp, encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
         return {}
@@ -4938,7 +4938,7 @@ def _save_fragment_matrix(path: str, entries: list[dict]):
     """Save fragment matrix entries to cache."""
     fp = os.path.join(os.path.abspath(path), _FRAGMENT_MATRIX_PATH)
     os.makedirs(os.path.dirname(fp), exist_ok=True)
-    with open(fp, "w") as f:
+    with open(fp, "w", encoding="utf-8") as f:
         json.dump({"schema_version": 1, "entries": entries}, f, indent=2, default=str)
 
 
@@ -4983,8 +4983,8 @@ def _is_declarative_changed(changed: list[str], file_vocabs) -> bool:
 
 def _same_package_prefix(test_dir: str, src_dir: str) -> bool:
     """True if directories share a meaningful package prefix (at least 2 segments)."""
-    t_parts = test_dir.split("/")
-    s_parts = src_dir.split("/")
+    t_parts = test_dir.replace("\\", "/").split("/")
+    s_parts = src_dir.replace("\\", "/").split("/")
     if len(t_parts) < 2 or len(s_parts) < 2:
         return False
     if t_parts[0] != s_parts[0]:
@@ -5002,7 +5002,7 @@ _CO_LOCATED_CONVENTIONS = [
 # — Per-source-prefix, look for same-named package subdirectory
 def _monorepo_package_prefix(p: str) -> str | None:
     """Extract 'packages/X' prefix from a monorepo path."""
-    parts = p.split("/")
+    parts = p.replace("\\", "/").split("/")
     if len(parts) >= 3 and parts[0] == "packages":
         return f"packages/{parts[1]}"
     return None
@@ -5438,7 +5438,7 @@ def _explain_verify_candidates(changed: list[str], bootstrap: dict | None, file_
     changed_bases = {os.path.splitext(os.path.basename(f))[0].replace(".", "").lower() for f in changed}
     changed_dirs = set()
     for f in changed:
-        parts = f.split("/")
+        parts = f.replace("\\", "/").split("/")
         if len(parts) > 1:
             changed_dirs.add("/".join(parts[:-1]))
     # Collect task-relevant tests
@@ -5502,7 +5502,7 @@ def _test_stem(path: str) -> str:
 
 def _verification_candidates_for_source(source_path: str, stem: str, test_paths: list[str], test_by_stem: dict[str, list[str]]) -> list[str]:
     candidates = list(test_by_stem.get(stem, []))
-    source_parts = source_path.split("/")[:-1]
+    source_parts = source_path.replace("\\", "/").split("/")[:-1]
     source_dir_tokens = {part.lower() for part in source_parts if part}
     for test in test_paths:
         if test in candidates:
@@ -5511,7 +5511,7 @@ def _verification_candidates_for_source(source_path: str, stem: str, test_paths:
         if stem and stem in _test_stem(test):
             candidates.append(test)
             continue
-        overlap = source_dir_tokens & {part.lower() for part in test.split("/")[:-1]}
+        overlap = source_dir_tokens & {part.lower() for part in test.replace("\\", "/").split("/")[:-1]}
         if overlap and os.path.basename(source_path).split(".")[0].lower() in test_lower:
             candidates.append(test)
     return list(dict.fromkeys(candidates))[:5]
@@ -5572,7 +5572,7 @@ def _verification_desert_reason(score: float, candidates: list[str], test_dirs: 
 def _verification_desert_score(source_path: str, candidates: list[str], test_dirs: set[str]) -> float:
     if candidates:
         return 0.0 if len(candidates) >= 2 else 0.25
-    parts = source_path.split("/")
+    parts = source_path.replace("\\", "/").split("/")
     has_nearby_test_dir = any(source_path.startswith(prefix.rsplit("/", 1)[0]) for prefix in test_dirs if "/" in prefix)
     score = 0.75
     if not test_dirs:
@@ -5609,7 +5609,7 @@ def verification_deserts(path: str, max_results: int = 20) -> dict:
     for p in test_paths:
         stem = _test_stem(p)
         test_by_stem[stem].append(p)
-        parts = p.split("/")
+        parts = p.replace("\\", "/").split("/")
         for idx, part in enumerate(parts):
             if "test" in part.lower():
                 test_dirs.add("/".join(parts[:idx + 1]))
@@ -6982,7 +6982,7 @@ def crystallography(path: str = ".") -> dict:
         if isinstance(m, dict):
             module_summary.append({
                 "size": m.get("size", 0),
-                "sample_files": [f.split("/")[-1] for f in m.get("files", [])[:3]],
+                "sample_files": [f.replace("\\", "/").split("/")[-1] for f in m.get("files", [])[:3]],
             })
 
     # File layout pattern
@@ -7023,7 +7023,7 @@ def crystallography(path: str = ".") -> dict:
     skeleton_parts.append(f"Layout: {layout_type} test:{test_convention}.")
     skeleton_parts.append(f"Gen: {generated_pct}% generated.")
     if stable_core:
-        stable_files = [s["file"].split("/")[-1] for s in stable_core[:3]]
+        stable_files = [s["file"].replace("\\", "/").split("/")[-1] for s in stable_core[:3]]
         skeleton_parts.append(f"Stable: {', '.join(stable_files)}.")
     if top_binders:
         cores = [b["concept"] for b in top_binders[:2]]
@@ -8246,7 +8246,7 @@ def implicature_report(path: str = ".", file_path: str = "") -> dict:
         full = os.path.join(path, tf)
         if not os.path.exists(full):
             continue
-        with open(full) as f:
+        with open(full, encoding="utf-8") as f:
             lines = f.readlines()
         tokens = set()
         for fv in analysis.file_vocabs:
