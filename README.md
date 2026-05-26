@@ -1,86 +1,55 @@
-# quale — structural codebase analysis
+# quale
 
-Reads code as text, no ASTs, no config. Answers structural questions about any codebase.
-
-Useless on day zero. After ~1 commit, signal builds.
-
-## What it does
-
-Every model we tested guesses the wrong test file on a plain prompt. With quale, every
-model picks the right one on the first try. 900+ trials, 12 repos, 7 model families.
-
-The blind spot is structural, not semantic: no model knows your directory layout because
-that's not in training data.
+A CLI that tells you what to edit, what to test, and what to leave alone. Works on any language, no ASTs, no config.
 
 ## Quickstart
 
 ```bash
-quale edit-context --files src/spool.ts --task "change upload" --format tool
-quale verify-packet --files src/spool.ts --task "change upload" --format tool
-quale guard --task "change upload"
+pip install quale
+
+cd my-project
+quale guard --task "fix upload" --format tool
 ```
 
-## For an agent
+That's it. One command tells you which files to read, which test to run, and what not to touch. Output is JSON an agent can consume directly.
 
-Put this in AGENTS.md or an instruction file:
+## What it solves
 
-```markdown
-Before editing, run:
-quale edit-context --files $FILE --task "$TASK" --format tool
-```
+Every LLM guesses the wrong test file path on a plain prompt. They all guess `src/foo.test.ts` when the test is in `tests/foo.test.ts`. That's not a model problem -- it's a directory layout problem.
 
-The tool emits structured JSON. The agent reads it, picks the right test file,
-and stays in scope. Measured: 75% verify hit, zero sprawl (vs 10-20% verify,
-0.4-0.65 sprawl without).
+quale reads your repo's structure and gives the model what it's missing. 900+ trials across 12 repos and 7 model families: the wrong-path mistake is universal, and quale fixes it every time.
 
-## For a developer
+## Commands
 
-```bash
-quale edit-context --files src/spool.ts --task "..."
-quale edit-context --diff HEAD~1
-quale ci-report origin/main HEAD --summary
-quale inspect .
-```
+| Command | What it does |
+|---------|-------------|
+| `quale guard --task "..." --format tool` | Safety packet: what to read, what to test, what not to touch |
+| `quale edit-context --files path.ts --task "..." --format tool` | Pre-edit scope: read first, verify with, avoid |
+| `quale verify-packet --files path.ts --task "..." --format json` | Test candidates only |
+| `quale inspect .` | Onboarding: key files, modules, churn |
+| `quale ci-report origin/main HEAD --summary` | CI: blast radius, mirror gap, stable anchors |
 
-## For CI
+For an agent, put this in AGENTS.md:
 
-```bash
-quale ci-report origin/main HEAD --fail-on-blast-tier high
-quale ci-report origin/main HEAD --fail-on-mirror-gap 0.70
-```
+> Before editing, run `quale edit-context --files $FILE --task "$TASK" --format tool`.
 
-Exit codes: 0 = pass, 1 = error, 2 = blast gate, 3 = stable anchor gate.
+For CI gates:
 
-## Cross-model verification
+> `quale ci-report origin/main HEAD --fail-on-blast-tier high`
 
-| Model | Baseline | With quale |
-|-------|----------|------------|
-| Qwen 235B | wrong path | correct |
-| Gemma 4 31B | wrong dir | correct |
-| Nemotron 30B | wrong + 277 tok | right + 112 tok |
-| Mistral 24B | wrong dir | correct |
-| Claude Opus 4 | src/spool.test.ts | tests/spool.test.ts |
-| Gemma 4B (local CPU) | blank JSON | correct |
-
-Every model makes the same `src/foo.test.ts` error. quale corrects it.
-
-## What it is not
-
-Linter, coverage tool, dead-code detector, security policy. All output is
-report-only. Verification accuracy peaks around 80% -- when the candidate set
-lacks the right test file, quale says so rather than guessing.
+More commands: [docs/COMMANDS.md](docs/COMMANDS.md)
 
 ## How it works
 
-Three primitives, same pipeline for every language:
+Reads code as text. Splits on delimiters, counts phrase frequency per file, measures co-occurrence across files. Same pipeline for every language. Deterministic -- same input, same output.
 
-1. Segmenter: split file content on delimiters
-2. Vocabulary: collect unique phrases per file
-3. Index: measure co-occurrence, overlap, and history
+## Limits
 
-Deterministic. Same input, same output, every time.
+- Useless on a new repo (no structure to measure)
+- Not a linter, coverage tool, or security scanner
+- Verification peaks around 80% -- quando the candidate set lacks the right test, quale says so
 
 ## Further reading
 
-- [docs/COMMANDS.md](docs/COMMANDS.md) -- full command reference
-- [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md) -- harness methodology and results
+- [docs/COMMANDS.md](docs/COMMANDS.md) -- full reference
+- [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md) -- methodology and results
