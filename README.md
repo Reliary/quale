@@ -15,7 +15,7 @@ That's it. One command tells you which files to read, which test to run, and wha
 
 ## What it solves
 
-Every LLM guesses the wrong test file path on a plain prompt. They all guess `src/foo.test.ts` when the test is in `tests/foo.test.ts`. That's not a model problem -- it's a directory layout problem.
+Every LLM guesses the wrong test file path on a plain prompt. They all guess `src/foo.test.ts` when the test is in `tests/foo.test.ts`. This is a directory layout problem, not a model quality problem.
 
 quale reads your repo's structure and gives the model what it's missing. 900+ trials across 12 repos and 7 model families: the wrong-path mistake is universal, and quale fixes it every time.
 
@@ -41,15 +41,15 @@ More commands: [docs/COMMANDS.md](docs/COMMANDS.md)
 
 ## How it works
 
-Reads code as text. Splits on delimiters, counts phrase frequency per file, measures co-occurrence across files. Same pipeline for every language. Deterministic -- same input, same output.
+Reads code as text. Splits on delimiters, counts phrase frequency per file, measures co-occurrence across files. Same pipeline for every language. Deterministic: same input, same output.
 
 ## Limits
 
 - Useless on a new repo (no structure to measure)
 - Not a linter, coverage tool, or security scanner
-- Verification peaks around 80% -- quando the candidate set lacks the right test, quale says so
+- Verification peaks around 80%. When the candidate set lacks the right test, quale says so
 
 ## Further reading
 
-- [docs/COMMANDS.md](docs/COMMANDS.md) -- full reference
-- [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md) -- methodology and results
+- [docs/COMMANDS.md](docs/COMMANDS.md) (full reference)
+- [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md) (methodology and results)
