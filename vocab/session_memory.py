@@ -116,6 +116,9 @@ class SessionMemory:
                             d[y] -= 1
                             if d[y] <= 0:
                                 del d[y]
+        for a in token_set:
+            if a in self._token_assoc and not self._token_assoc[a]:
+                del self._token_assoc[a]
 
     def ingest(self, *, tool: str = "", file_path: str = "",
                error_code: str = "", raw: str = "",
