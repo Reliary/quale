@@ -5123,7 +5123,7 @@ def _negative_verify_files(changed: list[str], file_vocabs: list) -> list[str]:
     changed_vocab = set()
     for fv in file_vocabs:
         if fv.path in changed_set:
-            changed_vocab.update(fv.vocabulary.keys() if hasattr(fv, "qualeulary") else [])
+            changed_vocab.update(fv.vocabulary.keys() if hasattr(fv, "vocabulary") else [])
     if not changed_vocab:
         return []
     negatives = []
@@ -5133,7 +5133,7 @@ def _negative_verify_files(changed: list[str], file_vocabs: list) -> list[str]:
             continue
         if fv.path in changed_set:
             continue
-        fv_vocab = set(fv.vocabulary.keys() if hasattr(fv, "qualeulary") else [])
+        fv_vocab = set(fv.vocabulary.keys() if hasattr(fv, "vocabulary") else [])
         if fv_vocab and not (fv_vocab & changed_vocab):
             negatives.append(fv.path)
     negatives.sort()

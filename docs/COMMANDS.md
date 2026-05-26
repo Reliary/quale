@@ -49,7 +49,7 @@ quale pr-report origin/main HEAD                      # consolidated markdown re
 ## History & Evolution
 
 ```bash
-quale qualeulary-trend --path . --weeks 12                    # qualeulary qualeulary-trend velocity
+quale vocabulary-trend --path . --weeks 12                    # vocabulary vocabulary-trend velocity
 quale lifecycle . --weeks 24                         # phrase lifecycle (stable/decaying/etc)
 quale stable .                                       # stable anchors and churn hotspots
 quale provenance "SpoolManager" .                    # phrase history through git
@@ -65,7 +65,7 @@ quale search SpoolManager ../repo-a ../repo-b        # cross-repo phrase search
 quale skeleton --path .                              # prompt decompression: ~100-token skip directives
 quale fingerprint .                                  # repo structural identity
 quale coupling --path .                              # concept coupling classification
-quale diff --ref HEAD~10                             # qualeulary changes across git history
+quale diff --ref HEAD~10                             # vocabulary changes across git history
 quale landmarks .                                    # characteristic phrases
 quale delta --path .                                 # structural changes since `quale init`
 ```

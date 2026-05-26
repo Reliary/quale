@@ -41,7 +41,7 @@ Best for weak models: `verify_scope` (verification-only, removes edit decision).
 - **Sprawl is the only durable claim**: every quale condition eliminated agent wandering
   (0.0 sprawl) across all repos and models.
 - **Every model benefits from structure**: Qwen 235B and Claude Opus 4 both guess
-  `src/spool.test.ts` on a blank prompt — no model is immune to structural blind spots.
+  `src/spool.test.ts` on a blank prompt--no model is immune to structural blind spots.
 - **Structured JSON beats prose**: compact oneline JSON doubles verify rate vs narrative
   guidance.
 - **The 17% boundary**: repos without stem-matched tests or co-change history remain
@@ -50,8 +50,8 @@ Best for weak models: `verify_scope` (verification-only, removes edit decision).
 ## Using the harness
 
 ```bash
-python scripts/evaluate_quale_effect.py --dry-run --max-cases 2
-python scripts/evaluate_quale_effect.py --suite edit-context --trials 3
+python scripts/evaluate_vocab_effect.py --dry-run --max-cases 2
+python scripts/evaluate_vocab_effect.py --suite edit-context --trials 3
 python scripts/analyze_effect_failures.py /tmp/quale-effect-edit-context-3trial.json
 ```
 

@@ -3506,7 +3506,7 @@ def stop(
     typer.echo("")
 
 
-@cli.command(name="qualeulary-trend",  rich_help_panel="Maintenance")
+@cli.command(name="vocabulary-trend",  rich_help_panel="Maintenance")
 def entropy(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks to analyze")] = 12,

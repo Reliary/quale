@@ -1,6 +1,6 @@
 # Philosophy
 
-quale treats code as a **phrase-file incidence matrix** — a qualeulary lattice that
+quale treats code as a **phrase-file incidence matrix** — a vocabulary lattice that
 can be diffed, analyzed, and traced without knowing the language. This reframing
 unlocks capabilities that no existing tool provides:
 

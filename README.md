@@ -29,9 +29,11 @@ quale reads your repo's structure and gives the model what it's missing. 900+ tr
 | `quale inspect .` | Onboarding: key files, modules, churn |
 | `quale ci-report origin/main HEAD --summary` | CI: blast radius, mirror gap, stable anchors |
 
-For an agent, put this in AGENTS.md:
+For an agent, put this in AGENTS.md or your system prompt:
 
 > Before editing, run `quale edit-context --files $FILE --task "$TASK" --format tool`.
+
+There is no setup or "init" step. The first time the command runs on a repo, quale automatically scans the codebase and caches the structural map (takes 1-3 seconds). Subsequent calls are instant.
 
 For CI gates:
 
