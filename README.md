@@ -29,9 +29,12 @@ quale reads your repo's structure and gives the model what it's missing. 900+ tr
 | `quale inspect .` | Onboarding: key files, modules, churn |
 | `quale ci-report origin/main HEAD --summary` | CI: blast radius, mirror gap, stable anchors |
 
-For an agent, put this in AGENTS.md or your system prompt:
+For an agent:
 
-> Before editing, run `quale edit-context --files $FILE --task "$TASK" --format tool`.
+1. Run `quale --agent-orient` after pip install — returns a JSON manifest with flag conventions, workflow ordering, format types, and gotchas. The tool teaches itself.
+2. Then `quale help-agent "change upload behavior" --format tool` for task-specific recommendations.
+
+Every agent-facing command (`edit-context`, `guard`, `contract`, `check-plan`, `verify-packet`) carries an `_agent_note` field in its `--format tool` JSON explaining the flag syntax for that command.
 
 There is no setup or "init" step. The first time the command runs on a repo, quale automatically scans the codebase and caches the structural map (takes 1-3 seconds). Subsequent calls are instant.
 
