@@ -1,2 +1,2 @@
-from quale.cli import main
-main()
+from quale.cli import _entry_main
+_entry_main()

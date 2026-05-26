@@ -1,12 +1,23 @@
 # Command Reference
 
+## Agent: Getting Started (Install to Productive)
+
+```bash
+quale --agent-orient                                    # JSON manifest: conventions, workflow, gotchas
+quale help-agent "change upload behavior" --format tool  # task-specific recommendations + workflow
+```
+
+Every agent-facing command carries an `_agent_note` field in `--format tool` JSON
+explaining its flag syntax.
+
 ## Agent: Scope Control (Proven)
 
 ```bash
 quale edit-context --files src/spool.ts --task "..." --format tool  # 75% accuracy, 0 scope creep
 quale edit-context --diff HEAD~1 --task "..." --format tool           # 75% accuracy (diff-scoped)
 quale edit-context --files src/spool.ts --task "..." --format verify  # 83% accuracy (test-only)
-quale contract --files src/spool.ts --task "..." --format tool     # ID-coded scope (experimental)
+quale guard --file src/spool.ts --task "..." --format tool          # combined safety packet
+quale contract --files src/spool.ts --task "..."                    # ID-coded scope (default tool)
 quale check-plan --contract c.json --proposal p.json               # validate LLM proposal
 ```
 
@@ -15,7 +26,7 @@ quale check-plan --contract c.json --proposal p.json               # validate LL
 ```bash
 quale repo-map --path . --format json         # ~100 token repo skeleton
 quale agent-bootstrap . --task "..." --format checklist  # weak-model step-by-step
-quale help-agent "debug upload"                     # discoverability: which command?
+quale help-agent "debug upload" --format tool              # discoverability + conventions + gotchas
 ```
 
 ## Human: Overview & Health

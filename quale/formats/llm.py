@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 
 CAPABILITY_FOOTER = (
     "Quale sees structure, not semantics. "
@@ -105,7 +104,7 @@ def format_preflight_llm(data: dict) -> str:
             cand_strs.append(f"{c}{tag}")
         path_lines.append(f"  3) VERIFY {', '.join(cand_strs)}")
     else:
-        path_lines.append(f"  3) VERIFY none — inspect manually")
+        path_lines.append("  3) VERIFY none — inspect manually")
     if do_not_touch:
         path_lines.append(f"  \u26a0 DNT {', '.join(do_not_touch[:3])}")
     if len(path_lines) >= 2:

@@ -35,7 +35,7 @@ def _indent_blocks(lines: list[str]) -> list[dict[str, Any]]:
         stripped = line.strip()
         if not stripped:
             if start < i:
-                blk_lines = [l for l in lines[start:i] if l.strip()]
+                blk_lines = [ln for ln in lines[start:i] if ln.strip()]
                 if blk_lines:
                     blocks.append({
                         "start": start,
@@ -61,7 +61,7 @@ def _indent_blocks(lines: list[str]) -> list[dict[str, Any]]:
             start = i
 
     if start < len(lines):
-        remaining = [l for l in lines[start:] if l.strip()]
+        remaining = [ln for ln in lines[start:] if ln.strip()]
         if remaining:
             blocks.append({
                 "start": start,
@@ -165,8 +165,8 @@ def fold_file(path: str = ".", file_path: str = "", task: str = "",
         block_lines = b_text.split("\n")
 
         # Never fold structural blocks (imports, function defs, class defs, return stmts)
-        non_empty = [l for l in block_lines if l.strip()]
-        if any(_is_structural(l) for l in non_empty):
+        non_empty = [ln for ln in block_lines if ln.strip()]
+        if any(_is_structural(ln) for ln in non_empty):
             kept_lines.extend(lines[b_start:b_end + 1])
             continue
 

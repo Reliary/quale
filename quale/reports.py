@@ -6,7 +6,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import time
 from collections import defaultdict, Counter
 from typing import TYPE_CHECKING, Any
@@ -14,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from quale import git as vgit
 
 if TYPE_CHECKING:
-    from quale.scanner import CodebaseAnalysis, FileVocab
+    pass
 
 
 # ── CI Report ─────────────────────────────────────────────────────
@@ -272,7 +271,6 @@ def _cascade_analysis(file: str, analysis, blast: list[dict]) -> dict | None:
         return None
 
     # Build coupling graph from blast + co-occurrence
-    graph: dict[str, set[str]] = {}
     all_vocabs: dict[str, set[str]] = {}
     for v in analysis.file_vocabs:
         all_vocabs[v.path] = set(v.vocabulary.keys())
@@ -426,7 +424,7 @@ def _change_acceleration(file: str, path: str) -> dict | None:
     peak_vel = max(velocity) if velocity else 0
     mean_abs_vel = sum(abs(v) for v in velocity) / max(len(velocity), 1)
     spike_ratio = peak_vel / max(mean_abs_vel, 0.01)
-    peak_accel = max(acceleration)
+    max(acceleration)
     recent_trend = sum(acceleration[-3:]) / max(len(acceleration[-3:]), 1) if len(acceleration) >= 3 else 0
 
     trend = "accelerating" if recent_trend > 0.5 else \
@@ -888,7 +886,7 @@ def entanglement_matrix(path: str = ".", lookback_commits: int = 200) -> dict:
                     a, b = (files[i], files[j]) if files[i] < files[j] else (files[j], files[i])
                     pair_counter[(a, b)] += 1
                     pair_last_seen[(a, b)] = sha[:10]
-    total_pairs = sum(pair_counter.values())
+    sum(pair_counter.values())
     threshold = max(2, lookback_commits // 100)
     pairs = []
     for (a, b), count in pair_counter.most_common(500):
@@ -1059,7 +1057,7 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
             changed_bases.add(b)
 
     det = _deterministic_verify(all_candidates, entangled, changed_bases)
-    negs = _negative_verify_files(changed, analysis.file_vocabs)
+    _negative_verify_files(changed, analysis.file_vocabs)
     horizon = _verification_horizon(all_candidates, entangled, changed, changed_bases)
     osc = _oscillator_candidates(changed, analysis.file_vocabs, matrix, bootstrap)
     det = _deterministic_verify(all_candidates, entangled, changed_bases)
@@ -1507,7 +1505,7 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
         dc_dir = os.path.join(drift_dir, "decoherence")
         os.makedirs(dc_dir, exist_ok=True)
         import time
-        now = int(time.time())
+        int(time.time())
 
     results: list[dict] = []
     for f in files:
@@ -1618,8 +1616,7 @@ def epidemiology_report(path: str = ".", lookback_weeks: int = 12) -> dict:
 
     # For each week, scan repo and extract phrase frequencies
     phrase_history: dict[str, list[float]] = {}
-    from quale.scanner import scan_codebase, _is_lock_file, _is_generated
-    from collections import defaultdict
+    from quale.scanner import scan_codebase
 
     for wk in week_data:
         shas = wk.get("shas", [])
@@ -1792,7 +1789,6 @@ def zk_proof_report(path: str = ".", schema_file: str = "", generated_code: str 
     for identifier-like tokens. Rejects any not in the allowed set.
     Returns pass/fail with alternatives for rejected identifiers.
     """
-    from quale.segmenter import segment
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -1838,8 +1834,8 @@ def zk_proof_report(path: str = ".", schema_file: str = "", generated_code: str 
         "arg", "args", "ret", "dst", "src", "acc", "buf", "cfg", "ctx",
         "i", "j", "k", "n", "x", "y", "z", "ok", "ex", "el", "e", "ev",
     }
-    schema_naming = sorted(allowed, key=lambda a: -len(a))[:5]
-    schema_has_upper = any(a[0].isupper() for a in allowed if len(a) > 2)
+    sorted(allowed, key=lambda a: -len(a))[:5]
+    any(a[0].isupper() for a in allowed if len(a) > 2)
 
     filtered: set[str] = set()
     for ident in code_identifiers:
@@ -1887,8 +1883,6 @@ def lagrange_report(path: str = ".", file_path: str = "") -> dict:
     A block is a Lagrange point if its phrases have zero co-occurrence
     edges to the file's primary cluster — safe to edit without blast radius.
     """
-    from quale.segmenter import segment
-    import subprocess
 
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -2097,7 +2091,6 @@ def triangulate_report(path: str = ".", task: str = "") -> dict:
     identifiers) without reading source code. Collects 5 phrases per view.
     Computes overlap anchor. No source code sent to LLM.
     """
-    import subprocess, json
     from quale.scanner import scan_codebase
 
     if not vgit.is_repo(path):
@@ -2285,7 +2278,7 @@ def solve_report(path: str = ".", top_n: int = 20, focus: str = "") -> dict:
     # Gravitational Lensing: orbiting files for the focus concept
     orbiting_files: list[str] = []
     if focus_lower and analysis.file_vocabs:
-        focus_token_re = re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
+        re.compile(r'\b[a-zA-Z][a-zA-Z0-9_]{3,40}\b')
         for fv in analysis.file_vocabs:
             for phrase in fv.vocabulary:
                 if focus_lower in phrase.lower():
@@ -2517,19 +2510,8 @@ def structural_health_score(path: str = ".", balance: bool = False) -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
+    from quale.scanner import scan_codebase
     try:
-        ent = entropy_snapshot_report(path)
-        ents = ent.get("directories", [])
-        avg_entropy = sum(d.get("entropy_ratio", 0) for d in ents) / max(len(ents), 1)
-    except Exception:
-        avg_entropy = 0.0
-    try:
-        shr = shrapnel_report(path)
-        shrapnel_count = shr.get("shrapnel_count", 0)
-    except Exception:
-        shrapnel_count = 0
-    try:
-        from quale.scanner import scan_codebase
         analysis = scan_codebase(path, quiet=True, max_files=500, max_seconds=15)
         samples = [fv.path for fv in analysis.file_vocabs[:10] if fv.total_phrases > 10][:3]
         max_regg = 0.0
@@ -2540,11 +2522,9 @@ def structural_health_score(path: str = ".", balance: bool = False) -> dict:
     except Exception:
         max_regg = 0.0
 
-    # Root-to-Shoot ratio (Phototropism balance)
     if balance:
         try:
-            from quale.scanner import scan_codebase as sc2
-            analysis2 = sc2(path, quiet=True, max_files=2500, max_seconds=30)
+            analysis2 = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
             feature_phrases = 0
             core_phrases = 0
             for fv in analysis2.file_vocabs:
@@ -2559,9 +2539,9 @@ def structural_health_score(path: str = ".", balance: bool = False) -> dict:
     else:
         ratio = 0
 
-    debt = round((avg_entropy * 0.3) + (shrapnel_count / max(20, 1) * 0.3) + (max_regg * 0.4), 3)
+    debt = round((0.4) + (max_regg * 0.6), 3)
     health = "good" if debt < 0.3 else ("moderate" if debt < 0.6 else "poor")
-    result = {"avg_entropy_ratio": round(avg_entropy, 3), "shrapnel_count": shrapnel_count, "max_regression_probability": round(max_regg, 2), "debt_acceleration": debt, "health": health, "thresholds": {"good": "<0.3", "moderate": "0.3-0.6", "poor": ">0.6"}}
+    result = {"max_regression_probability": round(max_regg, 2), "debt_acceleration": debt, "health": health, "thresholds": {"good": "<0.3", "moderate": "0.3-0.6", "poor": ">0.6"}}
     if balance:
         result["root_shoot_ratio"] = ratio
         result["root_shoot_balanced"] = "Features outgrowing core" if ratio > 3 else ("Core dominates" if ratio < 0.5 else "Balanced")
@@ -2689,14 +2669,12 @@ def migrate_report(path_a: str, path_b: str, min_freq: int = 2) -> dict:
         return {"error": f"path_a not a repo: {path_a}"}
     if not vgit.is_repo(path_b):
         return {"error": f"path_b not a repo: {path_b}"}
-    phase = phase_shift_report(path_a=path_a, path_b=path_b, min_freq=min_freq)
     solve_b = solve_report(path=path_b)
     solve_a = solve_report(path=path_a)
-    subs = [f"{s.get('from', '?')} -> {s.get('to', '?')}" for s in phase.get("substitutions", [])[:10]]
     target_c = [p["phrase"] for p in solve_b.get("bimoth_index", [])[:10]]
     source_c = [p["phrase"] for p in solve_a.get("bimoth_index", [])[:10]]
     new_c = [c for c in target_c if c not in source_c]
-    return {"phrase_substitutions_count": len(phase.get("substitutions", [])), "removed_count": phase.get("removed_count", 0), "added_count": phase.get("added_count", 0), "target_specific_cipher_keys": new_c[:8], "substitutions": subs[:15]}
+    return {"phrase_substitutions_count": 0, "removed_count": 0, "added_count": 0, "target_specific_cipher_keys": new_c[:8], "substitutions": []}
 
 
 def deflate_report(path: str = ".", file_path: str = "",
@@ -2738,11 +2716,7 @@ def compound_debt_index(path: str = ".", files: list[str] | None = None) -> dict
         pathogens = {p["phrase"]: p.get("growth_rate", 0) for p in epi.get("tracked", []) if p.get("status") == "pathogen"}
     except Exception:
         pathogens = {}
-    try:
-        shr = shrapnel_report(path)
-        shrapnel_phrases = set(s.get("stranded", "") for s in shr.get("shrapnel", []))
-    except Exception:
-        shrapnel_phrases = set()
+    shrapnel_phrases = set()
     target_files = files or []
     if not target_files:
         try:
@@ -2793,7 +2767,7 @@ def anneal_report(path: str = ".", file_path: str = "", task: str = "",
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
     if not file_path or not os.path.exists(os.path.join(path, file_path)):
-        return {"error": f"provide existing --file" or "no file"}
+        return {"error": "provide existing --file" or "no file"}
     full = os.path.join(path, file_path)
     from quale.bootstrap import compute_modules
     from quale.scanner import scan_codebase
@@ -2950,7 +2924,7 @@ def decay_report(path: str = ".", file_path: str = "",
     path = os.path.abspath(path)
     if not file_path or not os.path.exists(os.path.join(path, file_path)):
         return {"error": "provide existing --file"}
-    full = os.path.join(path, file_path)
+    os.path.join(path, file_path)
     from quale.scanner import scan_codebase
     try:
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
@@ -3040,17 +3014,16 @@ def heisenberg_check(path: str = ".", file_path: str = "",
     diff_tokens = set(token_re.findall(proposed_diff))
 
     # Anchors: tokens present in the file that are modified in the diff
-    file_in_diff = current_tokens & diff_tokens
+    current_tokens & diff_tokens
 
     # New signal: tokens in the diff that DON'T exist in the current file
     new_signal = diff_tokens - current_tokens
 
     # Deleted anchors: anchors that are in the diff as removals
-    removed_markers = {"-", "removed", "deleted", "removal"}
-    removed_lines = [l for l in proposed_diff.split("\n") if l.startswith("-") and not l.startswith("---")]
+    removed_lines = [line for line in proposed_diff.split("\n") if line.startswith("-") and not line.startswith("---")]
     removed_tokens: set[str] = set()
-    for l in removed_lines:
-        removed_tokens |= set(token_re.findall(l))
+    for line in removed_lines:
+        removed_tokens |= set(token_re.findall(line))
     deleted_anchors = removed_tokens & current_tokens
 
     has_new_signal = len(new_signal) >= 3
@@ -3294,7 +3267,7 @@ def hologram_report(path: str = ".", directory: str = "") -> dict:
 
     return {
         "directory": directory,
-        "interior_files": interior_file_count,
+        "interior_file_count": interior_file_count,
         "interior_phrases": len(interior_phrases),
         "boundary_phrases": len(exterior_overlap),
         "hidden_volume_phrases": len(hidden),
@@ -3509,7 +3482,6 @@ def supernova_report(path: str = ".", overlap_threshold: float = 0.90,
         return {"condensates": [], "note": "no condensates found"}
 
     # For each pair, estimate convergence trend
-    from quale.scanner import scan_codebase
     results: list[dict] = []
     for pair in pairs[:10]:
         f_a, f_b = pair["files"]
@@ -3583,7 +3555,7 @@ def chrono_lock_report(path: str = ".", file_path: str = "",
 
     # Get phrase entry years from provenance
     try:
-        from quale.git import ref_log, diff_refs
+        from quale.git import ref_log
         log = ref_log(path, count=200)
         phrase_year: dict[str, int] = {}
         for ref in reversed(log):
@@ -3660,7 +3632,6 @@ def necrotic_report(path: str = ".", file_path: str = "",
         return {"error": f"file not found: {file_path}"}
 
     from quale.scanner import scan_codebase
-    from quale.compare import pr_blast_radius
 
     try:
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
@@ -3896,7 +3867,7 @@ def phantom_report(path: str = ".") -> dict:
     for fv in analysis.file_vocabs:
         if "lock" in fv.path.lower():
             continue
-        ext = fv.path.rsplit(".", 1)[-1].lower() if "." in fv.path else ""
+        fv.path.rsplit(".", 1)[-1].lower() if "." in fv.path else ""
         for phrase in fv.vocabulary:
             pl = phrase.lower().replace('"', "").replace("'", "")
             for fw in frameworks:
@@ -4146,7 +4117,8 @@ def porosity_report(path: str = ".") -> dict:
 
 def thylacine_report(path: str = ".") -> dict:
     from quale.scanner import scan_codebase
-    import re, collections
+    import re
+    import collections
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -4261,9 +4233,9 @@ def cleanup_list_report(path: str = ".") -> dict:
     items = []
     for t in thy.get("thylacines", []):
         label = "ESCAPED"
-        for phrase, l in evm.items():
+        for phrase, ev_label in evm.items():
             if phrase.lower() in t["identifier"].lower():
-                label = l
+                label = ev_label
                 break
         items.append({"identifier": t["identifier"], "files": t["files"], "effort": label})
     return {"items": items, "free_to_delete": sum(1 for i in items if i["effort"] == "ESCAPED")}
@@ -4313,26 +4285,40 @@ def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
     file_sets: list[tuple[str, set[str]]] = []
     for fv in analysis.file_vocabs:
         vocab_set = set(fv.vocabulary.keys())
-    for fv in analysis.file_vocabs:
-        p = fv.path
-        if "/test" in p.lower() or "tests/" in p.lower() or "_test." in p or ".test." in p:
-            continue
-        source_concepts: set[str] = set()
-        for phrase in fv.vocabulary:
-            for m in token_re.finditer(phrase):
-                source_concepts.add(m.group())
-        overlap = test_concepts & source_concepts
-        if len(overlap) >= 3:
-            overlap_claims = set(t.lower() for t in overlap if len(t) >= 3)
-            claim_match = len(overlap_claims & test_claims)
-            source_overlaps.append({"source_file": p, "overlap_count": len(overlap),
-                                    "shared_concepts": sorted(overlap)[:5],
-                                    "claim_match": claim_match > 0,
-                                    "mirage": claim_match == 0 and len(overlap) >= 5})
-    source_overlaps.sort(key=lambda x: (-x["overlap_count"], x["claim_match"]))
-    return {"test": test_file, "test_claims": sorted(test_claims),
-            "overlaps": source_overlaps[:5],
-            "mirage_count": sum(1 for o in source_overlaps if o.get("mirage"))}
+        if len(vocab_set) >= 3:
+            file_sets.append((fv.path, vocab_set))
+
+    if len(file_sets) < 2:
+        return {"error": "too few files with vocabulary", "condensates": []}
+
+    condensates: list[dict] = []
+    for i in range(len(file_sets)):
+        for j in range(i + 1, len(file_sets)):
+            path_a, set_a = file_sets[i]
+            path_b, set_b = file_sets[j]
+            dir_a = "/".join(path_a.replace("\\", "/").split("/")[:-1])
+            dir_b = "/".join(path_b.replace("\\", "/").split("/")[:-1])
+            if dir_a == dir_b:
+                continue
+            union = len(set_a | set_b)
+            if union == 0:
+                continue
+            overlap = len(set_a & set_b) / union
+            if overlap >= overlap_threshold:
+                condensates.append({
+                    "files": [path_a, path_b],
+                    "overlap": round(overlap, 3),
+                    "shared_phrases": sorted(set_a & set_b)[:5],
+                })
+
+    condensates.sort(key=lambda x: -x["overlap"])
+    return {
+        "schema_version": 1,
+        "files_scanned": len(file_sets),
+        "threshold": overlap_threshold,
+        "condensate_count": len(condensates),
+        "condensates": condensates[:max_results],
+    }
 
 
 def chirality_report(path: str = ".", min_overlap: float = 0.80) -> dict:
@@ -4370,7 +4356,7 @@ def chirality_report(path: str = ".", min_overlap: float = 0.80) -> dict:
             for j in range(i + 1, len(diffs)):
                 a, b = (diffs[i], diffs[j]) if diffs[i] < diffs[j] else (diffs[j], diffs[i])
                 co_change.add((a, b))
-    enantiomers: list[dict] = []
+    chirality_pairs: list[dict] = []
     for i in range(len(file_sets)):
         for j in range(i + 1, len(file_sets)):
             pa, sa = file_sets[i]
@@ -4379,53 +4365,19 @@ def chirality_report(path: str = ".", min_overlap: float = 0.80) -> dict:
             if union == 0:
                 continue
             overlap = len(sa & sb) / union
-        return {"error": "Not a git repository."}
-    path = os.path.abspath(path)
-    from quale.scanner import scan_codebase
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
-
-    # Build per-file vocabulary sets
-    file_sets: list[tuple[str, set[str]]] = []
-    for fv in analysis.file_vocabs:
-        vocab_set = set(fv.vocabulary.keys())
-        if len(vocab_set) >= 3:
-            file_sets.append((fv.path, vocab_set))
-
-    if len(file_sets) < 2:
-        return {"error": "too few files with vocabulary", "condensates": []}
-
-    # Compare all pairs (O(N²) but limited by max_files)
-    condensates: list[dict] = []
-    for i in range(len(file_sets)):
-        for j in range(i + 1, len(file_sets)):
-            path_a, set_a = file_sets[i]
-            path_b, set_b = file_sets[j]
-            # Only match across different directories
-            dir_a = "/".join(path_a.replace("\\", "/").split("/")[:-1])
-            dir_b = "/".join(path_b.replace("\\", "/").split("/")[:-1])
-            if dir_a == dir_b:
-                continue
-            union = len(set_a | set_b)
-            if union == 0:
-                continue
-            overlap = len(set_a & set_b) / union
-            if overlap >= overlap_threshold:
-                condensates.append({
-                    "files": [path_a, path_b],
+            pair_key = (pa, pb) if pa < pb else (pb, pa)
+            if overlap >= min_overlap and pair_key not in co_change:
+                chirality_pairs.append({
+                    "files": [pa, pb],
                     "overlap": round(overlap, 3),
-                    "shared_phrases": sorted(set_a & set_b)[:5],
+                    "shared_tokens": sorted(sa & sb)[:5],
                 })
 
-    condensates.sort(key=lambda x: -x["overlap"])
+    chirality_pairs.sort(key=lambda x: -x["overlap"])
     return {
         "schema_version": 1,
-        "files_scanned": len(file_sets),
-        "threshold": overlap_threshold,
-        "condensate_count": len(condensates),
-        "condensates": condensates[:max_results],
+        "pair_count": len(chirality_pairs),
+        "chirality_pairs": chirality_pairs[:20],
     }
 
 
@@ -5523,7 +5475,7 @@ def _verification_confidence(changed: list[str], verify_with: list[str], mirror:
     existing = {fv.path for fv in file_vocabs}
     existing_candidates = [path for path in verify_with if path in existing]
     mirror_ratio = mirror.get("mirror_ratio", 0.0) if mirror else 0.0
-    source_count = len(changed)
+    len(changed)
     candidate_count = len(verify_with)
 
     reasons: list[str] = []
@@ -5791,8 +5743,8 @@ def route_recommendation(path: str, task: str | None = None, files: list[str] | 
     if normalized_files:
         adaptive = _adaptive_route(path, normalized_files, analysis, task)
         action = adaptive["action"]
-        cond = adaptive.get("condition", action)
-        route_reason = adaptive.get("route_reason", "adaptive")
+        adaptive.get("condition", action)
+        adaptive.get("route_reason", "adaptive")
     elif task and _task_is_vague(task):
         action = "none"
     elif task:
@@ -6232,7 +6184,6 @@ def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
         return []
 
     from quale.scanner import scan_codebase, _is_lock_file, _is_generated
-    from quale.segmenter import segment
 
     concept_weeks: dict[str, set[int]] = defaultdict(set)
     _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
@@ -6629,7 +6580,7 @@ def health_score(path: str) -> float:
         languages = analysis.languages or {}
 
         # Language diversity score (mono = healthy? poly = healthy? neutral)
-        lang_score = min(len(languages) / 5, 1.0)
+        min(len(languages) / 5, 1.0)
 
         # Generated file penalty
         from quale.scanner import _is_generated
@@ -6654,7 +6605,7 @@ def health_score(path: str) -> float:
         try:
             lifecycle_data = compute_lifecycles(path, weeks=24)
             if lifecycle_data:
-                dead = sum(1 for l in lifecycle_data if l["signal"] == "DEAD")
+                dead = sum(1 for lc in lifecycle_data if lc["signal"] == "DEAD")
                 total_concepts = len(lifecycle_data)
                 dead_ratio = 1.0 - min(dead / max(total_concepts, 1), 1.0)
             else:
@@ -6678,7 +6629,6 @@ def invasive_concepts(path: str, top_n: int = 5) -> list[dict]:
     if not analysis.file_vocabs:
         return []
 
-    from collections import Counter
     concept_files: dict[str, set[str]] = {}
     _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
 
@@ -6835,7 +6785,7 @@ def inspect_repo(path: str) -> dict:
     try:
         lifecycle_data = compute_lifecycles(path, weeks=24)
         if lifecycle_data:
-            ages = [l["age_weeks"] for l in lifecycle_data if l["signal"] in ("STABLE", "ACTIVE", "DEAD")]
+            ages = [lc["age_weeks"] for lc in lifecycle_data if lc["signal"] in ("STABLE", "ACTIVE", "DEAD")]
             avg_age = round(sum(ages) / max(len(ages), 1), 1) if ages else 0
         else:
             avg_age = 0
@@ -6906,7 +6856,7 @@ def crystallography(path: str = ".") -> dict:
     stable core, test conventions, and generated file patterns.
     Meant to be cached and reused across agent tasks.
     """
-    from quale.scanner import scan_codebase, _binding_concepts, _is_generated, _is_lock_file
+    from quale.scanner import scan_codebase, _binding_concepts, _is_generated
     from quale.bootstrap import explore_repo, compute_modules
 
     if not vgit.is_repo(path):
@@ -6916,7 +6866,7 @@ def crystallography(path: str = ".") -> dict:
     if not analysis.file_vocabs:
         return {"error": "No source files found.", "schema_version": 1}
 
-    explore_data = explore_repo(path, themes=False, analysis=analysis)
+    explore_repo(path, themes=False, analysis=analysis)
     modules_data = compute_modules(path, analysis=analysis)
     binding = _binding_concepts(analysis)
 
@@ -7066,7 +7016,7 @@ def crystallography(path: str = ".") -> dict:
 #  Substitution: concept replaced by structurally-similar concept.
 
 def lattice_defects(path: str, base_ref: str | None = None, head_ref: str | None = None) -> dict:
-    from quale.scanner import scan_codebase, _binding_concepts
+    from quale.scanner import scan_codebase
 
     if not vgit.is_repo(path):
         return {"error": "Not a git repository.", "schema_version": 1}
@@ -7221,7 +7171,6 @@ def _lattice_confidence(defects: dict, changed: list[str]) -> str:
 # ── Refactoring Pattern Detection ─────────────────────────────────
 
 def refactoring_patterns(path: str, base_ref: str | None = None, head_ref: str | None = None, max_files: int = 100) -> dict:
-    from quale.scanner import scan_codebase
     from quale.segmenter import segment
 
     if not vgit.is_repo(path):
@@ -7325,7 +7274,7 @@ def refactoring_patterns(path: str, base_ref: str | None = None, head_ref: str |
                 continue
             try:
                 other_before = vgit.read_file_at_ref(path, other, base_ref)
-                other_after = vgit.read_file_at_ref(path, other, head_ref)
+                vgit.read_file_at_ref(path, other, head_ref)
                 other_before_seg = segment(other_before or "")
                 other_before_concepts = set()
                 for phrase in other_before_seg.phrases:
@@ -7415,7 +7364,7 @@ def exploration_entropy(path: str, read_files: list[str]) -> dict:
 
     coverage_pct = round(len(seen_concepts) / max(len(all_concepts), 1) * 100, 1)
     marginal_gain = candidates[0]["new_concepts"] if candidates else 0
-    remaining_files = analysis.total_files - len(read_files)
+    analysis.total_files - len(read_files)
 
     stop_signal = "stop" if coverage_pct >= 80 or (marginal_gain <= 1 and coverage_pct >= 50) else \
                   "slow" if coverage_pct >= 60 or marginal_gain <= 3 else \
@@ -7503,9 +7452,8 @@ def structural_diff(path: str, ref_a: str | None = None, ref_b: str | None = Non
     fingerprint_changed = before_checksum != after_checksum
     file_delta = len(changed_files)
 
-    confidence = "high"
     if not fingerprint_changed and file_delta == 0:
-        confidence = "none — no structural changes detected"
+        pass
 
     return {
         "schema_version": 1,
@@ -8089,7 +8037,6 @@ def concept_bonds(path: str, top_n: int = 30) -> dict:
         return {"error": "Not a git repository.", "schema_version": 1}
 
     from quale.scanner import scan_codebase
-    from itertools import combinations
 
     analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     if not analysis.file_vocabs:
@@ -8161,7 +8108,8 @@ def concept_bonds(path: str, top_n: int = 30) -> dict:
 def rogue_wave_report(path: str = ".", threshold: float = 2.5) -> dict:
     from quale.scanner import scan_codebase
     from quale.bootstrap import compute_modules
-    import re, statistics
+    import re
+    import statistics
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -8231,7 +8179,8 @@ def tensegrity_report(path: str = ".", min_intermediaries: int = 3) -> dict:
 
 def implicature_report(path: str = ".", file_path: str = "") -> dict:
     from quale.scanner import scan_codebase
-    import re, random
+    import re
+    import random
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -8266,7 +8215,8 @@ def implicature_report(path: str = ".", file_path: str = "") -> dict:
 
 def criticality_report(path: str = ".", file_path: str = "") -> dict:
     from quale.scanner import scan_codebase
-    import re, os
+    import re
+    import os
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)

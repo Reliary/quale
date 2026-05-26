@@ -30,12 +30,18 @@ def _color(text: str, color: str) -> str:
 def format_terminal(analysis: CodebaseAnalysis) -> str:
     lines = []
 
-    h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
-    gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
-    y = lambda t: _color(t, "yellow")
-    gy = lambda t: _color(t, "gray")
+    def h(t):
+        return _color(t, "header")
+    def sh(t):
+        return _color(t, "subheader")
+    def gr(t):
+        return _color(t, "green")
+    def r(t):
+        return _color(t, "red")
+    def y(t):
+        return _color(t, "yellow")
+    def gy(t):
+        return _color(t, "gray")
 
     lines.append(h(f"{'━' * 60}"))
     lines.append(f"  {h('quale analyze — ')}{_color(analysis.path, 'bold')}")
@@ -122,16 +128,16 @@ def format_quick(analysis: CodebaseAnalysis) -> str:
     lines = []
 
     langs = sorted(analysis.languages.items(), key=lambda x: -x[1])[:3]
-    lang_str = " ".join(f"{l}({n})" for l, n in langs)
+    lang_str = " ".join(f"{lang}({n})" for lang, n in langs)
 
     unique_explanation = ""
     if analysis.landmarks:
-        l = analysis.landmarks[0]
-        up = l.get("unique_phrases", [])
+        lm = analysis.landmarks[0]
+        up = lm.get("unique_phrases", [])
         if up:
             unique_explanation = f"({up[0][:30]})"
         else:
-            unique_explanation = l['path'].replace("\\", "/").split("/")[-1]
+            unique_explanation = lm['path'].replace("\\", "/").split("/")[-1]
 
     lines.append(_color(f"{'━' * 50}", "cyan"))
     lines.append(f"  {analysis.path}")
@@ -160,7 +166,7 @@ def format_json(analysis: CodebaseAnalysis) -> str:
         "phrases_by_language": analysis.phrases_by_language,
         "shared_across_languages": analysis.shared_across_languages,
         "top_phrases": [{"phrase": p, "frequency": f} for p, f in analysis.top_phrases[:50]],
-        "patterns": [{"label": l, "size": len(c)} for l, c in zip(analysis.cluster_labels, analysis.clusters)],
+        "patterns": [{"label": label, "size": len(cluster)} for label, cluster in zip(analysis.cluster_labels, analysis.clusters)],
         "landmarks": [{"path": lm["path"], "uniqueness": lm["uniqueness"]} for lm in analysis.landmarks[:20]],
         "dead_exports": [{"phrase": de["phrase"], "file": de["file"]} for de in analysis.dead_exports[:30]],
     }
@@ -179,8 +185,8 @@ def format_html(analysis: CodebaseAnalysis) -> str:
 
     phrase_rows = "".join(f"<tr><td>{p}</td><td>{f}</td></tr>" for p, f in analysis.top_phrases[:30])
 
-    cluster_rows = "".join(f"<tr><td>{i+1}</td><td>{l}</td><td>{len(c)}</td></tr>"
-                           for i, (l, c) in enumerate(zip(analysis.cluster_labels, analysis.clusters)))
+    cluster_rows = "".join(f"<tr><td>{i+1}</td><td>{label}</td><td>{len(cluster)}</td></tr>"
+                           for i, (label, cluster) in enumerate(zip(analysis.cluster_labels, analysis.clusters)))
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -219,12 +225,18 @@ def format_html(analysis: CodebaseAnalysis) -> str:
 
 def format_lifecycles(lifecycles: list[dict], weeks: int, show_all: bool = False) -> str:
     lines = []
-    h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
-    gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
-    y = lambda t: _color(t, "yellow")
-    gy = lambda t: _color(t, "gray")
+    def h(t):
+        return _color(t, "header")
+    def sh(t):
+        return _color(t, "subheader")
+    def gr(t):
+        return _color(t, "green")
+    def r(t):
+        return _color(t, "red")
+    def y(t):
+        return _color(t, "yellow")
+    def gy(t):
+        return _color(t, "gray")
 
     lines.append(h(f"{'━' * 60}"))
     lines.append(f"  {h('CONCEPT LIFECYCLES')} (last {weeks} weeks)")
@@ -243,11 +255,11 @@ def format_lifecycles(lifecycles: list[dict], weeks: int, show_all: bool = False
         "SPORADIC": "SPORADIC (comes and goes, <30% appearance)",
         "RENAMED_TO": "RENAMED → (this replaced another concept)",
         "ACTIVE": "ACTIVE (in use, not yet mature)",
-        "STABLE": f"STABLE ({sum(1 for l in lifecycles if l['signal'] == 'STABLE')} mature concepts — not listed)",
+        "STABLE": f"STABLE ({sum(1 for lc in lifecycles if lc['signal'] == 'STABLE')} mature concepts — not listed)",
     }
 
     for signal in signal_order:
-        items = [l for l in lifecycles if l["signal"] == signal]
+        items = [lc for lc in lifecycles if lc["signal"] == signal]
         if not items:
             continue
         if signal == "STABLE":
@@ -278,12 +290,17 @@ def format_lifecycles(lifecycles: list[dict], weeks: int, show_all: bool = False
 def format_blast_radius(pr_files: list[str], results: dict, ref_a: str, ref_b: str) -> str:
     """Flat ranked list — no tiered risk labels."""
     lines = []
-    h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
-    gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
-    y = lambda t: _color(t, "yellow")
-    gy = lambda t: _color(t, "gray")
+    def h(t):
+        return _color(t, "header")
+    def sh(t):
+        return _color(t, "subheader")
+    def gr(t):
+        return _color(t, "green")
+    lambda t: _color(t, "red")
+    def y(t):
+        return _color(t, "yellow")
+    def gy(t):
+        return _color(t, "gray")
 
     lines.append(h(f"{'━' * 60}"))
     lines.append(f"  {h('PR BLAST RADIUS')} {ref_a} → {ref_b}")
@@ -363,12 +380,16 @@ def format_search_compact(results: list[dict]) -> str:
 def format_modules(modules_data: dict) -> str:
     """Terminal output for TDA module detection."""
     lines = []
-    h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
-    gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
-    y = lambda t: _color(t, "yellow")
-    gy = lambda t: _color(t, "gray")
+    def h(t):
+        return _color(t, "header")
+    lambda t: _color(t, "subheader")
+    def gr(t):
+        return _color(t, "green")
+    lambda t: _color(t, "red")
+    def y(t):
+        return _color(t, "yellow")
+    def gy(t):
+        return _color(t, "gray")
 
     modules = modules_data.get("modules", [])
     total = modules_data.get("total_files", 0)
@@ -419,12 +440,18 @@ def format_modules_json(modules_data: dict) -> str:
 
 
 def _why_verify_packet(data: dict) -> str:
-    h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
-    gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
-    y = lambda t: _color(t, "yellow")
-    gy = lambda t: _color(t, "gray")
+    def h(t):
+        return _color(t, "header")
+    def sh(t):
+        return _color(t, "subheader")
+    def gr(t):
+        return _color(t, "green")
+    def r(t):
+        return _color(t, "red")
+    def y(t):
+        return _color(t, "yellow")
+    def gy(t):
+        return _color(t, "gray")
 
     lines = []
     lines.append(h(f"{'━' * 60}"))
@@ -473,12 +500,18 @@ def _why_verify_packet(data: dict) -> str:
 
 
 def _why_edit_context(data: dict) -> str:
-    h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
-    gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
-    y = lambda t: _color(t, "yellow")
-    gy = lambda t: _color(t, "gray")
+    def h(t):
+        return _color(t, "header")
+    def sh(t):
+        return _color(t, "subheader")
+    def gr(t):
+        return _color(t, "green")
+    def r(t):
+        return _color(t, "red")
+    def y(t):
+        return _color(t, "yellow")
+    def gy(t):
+        return _color(t, "gray")
 
     lines = []
     lines.append(h(f"{'━' * 60}"))
@@ -523,12 +556,18 @@ def _why_edit_context(data: dict) -> str:
 
 
 def _why_diff(data: dict, ref_a: str, ref_b: str) -> str:
-    h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
-    gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
-    y = lambda t: _color(t, "yellow")
-    gy = lambda t: _color(t, "gray")
+    def h(t):
+        return _color(t, "header")
+    def sh(t):
+        return _color(t, "subheader")
+    def gr(t):
+        return _color(t, "green")
+    def r(t):
+        return _color(t, "red")
+    def y(t):
+        return _color(t, "yellow")
+    def gy(t):
+        return _color(t, "gray")
 
     lines = []
     lines.append(h(f"{'━' * 60}"))
@@ -564,12 +603,17 @@ def _why_diff(data: dict, ref_a: str, ref_b: str) -> str:
 
 
 def _why_inspect(data: dict) -> str:
-    h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
-    gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
-    y = lambda t: _color(t, "yellow")
-    gy = lambda t: _color(t, "gray")
+    def h(t):
+        return _color(t, "header")
+    def sh(t):
+        return _color(t, "subheader")
+    def gr(t):
+        return _color(t, "green")
+    lambda t: _color(t, "red")
+    def y(t):
+        return _color(t, "yellow")
+    def gy(t):
+        return _color(t, "gray")
 
     lines = []
     lines.append(h(f"{'━' * 60}"))
@@ -609,12 +653,17 @@ def _why_inspect(data: dict) -> str:
 
 
 def _why_ci_report(data: dict, ref_a: str, ref_b: str) -> str:
-    h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
-    gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
-    y = lambda t: _color(t, "yellow")
-    gy = lambda t: _color(t, "gray")
+    def h(t):
+        return _color(t, "header")
+    lambda t: _color(t, "subheader")
+    def gr(t):
+        return _color(t, "green")
+    def r(t):
+        return _color(t, "red")
+    def y(t):
+        return _color(t, "yellow")
+    def gy(t):
+        return _color(t, "gray")
 
     lines = []
     lines.append(h(f"{'━' * 60}"))
