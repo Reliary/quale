@@ -57,8 +57,25 @@ cli = typer.Typer(
       ADVANCED            capillary, phantom, trap, porosity, spectral-gap, complexity-ratio, escape-velocity,
                           entropy, solve, deflate, heisenberg, traffic-control, anomalies, vocabulary-trend,
                           diff-structural, fingerprint, orphans, stop, ask, calibration, orient, clone, landmarks
-    """
+    """,
+    add_completion=False,
+    context_settings={"help_option_names": ["--help", "-h"]},
 )
+
+
+def _version_callback(show_version: bool) -> None:
+    if show_version:
+        from vocab import __version__
+        typer.echo(f"vocab-cli {__version__}")
+        raise typer.Exit()
+
+
+@cli.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    version: Annotated[bool, typer.Option("--version", "-V", help="Show version and exit")] = False,
+):
+    _version_callback(version)
 
 
 def _bar(pct: float, width: int = 20) -> str:
@@ -2057,6 +2074,9 @@ def explore(
     across the codebase.
     """
     path = os.path.abspath(path)
+    if not vgit.is_repo(path):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = explore_repo(path, themes=themes)
     files = data.get("files", [])
     if not files:
@@ -2962,7 +2982,11 @@ def modules(
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
 ):
     """Detect parser-free module boundaries from rare identifier overlap."""
-    data = compute_modules(os.path.abspath(path))
+    path = os.path.abspath(path)
+    if not vgit.is_repo(path) or not vgit.has_commits(path):
+        typer.echo("Not a git repository with commits.", err=True)
+        raise typer.Exit(1)
+    data = compute_modules(path)
     if format == "json":
         typer.echo(format_modules_json(data))
     else:
@@ -3215,9 +3239,14 @@ search:
 
 
 def main():
+    if "--version" in sys.argv or "-V" in sys.argv:
+        from vocab import __version__
+        typer.echo(f"vocab-cli {__version__}")
+        return
     if len(sys.argv) == 1:
         typer.echo("vocab — grammar-free structural codebase analyzer")
         typer.echo("")
+        typer.echo("Start here:")
         typer.echo("Start here:")
         typer.echo("  vocab agent-bootstrap . --task \"fix upload\" --summary")
         typer.echo("  vocab inspect .")

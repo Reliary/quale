@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "vocab-cli"
+version = "0.7.0-dev"
+description = "Structural codebase analysis — no parsers, no config, any language"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.9",
+    "typing-extensions>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/reliary/vocab"
+
+[project.scripts]
+vocab = "vocab.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["vocab*"]
