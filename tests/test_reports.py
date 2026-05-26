@@ -11,7 +11,7 @@ from quale.reports import (
     _file_temperature,
     _safety_envelope,
     _marginal_candidate_score,
-    _edit_sprawl_guard,
+    _scope_creep_guard,
     _verification_confidence,
     _verification_desert_reason,
     _verification_desert_score,
@@ -193,19 +193,19 @@ class TestMarginalCandidateScore(unittest.TestCase):
 class TestEditSprawlGuard(unittest.TestCase):
 
     def test_no_sprawl_when_empty(self):
-        result = _edit_sprawl_guard(["a.go"], [], [], [])
+        result = _scope_creep_guard(["a.go"], [], [], [])
         self.assertEqual(result["mode"], "report_only")
 
     def test_has_questioned_when_avoid_expanding(self):
-        result = _edit_sprawl_guard(["a.go"], ["b.go"], [], [])
+        result = _scope_creep_guard(["a.go"], ["b.go"], [], [])
         self.assertGreaterEqual(len(result["question_extra_edits"]), 1)
 
     def test_stable_touched_present(self):
-        result = _edit_sprawl_guard(["a.go"], [], [{"file": "s.go"}], [])
+        result = _scope_creep_guard(["a.go"], [], [{"file": "s.go"}], [])
         self.assertGreaterEqual(len(result["stable_anchors_touched"]), 1)
 
     def test_instruction_present(self):
-        result = _edit_sprawl_guard(["a.go"], ["b.go"], [], [])
+        result = _scope_creep_guard(["a.go"], ["b.go"], [], [])
         self.assertIn("instruction", result)
 
 

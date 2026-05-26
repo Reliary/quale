@@ -18,8 +18,8 @@ without quale guessed the wrong test file. Every model with quale picked the rig
 
 ### Preflight / verification scope control
 
-| Condition | Verify | Sprawl | Tokens | Efficiency |
-|-----------|--------|--------|--------|------------|
+| Condition | Test Accuracy | Extra Edits | Tokens | Cost/Benefit |
+|-----------|---------------|-------------|--------|--------------|
 | baseline (no quale) | 10-20% | 0.40-0.65 | ~1,200 | 0.55-0.90 |
 | `edit-context --format tool` | 75% | 0.0 | 1,658 | 1.60 |
 | `verify_scope` | 83% | 0.0 | 1,233 | 2.29 |
@@ -31,18 +31,18 @@ Best for weak models: `verify_scope` (verification-only, removes edit decision).
 
 ### OpenCode (full tool-access agent)
 
-| Condition | Verify | Sprawl |
-|-----------|--------|--------|
+| Condition | Test Accuracy | Extra Edits |
+|-----------|---------------|-------------|
 | baseline | 46% | 0.31 |
 | `fragment_route` | 100% | 0.0 |
 
 ## Key takeaways
 
-- **Sprawl is the only durable claim**: every quale condition eliminated agent wandering
-  (0.0 sprawl) across all repos and models.
+- **Scope containment is the only durable claim**: every quale condition eliminated agent wandering
+  (0.0 extra edits) across all repos and models.
 - **Every model benefits from structure**: Qwen 235B and Claude Opus 4 both guess
   `src/spool.test.ts` on a blank prompt--no model is immune to structural blind spots.
-- **Structured JSON beats prose**: compact oneline JSON doubles verify rate vs narrative
+- **Structured JSON beats prose**: compact oneline JSON doubles test accuracy rate vs narrative
   guidance.
 - **The 17% boundary**: repos without stem-matched tests or co-change history remain
   structurally ambiguous. Quale documents this honestly rather than hallucinating.
@@ -59,9 +59,9 @@ Conditions: `candidate_baseline`, `edit-context --format tool`, `diff_edit-conte
 `route_policy`, `verify_scope`, `ask`, `negotiate_simple`.
 
 Decision rules:
-- keep `edit-context --format tool` as primary LLM surface: 75% verify, 0 sprawl
-- keep `diff_edit-context` for PR/diff workflows: 100% verify, 0 sprawl
-- kill `ask`: 0% verify (worse than baseline)
+- keep `edit-context --format tool` as primary LLM surface: 75% accuracy, 0 extra edits
+- keep `diff_edit-context` for PR/diff workflows: 100% accuracy, 0 extra edits
+- kill `ask`: 0% accuracy (worse than baseline)
 - `contract` path: experimental, needs more harness trials
 - re-run the harness after wording/ranking changes
 - mine failure rows after each run

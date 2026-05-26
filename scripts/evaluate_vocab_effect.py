@@ -314,18 +314,18 @@ def score_preflight(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
                 fp = item.get("file", "")
                 if fp and fp != case.edit_file and fp not in extra_edits:
                     extra_edits.append(fp)
-    semantic_sprawl = _semantic_sprawl_score(extra_edits, case.edit_file, case.task)
+    semantic_scope_creep = _unnecessary_edits_score(extra_edits, case.edit_file, case.task)
     if not case.verify_files:
-        verify_hit = len(verify) == 0
+        test_identified = len(verify) == 0
     else:
-        verify_hit = any(file in verify for file in case.verify_files)
+        test_identified = any(file in verify for file in case.verify_files)
     result = {
-        "verify_hit": verify_hit,
-        "verify_hit_count": sum(1 for file in case.verify_files if file in verify),
-        "extra_edit_count": len(extra_edits),
+        "test_identified": test_identified,
+        "test_identified_count": sum(1 for file in case.verify_files if file in verify),
+        "extra_files_edited": len(extra_edits),
         "extra_edits": extra_edits[:5],
         "verify": verify[:5],
-        "semantic_sprawl_score": semantic_sprawl,
+        "unnecessary_edits_score": semantic_scope_creep,
     }
     questions = parsed.get("questions")
     if isinstance(questions, list) and questions:
@@ -352,19 +352,19 @@ def score_contract_plan(parsed: dict[str, Any], case: Case) -> dict[str, Any]:
     raw_paths = [item for item in used if "/" in item or "." in item]
     invalid_ids = [item for item in used if not re.match(r"^[FTB]\d+[0-9a-f]$", item)]
     return {
-        "verify_hit": bool(verify_ids),
-        "verify_hit_count": len(verify_ids),
-        "extra_edit_count": len(expand_ids),
+        "test_identified": bool(verify_ids),
+        "test_identified_count": len(verify_ids),
+        "extra_files_edited": len(expand_ids),
         "extra_edits": expand_ids[:5],
         "verify": verify_ids[:5],
-        "semantic_sprawl_score": 0.0 if not expand_ids else 1.0,
+        "unnecessary_edits_score": 0.0 if not expand_ids else 1.0,
         "invalid_id_count": len(invalid_ids),
         "raw_path_count": len(raw_paths),
         "scope_expansion_request_count": len(expand_ids),
     }
 
 
-def _semantic_sprawl_score(extra_edits: list[str], edit_file: str, task: str) -> float:
+def _unnecessary_edits_score(extra_edits: list[str], edit_file: str, task: str) -> float:
     """Estimate how semantically distant proposed extra edits are from task scope.
     0.0 = all proposed files are task-relevant. 1.0 = all are unrelated.
     Uses path/stem overlap with task keywords — no vocab scan needed.
@@ -480,10 +480,10 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         guidance = run_vocab(case.path, ["verify", "--path", case.path, "--files", case.edit_file, "--task", case.task])
     elif condition == "preflight_tool":
         guidance = preflight_tool_guidance(case)
-    elif condition == "preflight_tool_sprawl_guard":
-        guidance = preflight_tool_guidance(case, include_sprawl_guard=True)
+    elif condition == "preflight_tool_scope_creep_guard":
+        guidance = preflight_tool_guidance(case, include_scope_creep_guard=True)
     elif condition == "desert_aware_preflight":
-        guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+        guidance = preflight_tool_guidance(case, include_scope_creep_guard=True, desert_aware=True)
     elif condition == "preflight_tool_llm":
         guidance = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "llm"])
     elif condition == "preflight_tool_full":
@@ -561,7 +561,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             baseline_keys = {"schema_version", "risk", "confidence", "reason",
                              "changed_files", "read_first",
                              "verification_mc", "verification_confidence",
-                             "expansion_risk", "edit_sprawl_guard",
+                             "expansion_risk", "scope_creep_guard",
                              "desert_warning", "guardrails"}
             kept = {k: v for k, v in p.items() if k in baseline_keys}
             add_map = {
@@ -585,7 +585,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             baseline_keys = {"schema_version", "risk", "confidence", "reason",
                              "changed_files", "read_first",
                              "verification_mc", "verification_confidence",
-                             "expansion_risk", "edit_sprawl_guard",
+                             "expansion_risk", "scope_creep_guard",
                              "desert_warning", "guardrails"}
             base = {k: p[k] for k in baseline_keys if k in p}
             if style == "json":
@@ -634,7 +634,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 parsed.pop("peer_relative", None)
                 parsed.pop("safety_envelope", None)
             elif ablation == "only_baseline":
-                keys_to_keep = {"schema_version", "risk", "confidence", "reason", "changed_files", "read_first", "verification_mc", "verification_confidence", "expansion_risk", "edit_sprawl_guard", "desert_warning", "guardrails"}
+                keys_to_keep = {"schema_version", "risk", "confidence", "reason", "changed_files", "read_first", "verification_mc", "verification_confidence", "expansion_risk", "scope_creep_guard", "desert_warning", "guardrails"}
                 parsed = {k: v for k, v in parsed.items() if k in keys_to_keep}
             guidance = json.dumps(parsed, indent=2)
         except (json.JSONDecodeError, TypeError):
@@ -642,31 +642,31 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
     elif condition == "route_policy":
         route = run_route(case, files=[case.edit_file])
         if route.get("action") == "preflight_tool":
-            guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+            guidance = preflight_tool_guidance(case, include_scope_creep_guard=True, desert_aware=True)
         elif route.get("action") == "no_vocab":
             guidance = ""
         elif route.get("command"):
             guidance = "Route: " + " ".join(route.get("command", []))
     elif condition == "discovery_then_preflight":
         discovery_guidance = run_vocab(case.path, ["agent-bootstrap", "--path", case.path, "--task", case.task, "--summary"])
-        preflight_guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+        preflight_guidance = preflight_tool_guidance(case, include_scope_creep_guard=True, desert_aware=True)
         guidance = f"Discovery overview:\n{discovery_guidance}\n\nEdit preflight:\n{preflight_guidance}"
     elif condition == "diff_preflight":
         raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--diff", "HEAD~0", "--task", case.task, "--format", "tool"])
         if "error" in raw.lower() or not raw.strip():
-            raw = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+            raw = preflight_tool_guidance(case, include_scope_creep_guard=True, desert_aware=True)
         else:
             try:
                 p = json.loads(raw)
                 baseline_keys = {"schema_version", "risk", "confidence", "reason",
                                  "changed_files", "read_first",
                                  "verification_mc", "verification_confidence",
-                                 "expansion_risk", "edit_sprawl_guard",
+                                 "expansion_risk", "scope_creep_guard",
                                  "desert_warning", "guardrails"}
                 base = {k: p[k] for k in baseline_keys if k in p}
                 guidance = json.dumps(base, separators=(",", ":"))
             except (json.JSONDecodeError, TypeError):
-                guidance = raw if raw else preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+                guidance = raw if raw else preflight_tool_guidance(case, include_scope_creep_guard=True, desert_aware=True)
     elif condition == "verify_classify":
         raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "verify"])
         guidance = raw
@@ -722,13 +722,13 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                     if cp and not cp.get("error"):
                         guidance = json.dumps(cp, separators=(",",":"))
                     else:
-                        guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+                        guidance = preflight_tool_guidance(case, include_scope_creep_guard=True, desert_aware=True)
                 except (json.JSONDecodeError, TypeError):
-                    guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+                    guidance = preflight_tool_guidance(case, include_scope_creep_guard=True, desert_aware=True)
             else:
-                guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+                guidance = preflight_tool_guidance(case, include_scope_creep_guard=True, desert_aware=True)
         except (json.JSONDecodeError, TypeError, Exception):
-            guidance = preflight_tool_guidance(case, include_sprawl_guard=True, desert_aware=True)
+            guidance = preflight_tool_guidance(case, include_scope_creep_guard=True, desert_aware=True)
     elif condition == "verify_scope":
         raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
         try:
@@ -740,7 +740,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
     elif condition == "ask":
         guidance = ""
     elif condition == "negotiate_simple":
-        guidance = preflight_tool_guidance(case, include_sprawl_guard=True)
+        guidance = preflight_tool_guidance(case, include_scope_creep_guard=True)
     elif condition == "deterministic_only":
         raw = run_vocab(case.path, ["verify-packet", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "json"])
         try:
@@ -771,7 +771,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                         "mode": "verify",
                         "verification_candidates": cands,
                         "verification_confidence": {"level": "high", "evidences": ["forced_choice_binary_tree"]},
-                        "edit_sprawl_guard": {"active": True, "instruction": "Answer YES/NO per candidate. Choose at most one."},
+                        "scope_creep_guard": {"active": True, "instruction": "Answer YES/NO per candidate. Choose at most one."},
                     }, separators=(",",":"))
                 else:
                     guidance = ""
@@ -790,7 +790,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                 guidance = json.dumps({
                     "verification_candidates": cands,
                     "verification_confidence": {"level": "high", "evidences": ["forced_choice_binary_tree"]},
-                    "edit_sprawl_guard": {"active": True, "instruction": "Answer YES/NO per candidate. Choose at most one."},
+                    "scope_creep_guard": {"active": True, "instruction": "Answer YES/NO per candidate. Choose at most one."},
                 }, separators=(",",":"))
             else:
                 guidance = json.dumps({"verification_candidates": [], "desert": True}, separators=(",",":"))
@@ -828,7 +828,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                     "verification_candidates": p.get("verification_candidates", [])[:2],
                     "deterministic_verify": {"file": top, "score": 0.85},
                     "verification_confidence": {"level": "high"},
-                    "edit_sprawl_guard": {"active": True, "instruction": "Veto if the candidate is wrong."},
+                    "scope_creep_guard": {"active": True, "instruction": "Veto if the candidate is wrong."},
                 }, separators=(",",":"))
             else:
                 cands = p.get("verification_candidates", [])
@@ -846,7 +846,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                     guidance = json.dumps({
                         "verification_candidates": cands[:3],
                         "verification_confidence": {"level": "high", "evidences": ["progressive_resolve"]},
-                        "edit_sprawl_guard": {"active": True, "instruction": "YES if candidate verifies, NO if not."},
+                        "scope_creep_guard": {"active": True, "instruction": "YES if candidate verifies, NO if not."},
                     }, separators=(",",":"))
                 else:
                     guidance = json.dumps({"verification_candidates": [], "desert": True}, separators=(",",":"))
@@ -875,7 +875,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                     "verification_candidates": p.get("verification_candidates", [])[:2],
                     "deterministic_verify": top,
                     "verification_confidence": {"level": "high", "evidences": ["veto_cascade"]},
-                    "edit_sprawl_guard": {"active": True, "instruction": "Veto if incorrect. Otherwise confirm."},
+                    "scope_creep_guard": {"active": True, "instruction": "Veto if incorrect. Otherwise confirm."},
                 }, separators=(",",":"))
             else:
                 cands = p.get("verification_candidates", [])
@@ -883,7 +883,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
                     guidance = json.dumps({
                         "verification_candidates": cands[:3],
                         "verification_confidence": {"level": "medium", "evidences": ["progressive_resolve"]},
-                        "edit_sprawl_guard": {"active": True, "instruction": "YES or NO per candidate."},
+                        "scope_creep_guard": {"active": True, "instruction": "YES or NO per candidate."},
                     }, separators=(",",":"))
                 else:
                     guidance = json.dumps({"desert": True}, separators=(",",":"))
@@ -918,7 +918,7 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
             guidance = ""
 
     system = (
-        "You are about to edit a candidate file. Decide verification and avoid unnecessary edit sprawl. "
+        "You are about to edit a candidate file. Decide verification and avoid unnecessary edit scope_creep. "
         "Return exactly one compact JSON object and no markdown. "
         "Use keys: verify (array of relative paths), extra_edits (array of relative paths), should_edit_candidate (boolean)."
     )
@@ -930,8 +930,8 @@ def preflight_messages(case: Case, condition: str, files: list[str]) -> list[dic
         )
     if condition in {"deterministic_only", "fragment_route"}:
         system += " Obey deterministic/constrained guidance: do not propose extra_edits unless the task explicitly requires them."
-    if condition in {"preflight_tool_sprawl_guard", "desert_aware_preflight", "route_policy"}:
-        system += " Obey report-only sprawl guidance: do not propose extra_edits unless the task explicitly requires them."
+    if condition in {"preflight_tool_scope_creep_guard", "desert_aware_preflight", "route_policy"}:
+        system += " Obey report-only scope_creep guidance: do not propose extra_edits unless the task explicitly requires them."
     if condition in {"desert_aware_preflight", "route_policy"}:
         system += " Do not use source files as verification unless they are explicitly test or suite files; empty verify is better than a fake test."
     if condition == "verify_classify":
@@ -1056,7 +1056,7 @@ def run_route(case: Case, files: list[str] | None) -> dict[str, Any]:
         return {"action": "route_error", "raw": raw}
 
 
-def preflight_tool_guidance(case: Case, include_sprawl_guard: bool = False, desert_aware: bool = False) -> str:
+def preflight_tool_guidance(case: Case, include_scope_creep_guard: bool = False, desert_aware: bool = False) -> str:
     raw = run_vocab(case.path, ["edit-context", "--path", case.path, "--files", case.edit_file, "--task", case.task, "--format", "tool"])
     try:
         parsed = json.loads(raw)
@@ -1076,15 +1076,15 @@ def preflight_tool_guidance(case: Case, include_sprawl_guard: bool = False, dese
         reasons = "; ".join(verification_confidence.get("reasons", [])[:2])
         parts.append(f"Verification confidence: {verification_confidence.get('level', 'unknown')} ({reasons})")
 
-    if include_sprawl_guard:
-        guard = parsed.get("edit_sprawl_guard", {})
+    if include_scope_creep_guard:
+        guard = parsed.get("scope_creep_guard", {})
         question = guard.get("question_extra_edits", [])[:3]
         if question:
             risky = ", ".join(item.get("file", "") for item in question if item.get("file"))
-            parts.append(f"Sprawl guard: question extra edits outside candidate file: {risky}")
+            parts.append(f"Scope creep guard: question extra edits outside candidate file: {risky}")
         instruction = guard.get("instruction")
         if instruction:
-            parts.append(f"Sprawl instruction: {instruction}")
+            parts.append(f"Scope creep instruction: {instruction}")
 
     if desert_aware and verification_confidence.get("level") in {"low", "mixed", "unknown"}:
         parts.append("Desert warning: verification topology is weak; do not invent tests or use source files as tests.")
@@ -1131,12 +1131,12 @@ def run_contract_check(case: Case, proposal: dict[str, Any]) -> dict[str, Any]:
         "invalid_id_count": invalid_id_count,
         "raw_path_count": raw_path_count,
         "scope_expansion_request_count": len(expand_paths),
-        "verify_hit": any(path in verify_paths for path in case.verify_files),
-        "verify_hit_count": sum(1 for path in case.verify_files if path in verify_paths),
-        "extra_edit_count": len(expand_paths),
+        "test_identified": any(path in verify_paths for path in case.verify_files),
+        "test_identified_count": sum(1 for path in case.verify_files if path in verify_paths),
+        "extra_files_edited": len(expand_paths),
         "extra_edits": expand_paths[:5],
         "verify": verify_paths[:5],
-        "semantic_sprawl_score": 0.0 if not expand_paths else 1.0,
+        "unnecessary_edits_score": 0.0 if not expand_paths else 1.0,
         "contract_check": checked,
     }
 
@@ -1299,20 +1299,20 @@ def _score_opencode_tool_calls(tool_data: dict, case: Case) -> dict | None:
             continue
         rel_paths.append(fp_rel)
     unique = list(dict.fromkeys(rel_paths))
-    verify_hit_list = [f for f in unique if f in case.verify_files]
+    test_identified_list = [f for f in unique if f in case.verify_files]
     in_scope = {case.edit_file} | set(case.verify_files)
     source_reads_beyond_scope = [f for f in unique
                                   if f not in in_scope
                                   and "test" not in f.lower()
                                   and f.endswith((".go", ".ts", ".py", ".rs", ".c", ".h", ".erl", ".ex", ".exs", ".zig", ".jl", ".clj", ".hs", ".nix", ".r"))]
     return {
-        "verify": verify_hit_list[:5],
-        "verify_hit": bool(verify_hit_list),
-        "verify_hit_count": len(verify_hit_list),
-        "extra_edit_count": len(source_reads_beyond_scope),
+        "verify": test_identified_list[:5],
+        "test_identified": bool(test_identified_list),
+        "test_identified_count": len(test_identified_list),
+        "extra_files_edited": len(source_reads_beyond_scope),
         "extra_edits": source_reads_beyond_scope[:5],
         "should_edit_candidate": case.edit_file in unique,
-        "semantic_sprawl_score": min(1.0, len(source_reads_beyond_scope) / 10) if source_reads_beyond_scope else 0.0,
+        "unnecessary_edits_score": min(1.0, len(source_reads_beyond_scope) / 10) if source_reads_beyond_scope else 0.0,
         "exploration_count": len(unique),
         "tool_reads": unique,
     }
@@ -1411,7 +1411,7 @@ def run_trial_multi_turn(case: Case, suite: str, condition: str, trial: int,
             row["deterministic_skip"] = True
         else:
             # Desert — no candidates at all
-            row["verify_hit"] = True
+            row["test_identified"] = True
             row["verify"] = []
             row["input_tokens"] = 0
             row["output_tokens"] = 0
@@ -1420,7 +1420,7 @@ def run_trial_multi_turn(case: Case, suite: str, condition: str, trial: int,
             return row
 
     if not candidates:
-        row["verify_hit"] = True
+        row["test_identified"] = True
         row["verify"] = []
         row["input_tokens"] = 0
         row["output_tokens"] = 0
@@ -1523,7 +1523,7 @@ def run_trial_hybrid(case: Case, suite: str, condition: str, trial: int,
             row.update(score_preflight(row, case))
             return row
         else:
-            row["verify_hit"] = True
+            row["test_identified"] = True
             row["verify"] = []
             row["input_tokens"] = 0
             row["output_tokens"] = 0
@@ -1532,7 +1532,7 @@ def run_trial_hybrid(case: Case, suite: str, condition: str, trial: int,
             return row
 
     if not candidates:
-        row["verify_hit"] = True
+        row["test_identified"] = True
         row["verify"] = []
         row["input_tokens"] = 0
         row["output_tokens"] = 0
@@ -1599,7 +1599,7 @@ def run_trial_hybrid(case: Case, suite: str, condition: str, trial: int,
     guidance = json.dumps({
         "verification_candidates": candidates[:3],
         "verification_confidence": {"level": "high", "evidences": ["progressive_resolve"]},
-        "edit_sprawl_guard": {"active": True, "instruction": "YES if candidate verifies, NO if not."},
+        "scope_creep_guard": {"active": True, "instruction": "YES if candidate verifies, NO if not."},
     }, separators=(",",":"))
 
     files = source_files(case.path)
@@ -1757,15 +1757,15 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
                     "avg_input_tokens": avg_num(rows, "input_tokens"),
                 }
             else:
-                avg_verify = avg_bool(rows, "verify_hit")
-                avg_sprawl = avg_num(rows, "extra_edit_count")
+                avg_verify = avg_bool(rows, "test_identified")
+                avg_scope_creep = avg_num(rows, "extra_files_edited")
                 avg_tokens = avg_num(rows, "input_tokens")
-                # Efficiency = (2×verify + (1−sprawl)) / (tokens / baseline_tokens)
+                # Cost/Benefit = (2×verify + (1−scope_creep)) / (tokens / baseline_tokens)
                 baseline_cond = "candidate_baseline"
                 baseline_rows = [r for r in suite_rows if r["condition"] == baseline_cond]
                 baseline_tokens = avg_num(baseline_rows, "input_tokens") if baseline_rows else avg_tokens
-                efficiency = round(
-                    ((avg_verify * 2 + max(0, 1 - avg_sprawl)) / max(avg_tokens / baseline_tokens, 0.01)),
+                cost_benefit = round(
+                    ((avg_verify * 2 + max(0, 1 - avg_scope_creep)) / max(avg_tokens / baseline_tokens, 0.01)),
                     3,
                 ) if baseline_tokens > 0 else 0.0
                 summary[suite][condition] = {
@@ -1773,17 +1773,17 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
                     "attempted": len(attempted),
                     "error_rate": round(len(errored) / len(attempted), 3),
                     "parse_error_rate": round(len(parsed_errors) / len(attempted), 3),
-                    "verify_hit_rate": avg_verify,
-                    "avg_verify_hit_count": avg_num(rows, "verify_hit_count"),
-                    "avg_extra_edit_count": avg_sprawl,
-                    "avg_semantic_sprawl": avg_num(rows, "semantic_sprawl_score"),
+                    "test_identified_rate": avg_verify,
+                    "avg_test_identified_count": avg_num(rows, "test_identified_count"),
+                    "avg_extra_files_edited": avg_scope_creep,
+                    "avg_unnecessary_edits_score": avg_num(rows, "unnecessary_edits_score"),
                     "avg_invalid_id_count": avg_num(rows, "invalid_id_count"),
                     "avg_raw_path_count": avg_num(rows, "raw_path_count"),
                     "avg_scope_expansion_request_count": avg_num(rows, "scope_expansion_request_count"),
                     "contract_valid_rate": avg_bool(rows, "contract_valid"),
                     "contract_needs_reflight_rate": avg_bool(rows, "contract_needs_reflight"),
                     "avg_input_tokens": avg_tokens,
-                    "efficiency_score": efficiency,
+                    "cost_benefit_ratio": cost_benefit,
                 }
     return summary
 

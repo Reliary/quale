@@ -3,9 +3,9 @@
 ## Agent: Scope Control (Proven)
 
 ```bash
-quale edit-context --files src/spool.ts --task "..." --format tool  # 75% verify, 0 sprawl
-quale edit-context --diff HEAD~1 --task "..." --format tool           # 75% verify (diff-scoped)
-quale edit-context --files src/spool.ts --task "..." --format verify  # 83% verify (verification-only)
+quale edit-context --files src/spool.ts --task "..." --format tool  # 75% accuracy, 0 scope creep
+quale edit-context --diff HEAD~1 --task "..." --format tool           # 75% accuracy (diff-scoped)
+quale edit-context --files src/spool.ts --task "..." --format verify  # 83% accuracy (test-only)
 quale contract --files src/spool.ts --task "..." --format tool     # ID-coded scope (experimental)
 quale check-plan --contract c.json --proposal p.json               # validate LLM proposal
 ```
@@ -49,7 +49,7 @@ quale pr-report origin/main HEAD                      # consolidated markdown re
 ## History & Evolution
 
 ```bash
-quale vocabulary-trend --path . --weeks 12                    # vocabulary vocabulary-trend velocity
+quale vocabulary-trend --path . --weeks 12                    # vocabulary trend velocity
 quale lifecycle . --weeks 24                         # phrase lifecycle (stable/decaying/etc)
 quale stable .                                       # stable anchors and churn hotspots
 quale provenance "SpoolManager" .                    # phrase history through git

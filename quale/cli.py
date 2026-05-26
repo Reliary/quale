@@ -435,10 +435,10 @@ def preflight(
 
     verify_candidates = data.get("verification_candidates", data.get("verify_with", []))
     ver_confidence = data.get("verification_confidence", {})
-    sprawl = data.get("edit_sprawl_guard", {})
-    wa = sprawl.get("warnings", [])
+    scope_creep = data.get("scope_creep_guard", {})
+    wa = scope_creep.get("warnings", [])
     qs = [w.get("question_extras", "").strip() for w in wa if w.get("question_extras")]
-    sprawl_instruction = (
+    scope_creep_instruction = (
         "Before broadening scope, verify each extra file: " + "; ".join(qs)
         if qs else
         "Do not propose extra_edits unless the task explicitly requires them."
@@ -487,7 +487,7 @@ def preflight(
             },
             "verification_confidence": ver_confidence,
             "expansion_risk": data.get("expansion_risk", data.get("avoid_expanding_into", [])),
-            "edit_sprawl_guard": {**sprawl, "instruction": sprawl_instruction},
+            "scope_creep_guard": {**scope_creep, "instruction": scope_creep_instruction},
             "desert_warning": _desert_text(ver_confidence, data.get("changed_files", [])),
             "guardrails": data.get("guardrails", {}),
             "spectrum": data.get("spectrum"),
@@ -530,7 +530,7 @@ def preflight(
             "verification_details": data.get("verification_details", []),
             "verification_confidence": ver_confidence,
             "expansion_risk": data.get("expansion_risk", data.get("avoid_expanding_into", [])),
-            "edit_sprawl_guard": {**sprawl, "instruction": sprawl_instruction},
+            "scope_creep_guard": {**scope_creep, "instruction": scope_creep_instruction},
             "desert_warning": _desert_text(ver_confidence, data.get("changed_files", [])),
             "co_change": data.get("co_change", []),
             "structural_orphans": data.get("structural_orphans", []),

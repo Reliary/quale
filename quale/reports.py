@@ -704,7 +704,7 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     risk = _preflight_risk(changed, stable_touched, blast)
     confidence = _preflight_confidence(changed, bootstrap, analysis.file_vocabs)
     verification_confidence = _verification_confidence(changed, verify_with, mirror, analysis.file_vocabs)
-    sprawl_guard = _edit_sprawl_guard(changed, avoid_expanding, stable_touched, blast)
+    scope_creep_guard = _scope_creep_guard(changed, avoid_expanding, stable_touched, blast)
 
     # Verifiability classification per changed file
     verify_classifications = [_classify_verifiability(f, changed, verify_with, analysis.file_vocabs, analysis) for f in changed]
@@ -809,7 +809,7 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         "verification_confidence": verification_confidence,
         "expansion_risk": avoid_expanding,
         "avoid_expanding_into": avoid_expanding,
-        "edit_sprawl_guard": sprawl_guard,
+        "scope_creep_guard": scope_creep_guard,
         "reverse_blast": blast[:5],
         "stable_anchors_touched": stable_touched[:5],
         "mirror_gap_ratio": mirror_ratio,
@@ -5404,7 +5404,7 @@ def _expand_scope_ids(value: Any) -> list[str]:
 
 
 
-def _edit_sprawl_guard(changed: list[str], avoid_expanding: list[str], stable_touched: list[dict], blast: list[dict]) -> dict:
+def _scope_creep_guard(changed: list[str], avoid_expanding: list[str], stable_touched: list[dict], blast: list[dict]) -> dict:
     questioned: list[dict] = []
     blast_by_file = {item.get("file"): item for item in blast}
     for file in avoid_expanding[:5]:

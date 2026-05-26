@@ -229,16 +229,16 @@ class TestCommandCoverage(unittest.TestCase):
         self.assertIn("guardrails", data)
         self.assertEqual(data["guardrails"]["mode"], "report_only")
 
-    def test_preflight_tool_includes_confidence_and_sprawl_guard(self):
+    def test_preflight_tool_includes_confidence_and_scope_creep_guard(self):
         tmp, repo = self._make_repo()
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
         result = self.run_vocab("edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
         data = json.loads(result.stdout)
         self.assertIn("verification_confidence", data)
         self.assertIn(data["verification_confidence"]["level"], {"low", "mixed", "high"})
-        self.assertIn("edit_sprawl_guard", data)
-        self.assertEqual(data["edit_sprawl_guard"]["mode"], "report_only")
-        self.assertIn("src/core.ts", data["edit_sprawl_guard"]["allow_changed_files"])
+        self.assertIn("scope_creep_guard", data)
+        self.assertEqual(data["scope_creep_guard"]["mode"], "report_only")
+        self.assertIn("src/core.ts", data["scope_creep_guard"]["allow_changed_files"])
 
     def test_contract_emits_id_coded_scope(self):
         tmp, repo = self._make_repo()
