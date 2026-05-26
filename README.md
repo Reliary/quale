@@ -23,9 +23,10 @@ quale reads your repo's structure and gives the model what it's missing. 900+ tr
 
 | Command | What it does |
 |---------|-------------|
+| `quale --agent-orient` | JSON manifest: conventions, workflow, gotchas (run after install) |
 | `quale guard --task "..." --format tool` | Safety packet: what to read, what to test, what not to touch |
 | `quale edit-context --files path.ts --task "..." --format tool` | Pre-edit scope: read first, verify with, avoid |
-| `quale verify-packet --files path.ts --task "..." --format json` | Test candidates only |
+| `quale verify-packet --files path.ts --task "..." --format tool` | Test candidates only (priority, entangle, negative) |
 | `quale inspect .` | Onboarding: key files, modules, churn |
 | `quale ci-report origin/main HEAD --summary` | CI: blast radius, mirror gap, stable anchors |
 
