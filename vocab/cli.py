@@ -70,11 +70,40 @@ def _version_callback(show_version: bool) -> None:
         raise typer.Exit()
 
 
+def _help_all(ctx: typer.Context) -> None:
+    """Print a compact summary of all commands with first-line descriptions."""
+    import re
+    with open(__file__) as f:
+        src = f.read()
+    panels: dict[str, list[tuple[str, str]]] = {}
+    for c in cli.registered_commands:
+        name = c.name or ""
+        doc = (c.callback.__doc__ or "").strip().split("\n")[0] if c.callback else ""
+        # Find panel from source
+        m = re.search(rf'@cli\.command\([^)]*name="{name}"[^)]*rich_help_panel="([^"]+)"', src)
+        panel = m.group(1) if m else "Other"
+        panels.setdefault(panel, []).append((name, doc))
+
+    for panel in ["Getting Started", "Agent Safety", "Verification", "CI",
+                   "Code Analysis", "History", "Maintenance", "Cross-Repo",
+                   "Utilities"]:
+        cmds = panels.get(panel, [])
+        if not cmds:
+            continue
+        typer.echo(f"\n\033[1m{panel}:\033[0m")
+        for name, doc in cmds:
+            typer.echo(f"  {name:<25s} {doc[:60]}")
+    raise typer.Exit()
+
+
 @cli.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
     version: Annotated[bool, typer.Option("--version", "-V", help="Show version and exit")] = False,
+    help_all: Annotated[bool, typer.Option("--help-all", help="Show help for every command")] = False,
 ):
+    if help_all:
+        _help_all(ctx)
     _version_callback(version)
 
 
@@ -1232,7 +1261,7 @@ def solve_cmd(
 
 
 @cli.command(name="deflate", rich_help_panel="Maintenance")
-def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact"):
+def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact") -> None:
     """Cap net-new identifiers per edit."""
 
     from vocab.reports import deflate_report
@@ -1254,9 +1283,6 @@ def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact"):
         typer.echo(f'  Violations: {", ".join(data.get("net_new_identifiers",[])[:bud+3])}')
     else:
         typer.echo(f'  Gold Standard OK — {used}/{bud} net-new identifiers used.')
-
-
-@cli.command(name="forecast", rich_help_panel="CI")
 
 
 @cli.command(name="forecast", rich_help_panel="CI")
@@ -1394,7 +1420,7 @@ def epidemiology_cmd(
 
 
 @cli.command(name="orient", rich_help_panel="Utilities")
-def orient_cmd(path=".", task="", format="compact"):
+def orient_cmd(path=".", task="", format="compact") -> None:
     """One-call orientation: solve + triangulate + isolate."""
 
     from vocab.reports import pipeline_orient
@@ -1442,7 +1468,7 @@ def health_cmd(
 
 
 @cli.command(name="heisenberg", rich_help_panel="Maintenance")
-def heisenberg_cmd(path=".", file="", diff="", format="compact"):
+def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
     """Mixed refactor/feature edits that must be split."""
 
     from vocab.reports import heisenberg_check
@@ -1466,7 +1492,7 @@ def heisenberg_cmd(path=".", file="", diff="", format="compact"):
 
 
 @cli.command(name="traffic-control", rich_help_panel="Maintenance")
-def traffic_control_cmd(path=".", file="", intended_import="", format="compact"):
+def traffic_control_cmd(path=".", file="", intended_import="", format="compact") -> None:
     """Zone files by graph centrality percentile."""
 
     from vocab.reports import traffic_control_report
@@ -1491,7 +1517,7 @@ def traffic_control_cmd(path=".", file="", intended_import="", format="compact")
 
 
 @cli.command(name="capillary", rich_help_panel="Code Analysis")
-def capillary_cmd(path=".", format="compact"):
+def capillary_cmd(path=".", format="compact") -> None:
     """Files with the most inter-file vocabulary edges."""
 
     from vocab.reports import capillary_report
@@ -1507,7 +1533,7 @@ def capillary_cmd(path=".", format="compact"):
         typer.echo(f'  {c["file"]} ({c["edges"]} edges)')
 
 @cli.command(name="spectral-gap", rich_help_panel="Code Analysis")
-def spectral_gap_cmd(path=".", format="compact"):
+def spectral_gap_cmd(path=".", format="compact") -> None:
     """Modularity score: largest cluster / second largest."""
 
     from vocab.reports import spectral_gap_report
@@ -1524,7 +1550,7 @@ def spectral_gap_cmd(path=".", format="compact"):
     typer.echo(f'Gap: {g} ({m})')
 
 @cli.command(name="phantom", rich_help_panel="Code Analysis")
-def phantom_cmd(path=".", format="compact"):
+def phantom_cmd(path=".", format="compact") -> None:
     """Detect framework/library from import/export vocabulary."""
 
     from vocab.reports import phantom_report
@@ -1544,7 +1570,7 @@ def phantom_cmd(path=".", format="compact"):
 
 
 @cli.command(name="parity-bit", rich_help_panel="CI")
-def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact"):
+def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact") -> None:
     """SHA-1 of module phrase set. [GATE: CHANGED vs UNCHANGED]"""
     from vocab.reports import parity_bit_report
     p = os.path.abspath(path)
@@ -1562,7 +1588,7 @@ def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact"):
 
 
 @cli.command(name="guide", rich_help_panel="Agent Safety")
-def guide_cmd(path=".", file="", format="compact"):
+def guide_cmd(path=".", file="", format="compact") -> None:
     """One-token file locator for a file. """
     from vocab.reports import guide_report
     p = os.path.abspath(path)
@@ -2994,7 +3020,7 @@ def modules(
 
 
 @cli.command(name="help-agent",  rich_help_panel="Getting Started")
-def help_agent(task: Annotated[str, typer.Argument(help="Engineering task description")]):
+def help_agent(task: Annotated[str, typer.Argument(help="Engineering task description")]) -> None:
     """Recommend useful vocab commands for an agent task."""
     task_lower = task.lower()
     commands: list[tuple[str, str, bool]] = []
@@ -3125,7 +3151,7 @@ def provenance(
 
 
 @cli.command(name="fingerprint",  rich_help_panel="Utilities")
-def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo path")]):
+def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo path")]) -> None:
     """Structural fingerprint of a file or entire repo."""
     target = os.path.abspath(target)
     if os.path.isdir(target):
@@ -3243,10 +3269,11 @@ def main():
         from vocab import __version__
         typer.echo(f"vocab-cli {__version__}")
         return
-    if len(sys.argv) == 1:
+    if len(sys.argv) == 1 or "--help-all" in sys.argv:
+        if "--help-all" in sys.argv:
+            _help_all(None)
+            return
         typer.echo("vocab — grammar-free structural codebase analyzer")
-        typer.echo("")
-        typer.echo("Start here:")
         typer.echo("Start here:")
         typer.echo("  vocab agent-bootstrap . --task \"fix upload\" --summary")
         typer.echo("  vocab inspect .")
@@ -3950,7 +3977,7 @@ def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
 
 
 @cli.command(name="escape-velocity", rich_help_panel="Maintenance")
-def escape_velocity_cmd(path=".", format="compact"):
+def escape_velocity_cmd(path=".", format="compact") -> None:
     """Phrase removal difficulty: ESCAPED / BOUND / DEEP."""
 
     from vocab.reports import escape_velocity_report
@@ -3965,7 +3992,7 @@ def escape_velocity_cmd(path=".", format="compact"):
     for t in data.get("tagged", [])[:5]:
         typer.echo(f'  {t["phrase"]}: {t["label"]}')
 @cli.command(name="trap", rich_help_panel="Code Analysis")
-def trap_cmd(path=".", file_a="", file_b="", format="compact"):
+def trap_cmd(path=".", file_a="", file_b="", format="compact") -> None:
     """Identifier overlap between two concurrently-edited files."""
 
     from vocab.reports import trap_report
@@ -3982,7 +4009,7 @@ def trap_cmd(path=".", file_a="", file_b="", format="compact"):
     typer.echo(f'Overlap: {data["overlap"]:.1%} — {data["label"]}')
 
 @cli.command(name="hub-risk", rich_help_panel="Code Analysis")
-def thanatosis_cmd(path=".", format="compact"):
+def thanatosis_cmd(path=".", format="compact") -> None:
     """High-centrality files with zero edits."""
 
     from vocab.reports import thanatosis_report
@@ -3999,7 +4026,7 @@ def thanatosis_cmd(path=".", format="compact"):
     typer.echo('  \033[90mNext: vocab guard --file <file> | vocab edit-context --files <file>\033[0m')
 
 @cli.command(name="complexity-ratio", rich_help_panel="Code Analysis")
-def trompe_cmd(path=".", file="", format="compact"):
+def trompe_cmd(path=".", file="", format="compact") -> None:
     """Apparent lines vs unique identifiers."""
 
     from vocab.reports import trompe_report
@@ -4016,7 +4043,7 @@ def trompe_cmd(path=".", file="", format="compact"):
     typer.echo(f'Trompe: {data.get("trompe_ratio",0)} — {data.get("label","")}')
 
 @cli.command(name="porosity", rich_help_panel="Code Analysis")
-def porosity_cmd(path=".", format="compact"):
+def porosity_cmd(path=".", format="compact") -> None:
     """Sparse coupling estimate without computing co-occurrence."""
 
     from vocab.reports import porosity_report
@@ -4031,7 +4058,7 @@ def porosity_cmd(path=".", format="compact"):
     typer.echo(f'Porosity: {data.get("porosity",0):.6f}')
 
 @cli.command(name="extinct-exports", rich_help_panel="Maintenance")
-def thylacine_cmd(path=".", format="compact"):
+def thylacine_cmd(path=".", format="compact") -> None:
     """Multi-file exports never imported externally."""
 
     from vocab.reports import thylacine_report
@@ -4051,7 +4078,7 @@ def thylacine_cmd(path=".", format="compact"):
         typer.echo('  \033[90mNext: vocab cleanup-list | vocab escape-velocity\033[0m')
 
 @cli.command(name="coupling-chain", rich_help_panel="Code Analysis")
-def tensegrity_cmd(path=".", format="compact"):
+def tensegrity_cmd(path=".", format="compact") -> None:
     """Indirect coupling with no direct edge."""
 
     from vocab.reports import tensegrity_report
@@ -4067,7 +4094,7 @@ def tensegrity_cmd(path=".", format="compact"):
         typer.echo(f'  {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} im)')
 
 @cli.command(name="criticality", rich_help_panel="Code Analysis")
-def criticality_cmd(path=".", file="", format="compact"):
+def criticality_cmd(path=".", file="", format="compact") -> None:
     """2-hop amplification ratio: changes amplify or dampen."""
 
     from vocab.reports import criticality_report
@@ -4084,7 +4111,7 @@ def criticality_cmd(path=".", file="", format="compact"):
 
 
 @cli.command(name="guard", rich_help_panel="Agent Safety")
-def guard_cmd(path=".", file="", task="", format="compact"):
+def guard_cmd(path=".", file="", task="", format="compact") -> None:
     """Combined safety packet: guide + hub-risk + complexity + criticality. """
     from vocab.reports import guard_report
     p = os.path.abspath(path)
@@ -4100,7 +4127,7 @@ def guard_cmd(path=".", file="", task="", format="compact"):
             typer.echo(f'  {k}: {v}')
 
 @cli.command(name="check-pr", rich_help_panel="CI")
-def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact"):
+def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact") -> None:
     """CI PR summary: parity-bit + trap + diff. [INFO: always exits 0]"""
     from vocab.reports import check_pr_report
     p = os.path.abspath(path)
@@ -4116,7 +4143,7 @@ def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact"):
         typer.echo(f'  {tp.get("file_a","")} <-> {tp.get("file_b","")}: {tp.get("label","")}')
 
 @cli.command(name="cleanup-list", rich_help_panel="Maintenance")
-def cleanup_list_cmd(path=".", format="compact"):
+def cleanup_list_cmd(path=".", format="compact") -> None:
     """Prioritized cleanup: extinct-exports x escape-velocity."""
 
     from vocab.reports import cleanup_list_report
@@ -4133,7 +4160,7 @@ def cleanup_list_cmd(path=".", format="compact"):
         typer.echo(f'  {i["identifier"]}: {i["effort"]} ({i["files"]} files)')
 
 @cli.command(name="vulnerability-map", rich_help_panel="Maintenance")
-def vulnerability_map_cmd(path=".", format="compact"):
+def vulnerability_map_cmd(path=".", format="compact") -> None:
     """Overlap of hub-risk and capillary."""
 
     from vocab.reports import vulnerability_report
@@ -4148,7 +4175,7 @@ def vulnerability_map_cmd(path=".", format="compact"):
     typer.echo(f'Don-touch: {len(data.get("don_touch",[]))}  Churn: {len(data.get("churn_hubs",[]))}  Critical: {len(data.get("critical",[]))}')
 
 @cli.command(name="health-score", rich_help_panel="CI")
-def health_score_cmd(path=".", format="compact"):
+def health_score_cmd(path=".", format="compact") -> None:
     """2-axis health: coupling density x modularity. """
     from vocab.reports import repo_health as health_score
     p = os.path.abspath(path)

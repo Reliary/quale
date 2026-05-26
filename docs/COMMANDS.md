@@ -77,11 +77,24 @@ vocab fold --file src/billing.ts --task "fix proration"           # fractional d
 vocab drift-check --file src/billing.ts --snapshot                # structural baseline
 vocab drift-check --file src/billing.ts                           # velocity spikes
 vocab forecast --files src/billing.ts                             # regression risk
-vocab mycorrhiza --files src/billing.ts                           # hidden dependencies
+vocab latent-deps --files src/billing.ts                          # hidden dependencies
 vocab isolate --task "Update billing" --format json               # module bisection
 vocab heisenberg --file worker.ts --diff "$(cat patch)"           # refactor/feature separation
 vocab traffic-control --file UserProfile.tsx --intended-import api_client.ts  # import zoning
-vocab pulsar --file core/worker.ts                                # anchor deletion detection
 vocab decay --file billing.ts --metabolism                        # legacy pattern clearance
-vocab condensate --threshold 0.90                                 # cross-directory clone detection
+vocab clone --threshold 0.90                                      # cross-directory clone detection
 ```
+
+## Exit codes
+
+| Code | Meaning | Examples |
+|------|---------|---------|
+| 0 | Success | All commands |
+| 1 | General error | Invalid path, not a git repo, parse failure |
+| 2 | CI gate: blast tier | `ci-report --fail-on-blast-tier high` |
+| 3 | CI gate: stable anchor | `ci-report --fail-on-stable-touched` |
+
+## All commands (generated from CLI)
+
+See [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for the full auto-generated command list
+grouped by panel (Agent Safety, CI, Code Analysis, etc.).

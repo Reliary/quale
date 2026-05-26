@@ -1,104 +1,66 @@
 # vocab — Feature-Persona Matrix
 
-## Personas
+Auto-generated. Add `(v)` for value, `(s)` for signal-only, `(g)` for gate.
 
-| Persona | Need | Works best with |
-|---------|------|----------------|
-| **Agent** (LLM coding agent) | Bounded guidance, scope control, speed labels | JSON output, compact format, single-file flags |
-| **Human** (developer) | Structural insight, cleanup lists, architecture discovery | Terminal output, --format markdown |
-| **CI** (pipeline gate) | Deterministic pass/fail, trend numbers, hash comparisons | JSON output, exit codes, zero-token overhead |
-
----
-
-## Core Analysis (always available)
-
-| Command | Signal | Agent | Human | CI | Why |
-|---------|--------|-------|-------|----|-----|
-| `specral-gap` | Single-number modularity score | ❌ | ⭐ | ⭐ | 1 float = repo health. Agent can't act on it |
-| `capillary` | High-edge-count files | ❌ | ⭐ | ❌ | Lists most coupled files. One-time insight |
-| `phantom` | Framework/library detection | ⭐ | ⭐ | ❌ | "This repo uses Zustand, not Redux" — agent convention hint |
-
-## Agent Guidance
-
-| Command | Signal | Token cost | Why |
-|---------|--------|-----------|-----|
-| `guide --file X` | 1-token unique file locator | ~2 | "Navigate to PgPaymentRepository" instead of path exploration |
-| `trompe --file X` | Apparent vs true complexity | ~4 | "Skip at 4x speed" or "2x attention" |
-| `thanatosis` | High-centrality rarely-edited files | ~8 | "Don't touch this file — 0 edits, 1054 centrality" |
-| `tensegrity` | Indirect coupling via intermediaries | ~15 | "Edit A will break B through C,D,E intermediaries" |
-| `criticality --file X` | 2-hop amplification ratio | ~4 | "k=3.2 — your edit will amplify" |
-
-## Human Insight
-
-| Command | Signal | Why |
-|---------|--------|-----|
-| `thylacine` | Extinct exports (defined everywhere, imported nowhere) | Cleanup backlog |
-| `tensegrity` | Indirect coupling | Debug hidden dependencies |
-| `capillary` | Most coupled files | Refactoring targets |
-| `thanatosis` | Playing-dead structural hubs | Risk assessment |
-| `trap --file-a X --file-b Y` | Identifier-level overlap | Safe parallel editing confidence |
-
-## CI Gates
-
-| Command | Signal | Token cost | Gate logic |
-|---------|--------|-----------|------------|
-| `porosity` | Excess coupling vs random | ~4 | "excess_porosity dropped → run blast on every PR" |
-| `trap --file-a X --file-b Y` | Divergence/over-trap warning | ~8 | "<10% = divergence gap → flag for review" |
-| `parity-bit --ref-a A --ref-b B` | Test mirror unchanged | 16 bytes | "mirror_unchanged = skip test suite" |
-| `escape-velocity --min-freq N` | Phrase removal effort label | ~8 | "DEEP = need multi-sprint effort" |
-
-## Verification & Safety
-
-| Command | Signal | Best for |
-|---------|--------|----------|
-| `mirage --test-file X` | Test claims misaligned with structure | Agent pre-edit verification |
-| `trap --file-a X --file-b Y` | Identifier-level conflict prediction | CI pre-merge |
-| `check-plan` | Contract validation | Agent post-generation |
-
-## History & Trends
-
-| Command | Signal | Frequency |
-|---------|--------|----------|
-| `specral-gap` | Modularity trend | Weekly CI |
-| `porosity` | Coupling trend | Weekly CI |
-| `forecast --files X` | Bugfix regression risk | Pre-edit |
-| `decay --file X --metabolism` | Active migration in progress | Pre-edit |
-
-## Cross-repo
-
-| Command | Signal | Use case |
-|---------|--------|----------|
-| `dark-matter --repo-a X --repo-b Y` | Orphans in A that bind to B | Distributed system safety |
-| `compare --contract-only` | Contract surface drift | API compatibility |
-| `migrate --from X --to Y` | Phrase-level substitution mask | Zero-hallucination migrations |
-
-## Quick reference by persona
-
-### Agent workflow
-```bash
-vocab guide --file target.ts                    # 1-token file location
-vocab thanatosis --path .                       # don't-touch list
-vocab trompe --file target.ts                    # skip speed
-vocab tensegrity --path .                        # indirect coupling check
-vocab criticality --file target.ts                # amplification check
-vocab mirage --test-file target.test.ts           # verification alignment
-vocab trap --file-a X --file-b Y                  # parallel edit safety
-```
-
-### Human workflow
-```bash
-vocab capillary --path .                         # most coupled files
-vocab thylacine --path .                         # extinct exports to clean
-vocab tenegrity --path .                          # hidden indirect coupling
-vocab thanatosis --path .                         # risky untouched files
-vocab specral-gap --path .                        # modularity score
-vocab phantom --path .                            # framework detection
-```
-
-### CI workflow
-```bash
-vocab porosity --path --format json               # coupling trend gate
-vocab parit-bit --ref-a main --ref-b HEAD         # test mirror gate
-vocab trap --file-a X --file-b Y --format json    # pre-merge conflict check
-vocab escape-velocity --path --format json         # effort estimation
-```
+| Command | Panel | Description |
+|---------|-------|-------------|
+| `help-agent` | Getting Started | Recommend useful vocab commands for an agent task. |
+| `repo-map` | Getting Started | One-time structural description of a codebase. |
+| `cascade-verify` | Agent Safety | Multi-strategy verification pipeline. |
+| `check-plan` | Agent Safety | Validate an LLM plan against an ID-coded contract. |
+| `edit-context` | Agent Safety | File-scoped edit context and risk card. |
+| `fold` | Agent Safety | Replace low-signal blocks with annotations. |
+| `guard` | Agent Safety | Combined safety packet: guide + hub-risk + complexity + criticality. |
+| `guide` | Agent Safety | One-token file locator for a file. |
+| `isolate` | Agent Safety | Pre-edit file discovery via structural module bisection. |
+| `triangulate` | Agent Safety | Intersect three structural probes to find the task anchor. |
+| `verify-packet` | Agent Safety | Verification packet — compressed scope for LLM verification. |
+| `verify-scope` | Agent Safety | Post-edit scope verification: compare actual diff against expected contract. |
+| `veto-cascade` | Agent Safety | Veto cascade pipeline — ~33 avg tokens per verification call. |
+| `zk-proof` | Agent Safety | Verify generated code identifiers against allowed set. |
+| `co-change` | Verification | Show file co-change pairs from git history. |
+| `reverse-verify` | Verification | Given changed test files, find source files that need verification. |
+| `test-gaps` | Verification | Test gap map: source files with weak test mirrors. |
+| `verify-bonds` | Verification | Detect when a change requires running multiple test files together. |
+| `verify-classify` | Verification | Classify each changed file's verifiability type and structural gaps. |
+| `verify-drift` | Verification | Track verification confidence across recent commits. |
+| `check-diff` | CI | Post-proposal defect scan: detect structural violations. |
+| `check-pr` | CI | CI PR summary: parity-bit + trap + diff. |
+| `ci-report` | CI | CI-ready structural report: blast radius + stable file check + flags. |
+| `drift-check` | CI | Structural anomaly velocity across directories. |
+| `forecast` | CI | Forecast regression risk from co-change shifts. |
+| `health` | CI | 0-1 health from stability, mirror, churn, concept age. |
+| `health-score` | CI | 2-axis health: coupling density x modularity. |
+| `parity-bit` | CI | SHA-1 of module phrase set. |
+| `pr-report` | CI | PR structural report in markdown. |
+| `capillary` | Code Analysis | Files with the most inter-file vocabulary edges. |
+| `complexity-ratio` | Code Analysis | Apparent lines vs unique identifiers. |
+| `coupling-chain` | Code Analysis | Indirect coupling with no direct edge. |
+| `criticality` | Code Analysis | 2-hop amplification ratio: changes amplify or dampen. |
+| `hub-risk` | Code Analysis | High-centrality files with zero edits. |
+| `latent-deps` | Code Analysis | Detect hidden structural dependencies (no direct imports). |
+| `phantom` | Code Analysis | Detect framework/library from import/export vocabulary. |
+| `porosity` | Code Analysis | Sparse coupling estimate without computing co-occurrence. |
+| `spectral-gap` | Code Analysis | Modularity score: largest cluster / second largest. |
+| `trap` | Code Analysis | Identifier overlap between two concurrently-edited files. |
+| `anomalies` | Maintenance | Detect structural anomalies and outliers in vocabulary. |
+| `cleanup-list` | Maintenance | Prioritized cleanup: extinct-exports x escape-velocity. |
+| `concept-flow` | Maintenance | Track phrase spread across weekly snapshots. |
+| `decay` | Maintenance | Legacy patterns; --metabolism for active decline. |
+| `deflate` | Maintenance | Cap net-new identifiers per edit. |
+| `diff-structural` | Maintenance | Structural fingerprint diff between two git refs. |
+| `entropy` | Maintenance | Dir-level vocabulary fragmentation vs 30-commit baseline. |
+| `escape-velocity` | Maintenance | Phrase removal difficulty: ESCAPED / BOUND / DEEP. |
+| `extinct-exports` | Maintenance | Multi-file exports never imported externally. |
+| `heisenberg` | Maintenance | Mixed refactor/feature edits that must be split. |
+| `migration-pairs` | Maintenance | Deterministic phrase substitution from two-repo comparison. |
+| `origins` | Maintenance | Concept origin: which concepts are native vs imported?. |
+| `safe-islands` | Maintenance | Structurally isolated blocks safe to edit. |
+| `solve` | Maintenance | Surface cipher keys: non-dictionary identifiers to learn a repo. |
+| `traffic-control` | Maintenance | Zone files by graph centrality percentile. |
+| `vocabulary-trend` | Maintenance | Entropy velocity: is vocabulary diversity accelerating or decelerating?. |
+| `vulnerability-map` | Maintenance | Overlap of hub-risk and capillary. |
+| `coupling` | Cross-Repo | Concept coupling classification: tightly bound, loosely bound, independent. |
+| `agent-bootstrap` | Utilities | One-shot agent bootstrap: explore + modules + stability + related files. |
+| `fingerprint` | Utilities | Structural fingerprint of a file or entire repo. |
+| `orient` | Utilities | One-call orientation: solve + triangulate + isolate. |
