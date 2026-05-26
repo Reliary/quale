@@ -4134,6 +4134,97 @@ def health_score_cmd(path=".", format="compact"):
     mod = "gapped" if data.get("spectral_gap", 0) >= 2 else ("moderate" if data.get("spectral_gap", 0) >= 1 else "flat")
     typer.echo(f'{coupling} + {mod}')
 
+@cli.command(name="session-memory", rich_help_panel="Agent")
+def session_memory_cmd(
+    action: str = typer.Argument(..., help="ingest|query|status|save|load"),
+    tool: str = typer.Option("", "--tool", help="Tool name for ingest"),
+    file_path: str = typer.Option("", "--file", "--file-path", help="File path for ingest/query"),
+    error_code: str = typer.Option("", "--error", "--error-code", help="Error code for ingest"),
+    raw: str = typer.Option("", "--raw", help="Raw text for token extraction"),
+    query: str = typer.Option("", "--query", "-q", help="Concept to query (shortcut for query action)"),
+    save_path: str = typer.Option("", "--save", help="Path to save/load session memory"),
+    max_events: int = typer.Option(5000, "--max-events", help="Max events before FIFO eviction"),
+    format: str = typer.Option("json", "--format", help="Output format (json or text)"),
+):
+    """Agent session memory via co-occurrence matrix.
+    
+    Associative recall across the agent's own behavioral history.
+    ingest events (tool calls, errors, file edits) and query by concept.
+    """
+    from vocab.session_memory import SessionMemory
+
+    p = os.path.abspath(save_path) if save_path else ""
+    mem = SessionMemory(max_events=max_events)
+
+    if p and os.path.isfile(p) and action != "save":
+        mem = SessionMemory.load(p)
+
+    if action == "ingest":
+        eid = mem.ingest(tool=tool, file_path=file_path,
+                         error_code=error_code, raw=raw)
+        if p:
+            mem.save(p)
+        if format != "json":
+            typer.echo(f"Ingested event {eid} ({len(mem.events)} total)")
+        else:
+            typer.echo(json.dumps({"event_id": eid, "total_events": len(mem.events)}))
+        return
+
+    if action == "query" or (action == "ingest" and query):
+        concept = query or file_path
+        if not concept:
+            typer.echo('Provide --query or --file for query action', err=True)
+            raise typer.Exit(1)
+        result = mem.query(concept)
+        if format == "json":
+            typer.echo(json.dumps({
+                "concept": concept,
+                "associations": result.associations if result else {},
+                "total_events": result.total_events if result else 0,
+                "recency": result.recency if result else 0,
+            }))
+        else:
+            if not result:
+                typer.echo(f"No session memory for '{concept}'")
+                return
+            typer.echo(f"Session recall: {concept}")
+            for assoc, count in list(result.associations.items())[:10]:
+                typer.echo(f"  {assoc}: {count}")
+            typer.echo(f"  ({result.total_events} events, recency {result.recency})")
+        return
+
+    if action == "status":
+        s = mem.status()
+        if format == "json":
+            typer.echo(json.dumps(s))
+        else:
+            typer.echo(f"Events: {s['events']}/{s['max_events']}")
+            typer.echo(f"Unique tokens: {s['unique_tokens']}")
+            typer.echo(f"Pairs: {s['pairs']}")
+        return
+
+    if action == "save":
+        if not p:
+            typer.echo('Provide --save path', err=True)
+            raise typer.Exit(1)
+        mem.save(p)
+        typer.echo(f"Saved {len(mem.events)} events to {p}")
+        return
+
+    if action == "load":
+        if not p or not os.path.isfile(p):
+            typer.echo(f'Cannot load: {p}', err=True)
+            raise typer.Exit(1)
+        mem = SessionMemory.load(p)
+        if format == "json":
+            typer.echo(json.dumps(mem.status()))
+        else:
+            typer.echo(f"Loaded {len(mem.events)} events from {p}")
+        return
+
+    typer.echo(f"Unknown action: {action}. Use: ingest, query, status, save, load", err=True)
+    raise typer.Exit(1)
+
 if __name__ == "__main__":
     main()
 
