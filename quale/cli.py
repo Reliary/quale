@@ -3387,7 +3387,7 @@ def _entry_main():
             "schema_version": 1,
             "name": "quale",
             "description": "Grammar-free structural codebase analyzer. Zero config, one scan, every language.",
-            "quickstart": "quale --format tool  # combined safety packet",
+            "quickstart": "quale guard --file <FILE> --task \"<TASK>\" --format tool  # combined safety packet",
             "recommended_workflow": [
                 {"step": 1, "command": "quale repo-map --path <REPO> --format json", "why": "Compact repo skeleton for initial orientation (once per repo)"},
                 {"step": 2, "command": "quale edit-context --path <REPO> --files <FILE> --task \"<TASK>\" --format tool", "why": "Pre-edit scope: read_first, verification candidates, scope_creep_guard"},
