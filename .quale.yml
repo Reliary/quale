@@ -1,4 +1,4 @@
-# vocab CI configuration
+# quale CI configuration
 # Structural checks for CI pipelines.
 
 blast:

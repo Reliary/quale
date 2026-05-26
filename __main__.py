@@ -2,13 +2,13 @@
 """quale — grammar-free structural codebase analyzer.
 
 Usage:
-  vocab analyze [path]           analyze codebase structure
-  vocab diff <ref_a> <ref_b>     compare two git refs
-  vocab search <phrase> [repos]  search across repos
-  vocab fingerprint <file>       structural fingerprint
-  vocab clone [path]             find structural clones
-  vocab landmarks [path]         find unique files
-  vocab timeline [path]          concept history
+  quale analyze [path]           analyze codebase structure
+  quale diff <ref_a> <ref_b>     compare two git refs
+  quale search <phrase> [repos]  search across repos
+  quale fingerprint <file>       structural fingerprint
+  quale clone [path]             find structural clones
+  quale landmarks [path]         find unique files
+  quale timeline [path]          concept history
 """
 
 from quale.cli import main

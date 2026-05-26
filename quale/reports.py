@@ -4542,7 +4542,7 @@ def _structural_cohesion_score(file_path: str, file_vocabs: list) -> float:
     return round(internal_count / total, 3)
 
 
-_B_CELL_DIR = ".reliary/vocab/b_cells/"
+_B_CELL_DIR = ".reliary/quale/b_cells/"
 
 
 def _b_cell_path(repo_path: str) -> str:
@@ -4913,7 +4913,7 @@ def _file_type(path: str) -> str:
     return ext.lstrip(".") or "unknown"
 
 
-_FRAGMENT_MATRIX_PATH = ".reliary/vocab/fragment_matrix.json"
+_FRAGMENT_MATRIX_PATH = ".reliary/quale/fragment_matrix.json"
 
 
 def _load_fragment_matrix(path: str = ".") -> dict:
@@ -5621,7 +5621,7 @@ def verification_deserts(path: str, max_results: int = 20) -> dict:
         ext = os.path.splitext(fv.path)[1].lower()
         if (ext not in _DEAD_CODE_EXTS or _task_file_role(fv.path) != "source"
                 or _is_generated(fv.path) or _is_lock_file(fv.path)
-                or fv.path.startswith((".reliary/", ".vocab-cache/"))
+                or fv.path.startswith((".reliary/", ".quale-cache/"))
                 or os.path.basename(fv.path).startswith(".")):
             continue
         source_count += 1
@@ -6522,7 +6522,7 @@ def concept_timeline(path: str, weeks: int = 12) -> list[dict]:
 
 # ── Cached scan cache for delta / anomaly detection ───────────────
 
-_CACHE_DIR = ".vocab-cache"
+_CACHE_DIR = ".quale-cache"
 
 def _cache_path(path: str) -> str:
     return os.path.join(path, _CACHE_DIR, "crystallography.json")
@@ -6550,7 +6550,7 @@ _CALIBRATION_FILE = "calibration.jsonl"
 
 
 def _calibration_path(path: str) -> str:
-    """Path to calibration log under .vocab-cache."""
+    """Path to calibration log under .quale-cache."""
     return os.path.join(path, _CACHE_DIR, _CALIBRATION_FILE)
 
 
@@ -6719,7 +6719,7 @@ def detect_anomalies(path: str) -> list[dict]:
     """Compare current scan against last cached scan and flag deltas."""
     cached = _load_cached(path)
     if not cached:
-        return [{"note": "no cached scan to compare against; run vocab init first"}]
+        return [{"note": "no cached scan to compare against; run quale init first"}]
 
     current = crystallography(path)
     if "error" in current:
@@ -6785,7 +6785,7 @@ def repo_delta(path: str) -> dict:
     """Compute delta between cached and current repo state."""
     cached = _load_cached(path)
     if not cached:
-        return {"error": "no cached scan; run vocab init first", "schema_version": 1}
+        return {"error": "no cached scan; run quale init first", "schema_version": 1}
 
     current = crystallography(path)
     if "error" in current:

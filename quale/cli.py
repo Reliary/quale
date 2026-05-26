@@ -3218,7 +3218,7 @@ def init(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
     seed: Annotated[bool, typer.Option("--seed", "--no-seed", help="Seed fragment router from git history")] = True,
 ):
-    """Generate a .vocab.yml config file and cache repo-map scan.
+    """Generate a .quale.yml config file and cache repo-map scan.
 
     By default also seeds the fragment router using up to 20 historical
     commits so the adaptive router has accuracy data before the first
@@ -3227,7 +3227,7 @@ def init(
     Speed: seeding scans up to 2500 files. On large repos (2400+ files)
     may take 10-30s additional.
     """
-    target = os.path.join(os.path.abspath(path), ".vocab.yml")
+    target = os.path.join(os.path.abspath(path), ".quale.yml")
     if not os.path.exists(target):
         os.makedirs(os.path.abspath(path), exist_ok=True)
         content = """# quale CI configuration
@@ -3893,7 +3893,7 @@ def calibration(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
-    """Show vocab's accuracy on this repo from past verify-scope runs.
+    """Show quale's accuracy on this repo from past verify-scope runs.
 
     Tracks verification hit rate and scope accuracy over time.
     Requires verify-scope to have been run at least 3 times on this repo.

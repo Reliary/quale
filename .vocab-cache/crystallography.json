@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "total_files": 41,
+  "languages": {
+    "Unknown": 1,
+    "YAML": 1,
+    "Markdown": 3,
+    "Python": 33,
+    "Shell": 3
+  },
+  "layout_type": "unknown",
+  "test_convention": "both",
+  "test_dirs": [
+    "test/",
+    "tests/"
+  ],
+  "test_suffixes": [
+    "_test.*"
+  ],
+  "generated_pct": 0.0,
+  "stable_core": [],
+  "core_concepts": [
+    {
+      "concept": "PYTHONPATH",
+      "file_count": 9
+    },
+    {
+      "concept": "Request",
+      "file_count": 8
+    },
+    {
+      "concept": "Vocab",
+      "file_count": 8
+    },
+    {
+      "concept": "Authorization",
+      "file_count": 7
+    },
+    {
+      "concept": "Bearer",
+      "file_count": 7
+    }
+  ],
+  "modules": [
+    {
+      "size": 4,
+      "sample_files": [
+        "evaluate_vocab_effect.py",
+        "cli.py",
+        "terminal.py"
+      ]
+    },
+    {
+      "size": 2,
+      "sample_files": [
+        "token_experiment.py",
+        "token_experiment_v3.py"
+      ]
+    }
+  ],
+  "skeleton": "Lang: Markdown, Python, Shell, Unknown, YAML. Files: 41. Layout: unknown test:both. Gen: 0.0% generated. Core: PYTHONPATH, Request.",
+  "guardrails": {
+    "mode": "report_only",
+    "not_semantic_truth": true,
+    "one_time_summary": true,
+    "does_not_guarantee_task_accuracy": true,
+    "caveat": "Cached summary; re-run on significant refactors."
+  },
+  "privacy_receipt": {
+    "local_only": true,
+    "uploaded": false,
+    "network": false
+  }
+}

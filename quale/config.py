@@ -1,38 +1,16 @@
-"""Config loader — reads .vocab.yml from repo root."""
+"""Config loader — reads .quale.yml from repo root."""
 
 from __future__ import annotations
 
 import os
-from typing import Any
-
-DEFAULT_CONFIG: dict[str, Any] = {
-    "blast": {
-        "max_high": 5,
-        "max_med": 20,
-        "critical_paths": [],
-    },
-    "orphans": {
-        "max_new_red": 0,
-        "allow": [],
-    },
-    "drift": {
-        "max_outliers": 3,
-        "allow": [],
-    },
-    "lifecycle": {
-        "min_signal_weeks": 4,
-    },
-    "search": {
-        "common_threshold": 0.8,
-    },
-}
+import yaml
 
 
-def load_config(path: str = ".") -> dict[str, Any]:
-    """Load .vocab.yml from path if it exists, else return defaults."""
-    config_path = os.path.join(os.path.abspath(path), ".vocab.yml")
+def load_config(path: str) -> dict:
+    """Load .quale.yml from path if it exists, else return defaults."""
+    config_path = os.path.join(os.path.abspath(path), ".quale.yml")
     if not os.path.isfile(config_path):
-        config_path = os.path.join(os.path.abspath(path), ".vocab.yaml")
+        config_path = os.path.join(os.path.abspath(path), ".quale.yaml")
     if not os.path.isfile(config_path):
         return dict(DEFAULT_CONFIG)
 
