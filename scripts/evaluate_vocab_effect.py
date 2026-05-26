@@ -1764,7 +1764,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
                 baseline_cond = "candidate_baseline"
                 baseline_rows = [r for r in suite_rows if r["condition"] == baseline_cond]
                 baseline_tokens = avg_num(baseline_rows, "input_tokens") if baseline_rows else avg_tokens
-                cost_benefit = round(
+                efficiency = round(
                     ((avg_verify * 2 + max(0, 1 - avg_scope_creep)) / max(avg_tokens / baseline_tokens, 0.01)),
                     3,
                 ) if baseline_tokens > 0 else 0.0
@@ -1783,7 +1783,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
                     "contract_valid_rate": avg_bool(rows, "contract_valid"),
                     "contract_needs_reflight_rate": avg_bool(rows, "contract_needs_reflight"),
                     "avg_input_tokens": avg_tokens,
-                    "cost_benefit_ratio": cost_benefit,
+                    "efficiency_score": efficiency,
                 }
     return summary
 
