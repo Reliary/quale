@@ -4134,6 +4134,42 @@ def health_score_cmd(path=".", format="compact"):
     mod = "gapped" if data.get("spectral_gap", 0) >= 2 else ("moderate" if data.get("spectral_gap", 0) >= 1 else "flat")
     typer.echo(f'{coupling} + {mod}')
 
-if __name__ == "__main__":
-    main()
+@cli.command(name="rho", rich_help_panel="CI")
+def rho_cmd(
+    path: str = typer.Option(".", "--path", "-p", help="Repository path"),
+    since: str = typer.Option("HEAD~20", "--since", "-s", help="Git ref for start of window"),
+    window: int = typer.Option(5, "--window", "-w", help="Generations to track infection spread"),
+    threshold: float = typer.Option(1.0, "--threshold", "-t", help="R₀ threshold for warning"),
+    format: str = typer.Option("compact", "--format", "-f", help="Output format: compact, detailed, json, csv"),
+):
+    """Token cascade R₀ — detect spreading tokens before they cause cascading breakage.
+    
+    Uses vocabulary birth tracking across git history to compute each token's
+    basic reproduction number (R₀). R₀ > 1.0 means the token actively spreads
+    to new files — an epidemic signal for architectural damage.
+    
+    Use --format=compact for CI gates (exits 1 if spreading detected).
+    Use --format=detailed for investigation.
+    """
+    from vocab.cascade import scan_cascade, format_rho_report, format_rho_json, format_rho_csv
+    
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    
+    events = scan_cascade(repo=p, since=since, window=window, threshold=0.0, quiet=(format == "compact"))
+    
+    spreading = [e for e in events if e.r0 >= threshold]
+    
+    if format == "json":
+        typer.echo(format_rho_json(events))
+    elif format == "csv":
+        typer.echo(format_rho_csv(events))
+    elif format == "compact":
+        typer.echo(format_rho_report(events, repo=p, since=since, threshold=threshold, compact=True))
+        if spreading:
+            raise typer.Exit(1)
+    else:
+        typer.echo(format_rho_report(events, repo=p, since=since, threshold=threshold, compact=False))
 

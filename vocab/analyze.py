@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -22,6 +23,34 @@ class CoOccurrenceMatrix:
             for b in phrases:
                 if a < b:
                     self.pairs[(a, b)] += 1
+
+    def pmi(self, a: str, b: str) -> float:
+        """Pointwise mutual information: log2(P(a,b) / P(a)P(b)).
+        
+        Positive PMI = co-occur more than expected by chance.
+        PMI = 0 = independent.
+        Negative PMI = co-occur less than expected (avoidance).
+        """
+        if self.total_docs == 0:
+            return 0.0
+        p_a = self.phrase_count.get(a, 0) / self.total_docs
+        p_b = self.phrase_count.get(b, 0) / self.total_docs
+        p_ab = self.pairs.get((a, b) if a < b else (b, a), 0) / self.total_docs
+        if p_a == 0 or p_b == 0 or p_ab == 0:
+            return 0.0
+        return math.log2(p_ab / (p_a * p_b))
+
+    def top_pmi_for(self, phrase: str, limit: int = 10) -> list[tuple[str, float]]:
+        """Top PMI co-occurrences for a given phrase."""
+        candidates: set[str] = set()
+        for (a, b) in self.pairs:
+            if a == phrase:
+                candidates.add(b)
+            elif b == phrase:
+                candidates.add(a)
+        scored = [(c, self.pmi(phrase, c)) for c in candidates]
+        scored.sort(key=lambda x: -x[1])
+        return scored[:limit]
 
     def cluster(self, min_cooccurrence: int = 3, min_phrases: int = 2) -> list[list[str]]:
         """Extract co-occurrence clusters — groups of phrases that frequently appear together."""
