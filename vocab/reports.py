@@ -768,12 +768,7 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     deficit_map: dict[str, dict | None] = {}
     cascade_map: dict[str, dict | None] = {}
     primary = changed[0] if changed else ""
-    cross_cutting: list[dict] = []
-    risk_vector: dict | None = None
-    acceleration: dict | None = None
-    boundary: dict | None = None
-    eversion: dict | None = None
-    fused_first: list[str] | None = None
+    pmi_couplings: list[dict] = []
     if enrich and primary and analysis.co_occurrence:
         try:
             spectrum_map[primary] = _spectrum_analysis(primary, analysis)

@@ -40,15 +40,20 @@ class CoOccurrenceMatrix:
             return 0.0
         return math.log2(p_ab / (p_a * p_b))
 
-    def top_pmi_for(self, phrase: str, limit: int = 10) -> list[tuple[str, float]]:
-        """Top PMI co-occurrences for a given phrase."""
+    def top_pmi_for(self, phrase: str, limit: int = 10, min_freq: int = 3) -> list[tuple[str, float]]:
+        """Top PMI co-occurrences for a given phrase.
+        
+        min_freq: minimum times a partner must appear to be considered
+        (filters out single-file artifacts with inflated PMI).
+        """
         candidates: set[str] = set()
         for (a, b) in self.pairs:
             if a == phrase:
                 candidates.add(b)
             elif b == phrase:
                 candidates.add(a)
-        scored = [(c, self.pmi(phrase, c)) for c in candidates]
+        scored = [(c, self.pmi(phrase, c)) for c in candidates
+                  if self.phrase_count.get(c, 0) >= min_freq]
         scored.sort(key=lambda x: -x[1])
         return scored[:limit]
 
