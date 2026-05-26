@@ -4145,15 +4145,22 @@ def session_memory_cmd(
     save_path: str = typer.Option("", "--save", help="Path to save/load session memory"),
     max_events: int = typer.Option(5000, "--max-events", help="Max events before FIFO eviction"),
     format: str = typer.Option("json", "--format", help="Output format (json or text)"),
-):
+    ):
     """Agent session memory via co-occurrence matrix.
     
     Associative recall across the agent's own behavioral history.
     ingest events (tool calls, errors, file edits) and query by concept.
+    
+    Use 'daemon' mode for persistent process (stdin JSON-lines, stdout
+    JSON-lines) — avoids Python startup cost per event/query.
     """
-    from vocab.session_memory import SessionMemory
+    from vocab.session_memory import SessionMemory, run_daemon
 
     p = os.path.abspath(save_path) if save_path else ""
+
+    if action == "daemon":
+        return run_daemon(save_path=p, max_events=max_events)
+
     mem = SessionMemory(max_events=max_events)
 
     if p and os.path.isfile(p) and action != "save":
@@ -4222,7 +4229,7 @@ def session_memory_cmd(
             typer.echo(f"Loaded {len(mem.events)} events from {p}")
         return
 
-    typer.echo(f"Unknown action: {action}. Use: ingest, query, status, save, load", err=True)
+    typer.echo(f"Unknown action: {action}. Use: ingest, query, status, save, load, daemon", err=True)
     raise typer.Exit(1)
 
 if __name__ == "__main__":

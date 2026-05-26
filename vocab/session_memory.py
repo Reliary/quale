@@ -231,3 +231,104 @@ class SessionMemory:
         mem._token_event_map.update(obj.get("token_event_map", {}))
         mem._token_assoc.update(obj.get("token_assoc", {}))
         return mem
+
+
+def run_daemon(save_path: str = "", max_events: int = 5000) -> None:
+    """Persistent process: reads JSON-line commands from stdin, writes JSON to stdout.
+    
+    Commands (one per line):
+      {"action":"ingest","tool":"...","file_path":"...","error_code":"...","raw":"..."}
+      {"action":"query","concept":"..."}
+      {"action":"status"}
+      {"action":"save"}
+    
+    Responses (one per line):
+      {"ok":true,"event_id":42,"total_events":8}
+      {"concept":"spool","associations":{...},"total_events":8,"recency":0.5}
+      {"events":8,"unique_tokens":12}
+      {"ok":true,"saved":"path"}
+    
+    Exit: send {"action":"exit"} or close stdin.
+    Uses sys.stdin.read() line-by-line — no binary framing needed.
+    """
+    import sys
+    
+    mem = SessionMemory(max_events=max_events)
+    if save_path and os.path.isfile(save_path):
+        try:
+            mem = SessionMemory.load(save_path)
+        except Exception:
+            mem = SessionMemory(max_events=max_events)
+    
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            cmd = json.loads(line)
+        except json.JSONDecodeError:
+            sys.stdout.write(json.dumps({"error": "invalid JSON"}) + "\n")
+            sys.stdout.flush()
+            continue
+        
+        action = cmd.get("action", "")
+        
+        if action == "exit":
+            break
+        
+        if action == "ingest":
+            eid = mem.ingest(
+                tool=cmd.get("tool", ""),
+                file_path=cmd.get("file_path", ""),
+                error_code=cmd.get("error_code", ""),
+                raw=cmd.get("raw", ""),
+                identifiers=cmd.get("identifiers"),
+            )
+            if save_path:
+                try:
+                    mem.save(save_path)
+                except Exception:
+                    pass
+            sys.stdout.write(json.dumps({
+                "ok": True, "event_id": eid, "total_events": len(mem.events)
+            }) + "\n")
+            sys.stdout.flush()
+        
+        elif action == "query":
+            concept = cmd.get("concept", "")
+            if not concept:
+                sys.stdout.write(json.dumps({"error": "missing concept"}) + "\n")
+                sys.stdout.flush()
+                continue
+            result = mem.query(concept)
+            if result:
+                sys.stdout.write(json.dumps({
+                    "concept": result.concept,
+                    "associations": result.associations,
+                    "total_events": result.total_events,
+                    "recency": result.recency,
+                }) + "\n")
+            else:
+                sys.stdout.write(json.dumps({
+                    "concept": concept,
+                    "associations": {},
+                    "total_events": len(mem.events),
+                    "recency": 0,
+                }) + "\n")
+            sys.stdout.flush()
+        
+        elif action == "status":
+            sys.stdout.write(json.dumps(mem.status()) + "\n")
+            sys.stdout.flush()
+        
+        elif action == "save":
+            if save_path:
+                mem.save(save_path)
+                sys.stdout.write(json.dumps({"ok": True, "saved": save_path}) + "\n")
+            else:
+                sys.stdout.write(json.dumps({"error": "no save path"}) + "\n")
+            sys.stdout.flush()
+        
+        else:
+            sys.stdout.write(json.dumps({"error": f"unknown action: {action}"}) + "\n")
+            sys.stdout.flush()
