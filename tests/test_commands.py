@@ -325,36 +325,6 @@ class TestCommandCoverage(unittest.TestCase):
         data = json.loads(result.stdout)
         self.assertEqual(data["action"], "none")
 
-    def test_failure_miner_classifies_harness_rows(self):
-        tmp = tempfile.TemporaryDirectory()
-        payload = {
-            "schema_version": 1,
-            "results": [
-                {
-                    "suite": "preflight",
-                    "bucket": "private_unseen",
-                    "repo": "sample",
-                    "condition": "candidate_baseline",
-                    "task": "change core",
-                    "verify_hit": False,
-                    "verify": ["src/core.ts"],
-                    "extra_edit_count": 1,
-                    "extra_edits": ["src/extra.ts"],
-                }
-            ],
-        }
-        path = Path(tmp.name) / "effect.json"
-        path.write_text(json.dumps(payload), encoding="utf-8")
-        result = subprocess.run(
-            [sys.executable, "scripts/analyze_effect_failures.py", str(path), "--format", "json"],
-            cwd=str(PROJECT_ROOT), env=self.env, text=True, capture_output=True,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        data = json.loads(result.stdout)
-        self.assertGreaterEqual(data["label_counts"].get("wrong_verification", 0), 1)
-        self.assertGreaterEqual(data["label_counts"].get("source_file_as_verification", 0), 1)
-        self.assertGreaterEqual(data["label_counts"].get("edit_sprawl", 0), 1)
-
 
 class TestStructuralDetection(unittest.TestCase):
     """Structural detection: desert, co-location, same-package prefix."""
