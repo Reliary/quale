@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import unittest
 
-from vocab.segmenter import segment, SegmentationResult
-from vocab.vocabulary import build_vocabulary, _compute_hash, Vocabulary
-from vocab.index import (_int_to_base36, _base36_to_int, encode_indices, decode_indices,
+from quale.segmenter import segment, SegmentationResult
+from quale.vocabulary import build_vocabulary, _compute_hash, Vocabulary
+from quale.index import (_int_to_base36, _base36_to_int, encode_indices, decode_indices,
                          index_sequence_hash, structural_similarity)
 
 
@@ -65,7 +65,7 @@ class TestSegmenter(unittest.TestCase):
         self.assertEqual(len(result.phrases), 1)
 
     def test_char_split_explicit(self):
-        from vocab.segmenter import _split_by_char
+        from quale.segmenter import _split_by_char
         phrases = _split_by_char("ABCDEFGHIJKLMNOPQRSTUVWXYZ", chunk_size=20)
         self.assertEqual(len(phrases), 2)
         self.assertEqual(phrases[0], "ABCDEFGHIJKLMNOPQRST")
@@ -198,7 +198,7 @@ class TestScanCache(unittest.TestCase):
     def test_cache_hits_on_repeated_ref_scans(self):
         import tempfile, subprocess
         from pathlib import Path
-        from vocab.scanner import scan_codebase, _scan_cache_clear, _SCAN_CACHE
+        from quale.scanner import scan_codebase, _scan_cache_clear, _SCAN_CACHE
 
         tmp = tempfile.TemporaryDirectory()
         repo = Path(tmp.name)
@@ -223,7 +223,7 @@ class TestScanCache(unittest.TestCase):
         _scan_cache_clear()
 
     def test_cache_respects_limit(self):
-        from vocab.scanner import _scan_cache_clear, _SCAN_CACHE, _SCAN_CACHE_MAX
+        from quale.scanner import _scan_cache_clear, _SCAN_CACHE, _SCAN_CACHE_MAX
         _scan_cache_clear()
         # Fill one past limit
         for i in range(_SCAN_CACHE_MAX + 1):

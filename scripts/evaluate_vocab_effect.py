@@ -112,10 +112,10 @@ CASES: tuple[Case, ...] = (
          "internal/handlers/fingerprint_read.go",
          ("internal/handlers/fingerprint_read.go", "internal/handlers/app.go", "internal/services/fingerprint.go"),
          ("tests/functional/api_fingerprints_test.go",)),
-    Case("private_unseen", "vocab", "/home/user/src/vocab",
+    Case("private_unseen", "quale", "/home/user/src/vocab",
          "add a file-scoped preflight command",
-         "vocab/cli.py",
-         ("vocab/cli.py", "vocab/reports.py", "vocab/compare.py"),
+         "quale/cli.py",
+         ("quale/cli.py", "quale/reports.py", "quale/compare.py"),
          ("tests/test_commands.py", "tests/test_cli.py")),
     Case("private_unseen", "llm-semantic-transport", "/home/user/src/llm-semantic-transport",
          "add a minhash compression backend for fuzzy duplicate detection",
@@ -212,7 +212,7 @@ def deepseek_call(messages: list[dict[str, str]], model: str, temperature: float
 
 def run_vocab(repo_path: str, args: list[str], timeout: int = 90) -> str:
     result = subprocess.run(
-        [sys.executable, "-m", "vocab.cli", *args],
+        [sys.executable, "-m", "quale.cli", *args],
         cwd=str(VOCAB_ROOT),
         env={**os.environ, "PYTHONPATH": str(VOCAB_ROOT)},
         text=True,

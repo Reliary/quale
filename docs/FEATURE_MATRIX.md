@@ -1,10 +1,10 @@
-# vocab — Feature-Persona Matrix
+# quale — Feature-Persona Matrix
 
 Auto-generated. Add `(v)` for value, `(s)` for signal-only, `(g)` for gate.
 
 | Command | Panel | Description |
 |---------|-------|-------------|
-| `help-agent` | Getting Started | Recommend useful vocab commands for an agent task. |
+| `help-agent` | Getting Started | Recommend useful quale commands for an agent task. |
 | `repo-map` | Getting Started | One-time structural description of a codebase. |
 | `cascade-verify` | Agent Safety | Multi-strategy verification pipeline. |
 | `check-plan` | Agent Safety | Validate an LLM plan against an ID-coded contract. |
@@ -33,23 +33,23 @@ Auto-generated. Add `(v)` for value, `(s)` for signal-only, `(g)` for gate.
 | `health-score` | CI | 2-axis health: coupling density x modularity. |
 | `parity-bit` | CI | SHA-1 of module phrase set. |
 | `pr-report` | CI | PR structural report in markdown. |
-| `capillary` | Code Analysis | Files with the most inter-file vocabulary edges. |
+| `capillary` | Code Analysis | Files with the most inter-file qualeulary edges. |
 | `complexity-ratio` | Code Analysis | Apparent lines vs unique identifiers. |
 | `coupling-chain` | Code Analysis | Indirect coupling with no direct edge. |
 | `criticality` | Code Analysis | 2-hop amplification ratio: changes amplify or dampen. |
 | `hub-risk` | Code Analysis | High-centrality files with zero edits. |
 | `latent-deps` | Code Analysis | Detect hidden structural dependencies (no direct imports). |
-| `phantom` | Code Analysis | Detect framework/library from import/export vocabulary. |
+| `phantom` | Code Analysis | Detect framework/library from import/export qualeulary. |
 | `porosity` | Code Analysis | Sparse coupling estimate without computing co-occurrence. |
 | `spectral-gap` | Code Analysis | Modularity score: largest cluster / second largest. |
 | `trap` | Code Analysis | Identifier overlap between two concurrently-edited files. |
-| `anomalies` | Maintenance | Detect structural anomalies and outliers in vocabulary. |
+| `anomalies` | Maintenance | Detect structural anomalies and outliers in qualeulary. |
 | `cleanup-list` | Maintenance | Prioritized cleanup: extinct-exports x escape-velocity. |
 | `concept-flow` | Maintenance | Track phrase spread across weekly snapshots. |
 | `decay` | Maintenance | Legacy patterns; --metabolism for active decline. |
 | `deflate` | Maintenance | Cap net-new identifiers per edit. |
 | `diff-structural` | Maintenance | Structural fingerprint diff between two git refs. |
-| `entropy` | Maintenance | Dir-level vocabulary fragmentation vs 30-commit baseline. |
+| `entropy` | Maintenance | Dir-level qualeulary fragmentation vs 30-commit baseline. |
 | `escape-velocity` | Maintenance | Phrase removal difficulty: ESCAPED / BOUND / DEEP. |
 | `extinct-exports` | Maintenance | Multi-file exports never imported externally. |
 | `heisenberg` | Maintenance | Mixed refactor/feature edits that must be split. |
@@ -58,7 +58,7 @@ Auto-generated. Add `(v)` for value, `(s)` for signal-only, `(g)` for gate.
 | `safe-islands` | Maintenance | Structurally isolated blocks safe to edit. |
 | `solve` | Maintenance | Surface cipher keys: non-dictionary identifiers to learn a repo. |
 | `traffic-control` | Maintenance | Zone files by graph centrality percentile. |
-| `vocabulary-trend` | Maintenance | Entropy velocity: is vocabulary diversity accelerating or decelerating?. |
+| `qualeulary-trend` | Maintenance | Entropy velocity: is qualeulary diversity accelerating or decelerating?. |
 | `vulnerability-map` | Maintenance | Overlap of hub-risk and capillary. |
 | `coupling` | Cross-Repo | Concept coupling classification: tightly bound, loosely bound, independent. |
 | `agent-bootstrap` | Utilities | One-shot agent bootstrap: explore + modules + stability + related files. |

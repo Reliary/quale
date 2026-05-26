@@ -1,4 +1,4 @@
-"""vocab CLI — grammar-free structural codebase analyzer."""
+"""quale CLI — grammar-free structural codebase analyzer."""
 
 from __future__ import annotations
 
@@ -11,27 +11,27 @@ try:
     import typer
     from typing_extensions import Annotated
 except ImportError:
-    print("vocab needs `typer` and `typing-extensions`. Install: pip install typer typing-extensions")
+    print("quale needs `typer` and `typing-extensions`. Install: pip install typer typing-extensions")
     sys.exit(1)
 
-from vocab.scanner import (scan_codebase, search_cross_repo,
+from quale.scanner import (scan_codebase, search_cross_repo,
                            search_cross_repo_ranked)
-from vocab.bootstrap import (bootstrap_repo, explore_repo, compute_modules)
-from vocab.reports import (ci_report, inspect_repo, repo_fingerprint,
+from quale.bootstrap import (bootstrap_repo, explore_repo, compute_modules)
+from quale.reports import (ci_report, inspect_repo, repo_fingerprint,
                            compute_stability, compute_lifecycles, concept_timeline,
                            preflight_report, build_contract, validate_plan)
-from vocab.compare import (compare_repos, phrase_provenance, pr_blast_radius)
-from vocab.formats.terminal import (format_terminal, format_json, format_html, format_quick,
+from quale.compare import (compare_repos, phrase_provenance, pr_blast_radius)
+from quale.formats.terminal import (format_terminal, format_json, format_html, format_quick,
                                      format_lifecycles, format_blast_radius,
                                      format_lifecycles_json, format_blast_json,
                                      format_orphans_json, format_pr_report_markdown,
                                      format_search_json, format_search_compact,
                                      format_modules, format_modules_json)
-from vocab.index import encode_indices, decode_indices, index_sequence_hash, structural_similarity
-from vocab.vocabulary import build_vocabulary
-from vocab.segmenter import segment
-from vocab import git as vgit
-from vocab.config import load_config
+from quale.index import encode_indices, decode_indices, index_sequence_hash, structural_similarity
+from quale.vocabulary import build_vocabulary
+from quale.segmenter import segment
+from quale import git as vgit
+from quale.config import load_config
 
 
 cli = typer.Typer(
@@ -65,8 +65,8 @@ cli = typer.Typer(
 
 def _version_callback(show_version: bool) -> None:
     if show_version:
-        from vocab import __version__
-        typer.echo(f"vocab-cli {__version__}")
+        from quale import __version__
+        typer.echo(f"quale-cli {__version__}")
         raise typer.Exit()
 
 
@@ -265,7 +265,7 @@ def diff(
         for phrase in sorted(retired_concepts)[:10]:
             typer.echo(f"  {_color('-', 'red')} {phrase[:60]}")
     if why:
-        from vocab.formats.terminal import _why_diff
+        from quale.formats.terminal import _why_diff
         data = {"changed_files": [], "impacts": [], "mirror_ratio": None}
         typer.echo(_why_diff(data, ref_a, ref_b))
 
@@ -449,7 +449,7 @@ def preflight(
         typer.echo(json.dumps(data, indent=2))
         return
     if format == "llm":
-        from vocab.formats.llm import format_preflight_llm
+        from quale.formats.llm import format_preflight_llm
         typer.echo(format_preflight_llm(data))
         return
     if format == "verify":
@@ -556,7 +556,7 @@ def preflight(
     data["verbose"] = verbose
     _print_preflight(data)
     if why:
-        from vocab.formats.terminal import _why_edit_context
+        from quale.formats.terminal import _why_edit_context
         typer.echo(_why_edit_context(data))
 
 
@@ -640,7 +640,7 @@ def crystallography(
     plus structured detail about test conventions, stable core,
     generated files, and module boundaries. Cache and reuse.
     """
-    from vocab.reports import crystallography as _crystallography
+    from quale.reports import crystallography as _crystallography
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -721,7 +721,7 @@ def verify(
     Given changed files, presents up to 3 candidate verification files
     as a multiple-choice question the LLM can answer by selecting one.
     """
-    from vocab.reports import preflight_report
+    from quale.reports import preflight_report
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -778,7 +778,7 @@ def reverse_verify(
 
     Reverse bridge: when tests change, which sources should be rechecked?
     """
-    from vocab.reports import reverse_verify_report
+    from quale.reports import reverse_verify_report
 
     data = reverse_verify_report(path=path, files=files or None, diff_ref=diff)
     if "error" in data:
@@ -808,7 +808,7 @@ def verify_classify(
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
     """Classify each changed file's verifiability type and structural gaps."""
-    from vocab.reports import verify_classify_report
+    from quale.reports import verify_classify_report
     data = verify_classify_report(path=path, files=files or None, diff_ref=diff)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -831,7 +831,7 @@ def verify_bonds(
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
     """Detect when a change requires running multiple test files together."""
-    from vocab.reports import covalent_verify_bonds
+    from quale.reports import covalent_verify_bonds
     data = covalent_verify_bonds(path=path, files=files or None)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -852,7 +852,7 @@ def verify_drift(
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
     """Track verification confidence across recent commits."""
-    from vocab.reports import verification_drift
+    from quale.reports import verification_drift
     data = verification_drift(path=path, commits=commits)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -879,7 +879,7 @@ def deserts(
 
     This is structural mirror analysis, not coverage proof.
     """
-    from vocab.reports import verification_deserts
+    from quale.reports import verification_deserts
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -926,7 +926,7 @@ def entangle(
     Entangled files share no vocabulary but are frequently committed together.
     Bridges the structural gap where phrase-matching fails.
     """
-    from vocab.reports import entanglement_matrix
+    from quale.reports import entanglement_matrix
     data = entanglement_matrix(path=path, lookback_commits=lookback)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -962,7 +962,7 @@ def cascade_verify_cmd(
 
     On steady state, ~77% of calls hit Tiers 1-3 (0 tokens).
     """
-    from vocab.reports import cascade_verify
+    from quale.reports import cascade_verify
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1008,7 +1008,7 @@ def veto_cascade_cmd(
     Tier 2: Veto prompt (~200 tokens)
     Tier 3: Progressive resolution (~42 tokens)
     """
-    from vocab.reports import veto_cascade
+    from quale.reports import veto_cascade
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1051,7 +1051,7 @@ def isolate_cmd(
     Scores module clusters by task-keyword overlap. Each turn presents
     one module for YES/NO confirmation. ~100 tokens per turn.
     """
-    from vocab.reports import isolate_modules, _active_gene_pool
+    from quale.reports import isolate_modules, _active_gene_pool
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1076,7 +1076,7 @@ def isolate_cmd(
         typer.echo(f"Turn {turn} exceeds available modules ({len(mods)}). Try --turn 0 through {len(mods)-1}.", err=True)
         raise typer.Exit(1)
     module = mods[turn]
-    from vocab.formats.llm import format_isolate_confirm
+    from quale.formats.llm import format_isolate_confirm
     prompt = format_isolate_confirm(task, module, turn)
     if format == "json":
         typer.echo(json.dumps({
@@ -1128,7 +1128,7 @@ def fold_cmd(
     Example:
       vocab fold --file src/billing.ts --task 'fix proration'
     """
-    from vocab.fold import fold_file
+    from quale.fold import fold_file
     path_abs = os.path.abspath(path)
     data = fold_file(path=path_abs, file_path=file, task=task, threshold=threshold)
     if "error" in data:
@@ -1137,7 +1137,7 @@ def fold_cmd(
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    from vocab.formats.llm import format_folded_file
+    from quale.formats.llm import format_folded_file
     typer.echo(format_folded_file(data))
 
 
@@ -1157,7 +1157,7 @@ def drift_check_cmd(
       vocab drift-check --file src/billing.ts --snapshot
       vocab drift-check --file src/billing.ts
     """
-    from vocab.reports import drift_velocity_snapshot
+    from quale.reports import drift_velocity_snapshot
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1200,7 +1200,7 @@ def mycorrhiza_cmd(
     Use --tolerance to detect when an edit introduces vocabulary
     from clusters the target file has never historically touched.
     """
-    from vocab.reports import mycorrhiza_map, mycorrhiza_with_tolerance, _active_gene_pool
+    from quale.reports import mycorrhiza_map, mycorrhiza_with_tolerance, _active_gene_pool
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1243,7 +1243,7 @@ def solve_cmd(
 ):
     """Surface cipher keys: non-dictionary identifiers to learn a repo."""
 
-    from vocab.reports import solve_report
+    from quale.reports import solve_report
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1264,7 +1264,7 @@ def solve_cmd(
 def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact") -> None:
     """Cap net-new identifiers per edit."""
 
-    from vocab.reports import deflate_report
+    from quale.reports import deflate_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1303,7 +1303,7 @@ def forecast_cmd(
     Example:
       vocab forecast --files src/billing.ts
     """
-    from vocab.reports import forecast_report, _active_gene_pool
+    from quale.reports import forecast_report, _active_gene_pool
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1356,7 +1356,7 @@ def triangulate_cmd(
     Example:
       vocab triangulate --task 'fix billing proration'
     """
-    from vocab.reports import triangulate_report
+    from quale.reports import triangulate_report
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1395,7 +1395,7 @@ def epidemiology_cmd(
     Example:
       vocab epidemiology --weeks 12
     """
-    from vocab.reports import epidemiology_report
+    from quale.reports import epidemiology_report
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1423,7 +1423,7 @@ def epidemiology_cmd(
 def orient_cmd(path=".", task="", format="compact") -> None:
     """One-call orientation: solve + triangulate + isolate."""
 
-    from vocab.reports import pipeline_orient
+    from quale.reports import pipeline_orient
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1447,7 +1447,7 @@ def health_cmd(
                balance: Annotated[bool, typer.Option("--balance", help="Phototropism: check root-to-shoot vocabulary ratio")] = False,
                format="compact"):
     """0-1 health from stability, mirror, churn, concept age. """
-    from vocab.reports import structural_health_score
+    from quale.reports import structural_health_score
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1471,7 +1471,7 @@ def health_cmd(
 def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
     """Mixed refactor/feature edits that must be split."""
 
-    from vocab.reports import heisenberg_check
+    from quale.reports import heisenberg_check
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1495,7 +1495,7 @@ def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
 def traffic_control_cmd(path=".", file="", intended_import="", format="compact") -> None:
     """Zone files by graph centrality percentile."""
 
-    from vocab.reports import traffic_control_report
+    from quale.reports import traffic_control_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1520,7 +1520,7 @@ def traffic_control_cmd(path=".", file="", intended_import="", format="compact")
 def capillary_cmd(path=".", format="compact") -> None:
     """Files with the most inter-file vocabulary edges."""
 
-    from vocab.reports import capillary_report
+    from quale.reports import capillary_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1536,7 +1536,7 @@ def capillary_cmd(path=".", format="compact") -> None:
 def spectral_gap_cmd(path=".", format="compact") -> None:
     """Modularity score: largest cluster / second largest."""
 
-    from vocab.reports import spectral_gap_report
+    from quale.reports import spectral_gap_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1553,7 +1553,7 @@ def spectral_gap_cmd(path=".", format="compact") -> None:
 def phantom_cmd(path=".", format="compact") -> None:
     """Detect framework/library from import/export vocabulary."""
 
-    from vocab.reports import phantom_report
+    from quale.reports import phantom_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1572,7 +1572,7 @@ def phantom_cmd(path=".", format="compact") -> None:
 @cli.command(name="parity-bit", rich_help_panel="CI")
 def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact") -> None:
     """SHA-1 of module phrase set. [GATE: CHANGED vs UNCHANGED]"""
-    from vocab.reports import parity_bit_report
+    from quale.reports import parity_bit_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1590,7 +1590,7 @@ def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact") -> None:
 @cli.command(name="guide", rich_help_panel="Agent Safety")
 def guide_cmd(path=".", file="", format="compact") -> None:
     """One-token file locator for a file. """
-    from vocab.reports import guide_report
+    from quale.reports import guide_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1612,7 +1612,7 @@ def decay_cmd(path=".", file="", weeks=12, half_life=30,
               format="compact"):
     """Legacy patterns; --metabolism for active decline."""
 
-    from vocab.reports import decay_report
+    from quale.reports import decay_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -1647,7 +1647,7 @@ def entropy_cmd(
     Example:
       vocab entropy --weeks 12
     """
-    from vocab.reports import isothermal_entropy
+    from quale.reports import isothermal_entropy
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1683,7 +1683,7 @@ def zk_proof_cmd(
     Example:
       vocab zk-proof --file db/types.ts --code 'const q = db.query(...)'
     """
-    from vocab.reports import zk_proof_report
+    from quale.reports import zk_proof_report
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1723,7 +1723,7 @@ def lagrange_cmd(
     Example:
       vocab lagrange --file legacy.ts
     """
-    from vocab.reports import lagrange_report
+    from quale.reports import lagrange_report
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1764,7 +1764,7 @@ def phase_shift_cmd(
     Example:
       vocab phase-shift --repo-a ./pre-migration --repo-b ./post-migration
     """
-    from vocab.reports import phase_shift_report
+    from quale.reports import phase_shift_report
     if not repo_a or not repo_b:
         typer.echo("provide --repo-a and --repo-b", err=True)
         raise typer.Exit(1)
@@ -1797,7 +1797,7 @@ def cartridge(
       vocab verify-packet --files src/spool.ts --why
       vocab verify-packet --files src/spool.ts --format json
     """
-    from vocab.reports import cartridge_report
+    from quale.reports import cartridge_report
     data = cartridge_report(path=path, files=files or None, diff_ref=diff, task=task)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -1831,7 +1831,7 @@ def cartridge(
     if data.get("desert"):
         typer.echo(f"Desert: {data.get('desert_note', 'no candidates')}")
     if why:
-        from vocab.formats.terminal import _why_verify_packet
+        from quale.formats.terminal import _why_verify_packet
         typer.echo(_why_verify_packet(data))
 
 
@@ -1848,7 +1848,7 @@ def check_diff(
     and large change sets. Report-only by default — use --fail-on-defect
     to enforce a minimum severity threshold in CI.
     """
-    from vocab.reports import check_diff_report
+    from quale.reports import check_diff_report
     data = check_diff_report(path=path, diff_ref=diff_ref)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -1885,7 +1885,7 @@ def route(
     verification, escalates to contract for risky changes, and flags
     test gaps for human review.
     """
-    from vocab.reports import route_recommendation
+    from quale.reports import route_recommendation
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -2482,7 +2482,7 @@ def agent_bootstrap(
         return
 
     if format == "llm":
-        from vocab.formats.llm import format_bootstrap_llm
+        from quale.formats.llm import format_bootstrap_llm
         typer.echo(format_bootstrap_llm(data))
         return
 
@@ -2644,7 +2644,7 @@ def skeleton(
     Skip directives tell the LLM which files to ignore (generated, vendor) and
     which test conventions to expect. Meant to REDUCE prompt noise.
     """
-    from vocab.reports import crystallography as _crystallography
+    from quale.reports import crystallography as _crystallography
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -2680,7 +2680,7 @@ def delta(
 
     Requires a cached scan from `vocab init` or `vocab repo-map --save`.
     """
-    from vocab.reports import repo_delta
+    from quale.reports import repo_delta
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -2862,7 +2862,7 @@ def ci_report_cmd(
         raise typer.Exit(gate_failures[0][0])
 
     if why:
-        from vocab.formats.terminal import _why_ci_report
+        from quale.formats.terminal import _why_ci_report
         typer.echo(_why_ci_report(data, ref_a, ref_b))
 
 
@@ -2894,7 +2894,7 @@ def inspect(
         raise typer.Exit(1)
 
     if anomalies:
-        from vocab.reports import detect_anomalies
+        from quale.reports import detect_anomalies
         data["anomalies"] = detect_anomalies(path)
 
     if format == "json":
@@ -2998,7 +2998,7 @@ def inspect(
     typer.echo(c(f"{'━' * 60}", "cyan"))
 
     if why:
-        from vocab.formats.terminal import _why_inspect
+        from quale.formats.terminal import _why_inspect
         typer.echo(_why_inspect(data))
 
 
@@ -3026,51 +3026,51 @@ def help_agent(task: Annotated[str, typer.Argument(help="Engineering task descri
     commands: list[tuple[str, str, bool]] = []
 
     # Primary agent surface — proven by harness
-    commands.append(("vocab edit-context --path . --files <file> --task \"<task>\" --format tool",
+    commands.append(("quale edit-context --path . --files <file> --task \"<task>\" --format tool",
                      "Verify candidates and stay in scope for a candidate edit file.", True))
-    commands.append(("vocab contract --path . --files <file> --task \"<task>\" --format tool",
+    commands.append(("quale contract --path . --files <file> --task \"<task>\" --format tool",
                      "Bounded ID-coded scope contract (experimental).", True))
-    commands.append(("vocab check-plan --contract <contract.json> --proposal <proposal.json>",
+    commands.append(("quale check-plan --contract <contract.json> --proposal <proposal.json>",
                      "Validate LLM proposal against contract (experimental).", True))
 
     # Task-specific secondary
     if any(word in task_lower for word in ("pr", "review", "change", "refactor", "edit", "feature", "fix")):
-        commands.append(("vocab edit-context --path . --diff HEAD~1 --task \"<task>\" --format tool",
+        commands.append(("quale edit-context --path . --diff HEAD~1 --task \"<task>\" --format tool",
                          "Diff-scoped edit-context for PR review (100% verify in testing).", True))
-        commands.append(("vocab ci-report origin/main HEAD --format json",
+        commands.append(("quale ci-report origin/main HEAD --format json",
                          "Check structural impact before PR (human/CI tool).", False))
 
     # Orientation
-    commands.append(("vocab repo-map --path . --format json",
+    commands.append(("quale repo-map --path . --format json",
                      "Compact repo skeleton for initial orientation (not per-task).", False))
-    commands.append(("vocab agent-bootstrap . --task \"<task>\" --format checklist",
+    commands.append(("quale agent-bootstrap . --task \"<task>\" --format checklist",
                      "Weak-model orientation: step-by-step protocol (not for strong models).", True))
 
     # Deep investigations
     if any(word in task_lower for word in ("history", "why", "when", "provenance", "timeline")):
-        commands.append(("vocab provenance <phrase> --format json",
+        commands.append(("quale provenance <phrase> --format json",
                          "Trace when a concept appeared or disappeared.", True))
-        commands.append(("vocab stable . --format json",
+        commands.append(("quale stable . --format json",
                          "Surface files and phrases that persist across git history.", False))
     if any(word in task_lower for word in ("contract", "integration", "cross", "drift", "compare")):
-        commands.append(("vocab compare <repo-a> <repo-b> --format json",
+        commands.append(("quale compare <repo-a> <repo-b> --format json",
                          "Cross-repo vocabulary alignment and drift asymmetry.", True))
 
     # Unmeasured agent commands — harness-validated behavior unknown
     if any(word in task_lower for word in ("negotiate", "scope")):
-        commands.append(("vocab negotiate --path . --files <file> --task \"<task>\" --format json",
+        commands.append(("quale negotiate --path . --files <file> --task \"<task>\" --format json",
                          "[UNMEASURED] Multi-turn scope containment protocol.", True))
     if any(word in task_lower for word in ("verify", "test", "check")):
-        commands.append(("vocab verify --path . --files <file> --task \"<task>\"",
+        commands.append(("quale verify --path . --files <file> --task \"<task>\"",
                          "[UNMEASURED] Multiple-choice verification candidates.", True))
     if any(word in task_lower for word in ("route", "decide", "whether")):
-        commands.append(("vocab route --path . --task \"<task>\" --format json",
+        commands.append(("quale route --path . --task \"<task>\" --format json",
                          "[UNMEASURED] Routing logic that decides when to use vocab.", True))
 
     # Discoverability
-    commands.append(("vocab explore . --format json --quick",
+    commands.append(("quale explore . --format json --quick",
                      "Quick onboarding: most distinctive source files.", False))
-    commands.append(("vocab help-agent \"<task>\"",
+    commands.append(("quale help-agent \"<task>\"",
                      "This command — show recommended commands for any task.", True))
 
     typer.echo(json.dumps({
@@ -3208,7 +3208,7 @@ def pr_report(
         return
     analysis = scan_codebase(path, git_ref=ref_b, quiet=True)
     blast_results = pr_blast_radius(pr_files, analysis.file_vocabs)
-    from vocab.reports import refactoring_patterns
+    from quale.reports import refactoring_patterns
     pattern_data = refactoring_patterns(path, base_ref=ref_a, head_ref=ref_b)
     typer.echo(format_pr_report_markdown(pr_files, blast_results, [], ref_a, ref_b, pattern_data=pattern_data))
 
@@ -3247,7 +3247,7 @@ search:
             f.write(content)
         typer.echo(f"Created {target}")
 
-    from vocab.reports import crystallography, _save_cached
+    from quale.reports import crystallography, _save_cached
     path_abs = os.path.abspath(path)
     if vgit.is_repo(path_abs):
         data = crystallography(path_abs)
@@ -3255,7 +3255,7 @@ search:
             _save_cached(path_abs, data)
             typer.echo("Cached repo-map scan for delta tracking.")
         if seed:
-            from vocab.reports import seed_fragment_matrix
+            from quale.reports import seed_fragment_matrix
             typer.echo("Seeding fragment router from recent commits... ", nl=False)
             seed_data = seed_fragment_matrix(path_abs, max_commits=20)
             seeded = seed_data.get("seeded_trials", 0)
@@ -3266,14 +3266,14 @@ search:
 
 def main():
     if "--version" in sys.argv or "-V" in sys.argv:
-        from vocab import __version__
-        typer.echo(f"vocab-cli {__version__}")
+        from quale import __version__
+        typer.echo(f"quale-cli {__version__}")
         return
     if len(sys.argv) == 1 or "--help-all" in sys.argv:
         if "--help-all" in sys.argv:
             _help_all(None)
             sys.exit(0)
-        typer.echo("vocab — grammar-free structural codebase analyzer")
+        typer.echo("quale — grammar-free structural codebase analyzer")
         typer.echo("Start here:")
         typer.echo("  vocab agent-bootstrap . --task \"fix upload\" --summary")
         typer.echo("  vocab inspect .")
@@ -3319,7 +3319,7 @@ def lattice(
     Compares vocabulary changes against the repo's co-occurrence
     structure, finding vacancies, interstitials, and substitutions.
     """
-    from vocab.reports import lattice_defects
+    from quale.reports import lattice_defects
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -3391,7 +3391,7 @@ def patterns(
     rename (concept A → B), extract (lost vocabulary), inline (gained),
     and move (vocabulary migrated between files).
     """
-    from vocab.reports import refactoring_patterns
+    from quale.reports import refactoring_patterns
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -3460,7 +3460,7 @@ def stop(
     Tracks concept coverage as you read files and signals
     when further exploration has diminishing returns.
     """
-    from vocab.reports import exploration_entropy
+    from quale.reports import exploration_entropy
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -3506,7 +3506,7 @@ def stop(
     typer.echo("")
 
 
-@cli.command(name="vocabulary-trend",  rich_help_panel="Maintenance")
+@cli.command(name="qualeulary-trend",  rich_help_panel="Maintenance")
 def entropy(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks to analyze")] = 12,
@@ -3518,7 +3518,7 @@ def entropy(
     intervals. Acceleration > 0 = heating up (diversifying fast).
     Acceleration < 0 = cooling down (stabilizing).
     """
-    from vocab.reports import entropy_velocity
+    from quale.reports import entropy_velocity
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -3566,7 +3566,7 @@ def genesis(
     Imported: appears in 2-5 files — may be a shared dependency.
     Ambiguous: widespread (6+ files) — framework or utility concept.
     """
-    from vocab.reports import concept_genesis
+    from quale.reports import concept_genesis
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -3631,7 +3631,7 @@ def bond(
     Ionic: concepts that bridge exactly 2 files.
     Metallic: concepts shared across 6+ files (framework pool).
     """
-    from vocab.reports import concept_bonds
+    from quale.reports import concept_bonds
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -3698,7 +3698,7 @@ def diff_structural(
     measures diversity acceleration, and lists changed files.
     All from grammar-free structural signals.
     """
-    from vocab.reports import structural_diff
+    from quale.reports import structural_diff
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -3755,7 +3755,7 @@ def ask(
       vocab ask "Is this repo healthy?"
       vocab ask "Does this repo have tests?"
     """
-    from vocab.reports import answer_question
+    from quale.reports import answer_question
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -3815,7 +3815,7 @@ def verify_scope(
     Reports scope violations, unexpected stable anchor touches, and
     produces a structural receipt.
     """
-    from vocab.reports import verify_scope as _verify_scope
+    from quale.reports import verify_scope as _verify_scope
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -3898,7 +3898,7 @@ def calibration(
     Tracks verification hit rate and scope accuracy over time.
     Requires verify-scope to have been run at least 3 times on this repo.
     """
-    from vocab.reports import compute_calibration
+    from quale.reports import compute_calibration
 
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
@@ -3980,7 +3980,7 @@ def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
 def escape_velocity_cmd(path=".", format="compact") -> None:
     """Phrase removal difficulty: ESCAPED / BOUND / DEEP."""
 
-    from vocab.reports import escape_velocity_report
+    from quale.reports import escape_velocity_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -3995,7 +3995,7 @@ def escape_velocity_cmd(path=".", format="compact") -> None:
 def trap_cmd(path=".", file_a="", file_b="", format="compact") -> None:
     """Identifier overlap between two concurrently-edited files."""
 
-    from vocab.reports import trap_report
+    from quale.reports import trap_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4012,7 +4012,7 @@ def trap_cmd(path=".", file_a="", file_b="", format="compact") -> None:
 def thanatosis_cmd(path=".", format="compact") -> None:
     """High-centrality files with zero edits."""
 
-    from vocab.reports import thanatosis_report
+    from quale.reports import thanatosis_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4029,7 +4029,7 @@ def thanatosis_cmd(path=".", format="compact") -> None:
 def trompe_cmd(path=".", file="", format="compact") -> None:
     """Apparent lines vs unique identifiers."""
 
-    from vocab.reports import trompe_report
+    from quale.reports import trompe_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4046,7 +4046,7 @@ def trompe_cmd(path=".", file="", format="compact") -> None:
 def porosity_cmd(path=".", format="compact") -> None:
     """Sparse coupling estimate without computing co-occurrence."""
 
-    from vocab.reports import porosity_report
+    from quale.reports import porosity_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4061,7 +4061,7 @@ def porosity_cmd(path=".", format="compact") -> None:
 def thylacine_cmd(path=".", format="compact") -> None:
     """Multi-file exports never imported externally."""
 
-    from vocab.reports import thylacine_report
+    from quale.reports import thylacine_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4081,7 +4081,7 @@ def thylacine_cmd(path=".", format="compact") -> None:
 def tensegrity_cmd(path=".", format="compact") -> None:
     """Indirect coupling with no direct edge."""
 
-    from vocab.reports import tensegrity_report
+    from quale.reports import tensegrity_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4097,7 +4097,7 @@ def tensegrity_cmd(path=".", format="compact") -> None:
 def criticality_cmd(path=".", file="", format="compact") -> None:
     """2-hop amplification ratio: changes amplify or dampen."""
 
-    from vocab.reports import criticality_report
+    from quale.reports import criticality_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4113,7 +4113,7 @@ def criticality_cmd(path=".", file="", format="compact") -> None:
 @cli.command(name="guard", rich_help_panel="Agent Safety")
 def guard_cmd(path=".", file="", task="", format="compact") -> None:
     """Combined safety packet: guide + hub-risk + complexity + criticality. """
-    from vocab.reports import guard_report
+    from quale.reports import guard_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4129,7 +4129,7 @@ def guard_cmd(path=".", file="", task="", format="compact") -> None:
 @cli.command(name="check-pr", rich_help_panel="CI")
 def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact") -> None:
     """CI PR summary: parity-bit + trap + diff. [INFO: always exits 0]"""
-    from vocab.reports import check_pr_report
+    from quale.reports import check_pr_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4146,7 +4146,7 @@ def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact") -> None
 def cleanup_list_cmd(path=".", format="compact") -> None:
     """Prioritized cleanup: extinct-exports x escape-velocity."""
 
-    from vocab.reports import cleanup_list_report
+    from quale.reports import cleanup_list_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4163,7 +4163,7 @@ def cleanup_list_cmd(path=".", format="compact") -> None:
 def vulnerability_map_cmd(path=".", format="compact") -> None:
     """Overlap of hub-risk and capillary."""
 
-    from vocab.reports import vulnerability_report
+    from quale.reports import vulnerability_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
@@ -4177,7 +4177,7 @@ def vulnerability_map_cmd(path=".", format="compact") -> None:
 @cli.command(name="health-score", rich_help_panel="CI")
 def health_score_cmd(path=".", format="compact") -> None:
     """2-axis health: coupling density x modularity. """
-    from vocab.reports import repo_health as health_score
+    from quale.reports import repo_health as health_score
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True); raise typer.Exit(1)

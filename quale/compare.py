@@ -6,10 +6,10 @@ import os
 from collections import defaultdict, Counter
 from typing import TYPE_CHECKING
 
-from vocab import git as vgit
+from quale import git as vgit
 
 if TYPE_CHECKING:
-    from vocab.scanner import CodebaseAnalysis, FileVocab
+    from quale.scanner import CodebaseAnalysis, FileVocab
 
 
 # ── Contract surface helpers ──────────────────────────────────────
@@ -46,7 +46,7 @@ def _is_contract_surface(filepath: str) -> bool:
 # ── Compare repos ─────────────────────────────────────────────────
 
 def compare_repos(repo_a: str, repo_b: str, contract_only: bool = False) -> dict:
-    from vocab.scanner import scan_codebase, _snapshot_phrases, _identifier_file_map, _code_file_vocabs, _structural_information_score, _is_test_path
+    from quale.scanner import scan_codebase, _snapshot_phrases, _identifier_file_map, _code_file_vocabs, _structural_information_score, _is_test_path
 
     analysis_a = scan_codebase(repo_a, quiet=True, max_files=2500, max_seconds=30)
     analysis_b = scan_codebase(repo_b, quiet=True, max_files=2500, max_seconds=30)
@@ -150,7 +150,7 @@ def phrase_provenance(path: str, phrase: str, weeks: int = 24) -> list[dict]:
     if not week_data:
         return []
 
-    from vocab.scanner import scan_codebase, _is_lock_file, _is_generated
+    from quale.scanner import scan_codebase, _is_lock_file, _is_generated
 
     timeline = []
     for wk in week_data:
@@ -202,7 +202,7 @@ _DEAD_CODE_EXTS = frozenset({
 
 def _extract_identifiers(fv: FileVocab, min_len: int = 4) -> set[str]:
     import re
-    from vocab.scanner import _is_actionable_identifier
+    from quale.scanner import _is_actionable_identifier
     token = re.compile(rf'\b[A-Z][A-Za-z0-9_]{{{min_len - 1},40}}\b')
     identifiers: set[str] = set()
     for phrase in fv.vocabulary:

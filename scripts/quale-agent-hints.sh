@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# vocab-agent-hints.sh — read cached vocab JSON, emit agent-prompt hints
-# Usage: vocab-agent-hints.sh <repo-path>
+# quale-agent-hints.sh — read cached quale JSON, emit agent-prompt hints
+# Usage: quale-agent-hints.sh <repo-path>
 # Output: plain text hints (stdout) suitable for system prompt injection
 
 REPO="${1:-.}"
-CACHE_FILE="${REPO}/.reliary/vocab/bootstrap.json"
-TASK_FILE="${REPO}/.reliary/vocab/bootstrap_summary.txt"
+CACHE_FILE="${REPO}/.reliary/quale/bootstrap.json"
+TASK_FILE="${REPO}/.reliary/quale/bootstrap_summary.txt"
 
 if [ ! -f "$CACHE_FILE" ]; then
   exit 0

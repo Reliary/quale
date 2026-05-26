@@ -11,12 +11,12 @@ from pathlib import Path
 from collections import defaultdict, Counter
 from dataclasses import dataclass, field
 
-from vocab.segmenter import segment
-from vocab.vocabulary import build_vocabulary, Vocabulary
-from vocab.index import structural_similarity
-from vocab.analyze import FileVocab, CoOccurrenceMatrix, classify_language, compute_uniqueness
-from vocab.concepts import cluster_labels
-from vocab import git as vgit
+from quale.segmenter import segment
+from quale.vocabulary import build_vocabulary, Vocabulary
+from quale.index import structural_similarity
+from quale.analyze import FileVocab, CoOccurrenceMatrix, classify_language, compute_uniqueness
+from quale.concepts import cluster_labels
+from quale import git as vgit
 
 
 @dataclass

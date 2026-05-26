@@ -1,6 +1,6 @@
 # Philosophy
 
-vocab treats code as a **phrase-file incidence matrix** — a vocabulary lattice that
+quale treats code as a **phrase-file incidence matrix** — a qualeulary lattice that
 can be diffed, analyzed, and traced without knowing the language. This reframing
 unlocks capabilities that no existing tool provides:
 
@@ -18,7 +18,7 @@ unlocks capabilities that no existing tool provides:
 
 ## Scope
 
-vocab is intentionally parser-free. It works across languages and formats because it
+quale is intentionally parser-free. It works across languages and formats because it
 relies on phrase/file/history matrices, not language-specific ASTs. That makes it
 useful for orientation, drift, impact, and structure. It also means users and agents
 must apply judgment before treating any signal as policy.

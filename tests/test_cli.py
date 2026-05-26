@@ -17,7 +17,7 @@ class VocabCliTests(unittest.TestCase):
         env = os.environ.copy()
         env["PYTHONPATH"] = str(PROJECT_ROOT)
         result = subprocess.run(
-            [sys.executable, "-m", "vocab.cli", *args],
+            [sys.executable, "-m", "quale.cli", *args],
             cwd=cwd or PROJECT_ROOT,
             env=env,
             text=True,

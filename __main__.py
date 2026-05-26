@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vocab — grammar-free structural codebase analyzer.
+"""quale — grammar-free structural codebase analyzer.
 
 Usage:
   vocab analyze [path]           analyze codebase structure
@@ -11,7 +11,7 @@ Usage:
   vocab timeline [path]          concept history
 """
 
-from vocab.cli import main
+from quale.cli import main
 
 if __name__ == "__main__":
     main()

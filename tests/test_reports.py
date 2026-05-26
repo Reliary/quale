@@ -4,7 +4,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock
 
-from vocab.reports import (
+from quale.reports import (
     _source_stem, _test_stem,
     _risk_vector,
     _fused_priority_ranking,
@@ -18,8 +18,8 @@ from vocab.reports import (
     _lattice_confidence,
     _patterns_confidence,
 )
-from vocab.bootstrap import _task_file_role, _task_role_rank
-from vocab.scanner import FileVocab, _structural_information_score, _is_actionable_identifier
+from quale.bootstrap import _task_file_role, _task_role_rank
+from quale.scanner import FileVocab, _structural_information_score, _is_actionable_identifier
 
 
 class TestSourceStem(unittest.TestCase):

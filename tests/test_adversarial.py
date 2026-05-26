@@ -21,7 +21,7 @@ class TestAdversarialContent(unittest.TestCase):
 
     def run_vocab(self, *args: str) -> subprocess.CompletedProcess:
         result = subprocess.run(
-            [sys.executable, "-m", "vocab.cli", *args],
+            [sys.executable, "-m", "quale.cli", *args],
             cwd=str(PROJECT_ROOT),
             env=self.env,
             text=True,

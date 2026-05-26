@@ -21,7 +21,7 @@ class TestCommandCoverage(unittest.TestCase):
 
     def run_vocab(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         result = subprocess.run(
-            [sys.executable, "-m", "vocab.cli", *args],
+            [sys.executable, "-m", "quale.cli", *args],
             cwd=str(PROJECT_ROOT),
             env=self.env,
             text=True,
@@ -101,7 +101,7 @@ class TestCommandCoverage(unittest.TestCase):
         bare = Path(tmp.name) / "bare.git"
         subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True, text=True)
         result = subprocess.run(
-            [sys.executable, "-m", "vocab.cli", "inspect", str(bare), "--format", "json"],
+            [sys.executable, "-m", "quale.cli", "inspect", str(bare), "--format", "json"],
             cwd=str(PROJECT_ROOT), env=self.env, text=True, capture_output=True,
         )
         self.assertNotEqual(result.returncode, 0)
@@ -330,7 +330,7 @@ class TestStructuralDetection(unittest.TestCase):
     """Structural detection: desert, co-location, same-package prefix."""
 
     def test_has_code_phrase_code_chars(self):
-        from vocab.reports import _has_code_phrase
+        from quale.reports import _has_code_phrase
         self.assertTrue(_has_code_phrase("if err != nil {"))
         self.assertTrue(_has_code_phrase("return fiber.NewError(...)"))
         self.assertTrue(_has_code_phrase("workspaceID := middleware.GetWorkspaceID(c)"))
@@ -340,7 +340,7 @@ class TestStructuralDetection(unittest.TestCase):
         self.assertTrue(_has_code_phrase("handleRequest(params)"))
 
     def test_has_code_phrase_declarative(self):
-        from vocab.reports import _has_code_phrase
+        from quale.reports import _has_code_phrase
         self.assertFalse(_has_code_phrase("features"))
         self.assertFalse(_has_code_phrase("enabled"))
         self.assertFalse(_has_code_phrase("true"))
@@ -350,68 +350,68 @@ class TestStructuralDetection(unittest.TestCase):
         self.assertFalse(_has_code_phrase('description: "Single sign-on integration (SAML/OAuth)"'))
 
     def test_is_declarative_changed_config(self):
-        from vocab.reports import _is_declarative_changed
-        from vocab.analyze import FileVocab
+        from quale.reports import _is_declarative_changed
+        from quale.analyze import FileVocab
         fv = FileVocab(path="config/features.yaml", language="YAML",
                        vocabulary={"features": 1, "enabled": 1, "true": 2, "false": 1, "retention_days": 1},
                        total_phrases=5)
         self.assertTrue(_is_declarative_changed(["config/features.yaml"], [fv]))
 
     def test_is_declarative_changed_code(self):
-        from vocab.reports import _is_declarative_changed
-        from vocab.analyze import FileVocab
+        from quale.reports import _is_declarative_changed
+        from quale.analyze import FileVocab
         fv = FileVocab(path="src/worker.go", language="Go",
                        vocabulary={"func (s *Service) Start() {": 1, "return fiber.NewError(...)": 2, "true": 1},
                        total_phrases=3)
         self.assertFalse(_is_declarative_changed(["src/worker.go"], [fv]))
 
     def test_same_package_prefix_same(self):
-        from vocab.reports import _same_package_prefix
+        from quale.reports import _same_package_prefix
         self.assertTrue(_same_package_prefix("packages/mcp/test", "packages/mcp/src"))
 
     def test_same_package_prefix_different(self):
-        from vocab.reports import _same_package_prefix
+        from quale.reports import _same_package_prefix
         self.assertFalse(_same_package_prefix("packages/cli/test", "packages/mcp/src"))
 
     def test_same_package_prefix_too_shallow(self):
-        from vocab.reports import _same_package_prefix
+        from quale.reports import _same_package_prefix
         self.assertFalse(_same_package_prefix("src", "src"))
 
     def test_desert_on_json(self):
-        from vocab.reports import _is_declarative_changed
-        from vocab.analyze import FileVocab
+        from quale.reports import _is_declarative_changed
+        from quale.analyze import FileVocab
         fv = FileVocab(path="config/settings.json", language="JSON",
                        vocabulary={'"host"': 1, '"port"': 1},
                        total_phrases=2)
         self.assertTrue(_is_declarative_changed(["config/settings.json"], [fv]))
 
     def test_no_desert_on_py(self):
-        from vocab.reports import _is_declarative_changed
-        from vocab.analyze import FileVocab
+        from quale.reports import _is_declarative_changed
+        from quale.analyze import FileVocab
         fv = FileVocab(path="worker.py", language="Python",
                        vocabulary={"def __init__(self):": 1, "self.client = Client()": 1},
                        total_phrases=2)
         self.assertFalse(_is_declarative_changed(["worker.py"], [fv]))
 
     def test_desert_on_toml(self):
-        from vocab.reports import _is_declarative_changed
-        from vocab.analyze import FileVocab
+        from quale.reports import _is_declarative_changed
+        from quale.analyze import FileVocab
         fv = FileVocab(path="Cargo.toml", language="TOML",
                        vocabulary={"[package]": 1, "name": 1, "version": 1},
                        total_phrases=3)
         self.assertTrue(_is_declarative_changed(["Cargo.toml"], [fv]))
 
     def test_desert_on_markdown(self):
-        from vocab.reports import _is_declarative_changed
-        from vocab.analyze import FileVocab
+        from quale.reports import _is_declarative_changed
+        from quale.analyze import FileVocab
         fv = FileVocab(path="README.md", language="Markdown",
                        vocabulary={"# Project": 1, "## Usage": 1},
                        total_phrases=2)
         self.assertTrue(_is_declarative_changed(["README.md"], [fv]))
 
     def test_desert_yaml_with_space_phrases(self):
-        from vocab.reports import _is_declarative_changed
-        from vocab.analyze import FileVocab
+        from quale.reports import _is_declarative_changed
+        from quale.analyze import FileVocab
         fv = FileVocab(path="features.yaml", language="YAML",
                        vocabulary={
                            "features:": 1,
@@ -424,7 +424,7 @@ class TestStructuralDetection(unittest.TestCase):
         self.assertTrue(_is_declarative_changed(["features.yaml"], [fv]))
 
     def test_deterministic_fires_on_stem_match(self):
-        from vocab.reports import _deterministic_verify
+        from quale.reports import _deterministic_verify
         result = _deterministic_verify(
             ["internal/worker_test.go", "internal/testutil.go"],
             None, {"worker"})
@@ -433,15 +433,15 @@ class TestStructuralDetection(unittest.TestCase):
         self.assertEqual(result["file"], "internal/worker_test.go")
 
     def test_deterministic_not_on_no_stem(self):
-        from vocab.reports import _deterministic_verify
+        from quale.reports import _deterministic_verify
         result = _deterministic_verify(
             ["tests/integration/api_test.go", "internal/testutil.go"],
             None, {"worker"})
         self.assertIsNone(result)
 
     def test_co_location_c_src_to_test(self):
-        from vocab.reports import _co_located_tests
-        from vocab.analyze import FileVocab
+        from quale.reports import _co_located_tests
+        from quale.analyze import FileVocab
         mock_vocabs = [
             FileVocab(path="src/llama.cpp", language="C++", vocabulary={}, total_phrases=0),
             FileVocab(path="tests/test-llama-grammar.cpp", language="C++", vocabulary={}, total_phrases=0),
@@ -451,8 +451,8 @@ class TestStructuralDetection(unittest.TestCase):
         self.assertTrue(any("test-llama" in c["file"] for c in result))
 
     def test_co_location_ts_monorepo(self):
-        from vocab.reports import _co_located_tests
-        from vocab.analyze import FileVocab
+        from quale.reports import _co_located_tests
+        from quale.analyze import FileVocab
         mock_vocabs = [
             FileVocab(path="packages/mcp/src/index.ts", language="TypeScript", vocabulary={}, total_phrases=0),
             FileVocab(path="packages/mcp/tests/index.test.ts", language="TypeScript", vocabulary={}, total_phrases=0),
@@ -462,8 +462,8 @@ class TestStructuralDetection(unittest.TestCase):
         self.assertTrue(any("packages/mcp/tests" in c["file"] for c in result))
 
     def test_co_location_no_match(self):
-        from vocab.reports import _co_located_tests
-        from vocab.analyze import FileVocab
+        from quale.reports import _co_located_tests
+        from quale.analyze import FileVocab
         result = _co_located_tests(["src/llama.cpp"], [])
         self.assertEqual(len(result), 0)
 

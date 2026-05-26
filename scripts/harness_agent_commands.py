@@ -24,7 +24,7 @@ AGENT = Path("/home/user/src/autopsylab-agent")
 
 def run_vocab(args: list[str], timeout: int = 120) -> tuple[str, str, int]:
     """Run a vocab CLI command."""
-    cmd = [sys.executable, "-m", "vocab.cli"] + args
+    cmd = [sys.executable, "-m", "quale.cli"] + args
     proc = subprocess.run(
         cmd, capture_output=True, text=True, timeout=timeout, cwd=str(VOCAB_ROOT)
     )
@@ -79,7 +79,7 @@ def harness() -> int:
 
     o, e, rc = run_vocab([
         "edit-context", "--path", str(VOCAB_ROOT),
-        "--files", "vocab/cli.py",
+        "--files", "quale/cli.py",
         "--task", "add a new CLI command",
         "--format", "json",
     ])
@@ -96,7 +96,7 @@ def harness() -> int:
     for label, path, file in [
         ("guard (agent spool.ts)", AGENT, "packages/core/src/spool.ts"),
         ("guard (agent typed-evidence.ts)", AGENT, "packages/core/src/typed-evidence.ts"),
-        ("guard (vocab reports.py)", VOCAB_ROOT, "vocab/reports.py"),
+        ("guard (vocab reports.py)", VOCAB_ROOT, "quale/reports.py"),
     ]:
         o, e, rc = run_vocab([
             "guard", "--path", str(path), "--file", file, "--format", "json",
@@ -110,7 +110,7 @@ def harness() -> int:
     # ===== contract =====
     print("\n\033[1m=== contract ===\033[0m")
     for label, path, files in [
-        ("contract (vocab reports.py)", VOCAB_ROOT, "vocab/reports.py"),
+        ("contract (vocab reports.py)", VOCAB_ROOT, "quale/reports.py"),
         ("contract (agent typed-evidence)", AGENT, "packages/core/src/typed-evidence.ts"),
     ]:
         o, e, rc = run_vocab([
@@ -127,7 +127,7 @@ def harness() -> int:
     # Generate a valid contract first, then test check-plan against it
     o, e, rc = run_vocab([
         "contract", "--path", str(VOCAB_ROOT),
-        "--files", "vocab/reports.py",
+        "--files", "quale/reports.py",
         "--format", "json",
     ])
     if rc == 0:
@@ -136,7 +136,7 @@ def harness() -> int:
             json.dump(contract, f)
             contract_path = f.name
         # Valid proposal
-        valid_proposal = {"read": ["vocab/reports.py"], "edit": ["vocab/reports.py"]}
+        valid_proposal = {"read": ["quale/reports.py"], "edit": ["quale/reports.py"]}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(valid_proposal, f)
             valid_path = f.name
@@ -153,7 +153,7 @@ def harness() -> int:
                  "valid" in d2.get("result", "").lower() if isinstance(d2.get("result"), str) else True)
 
         # Hallucinated proposal
-        bad_proposal = {"read": ["vocab/nonexistent.py"], "edit": ["vocab/reports.py"]}
+        bad_proposal = {"read": ["quale/nonexistent.py"], "edit": ["quale/reports.py"]}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(bad_proposal, f)
             bad_path = f.name
@@ -170,8 +170,8 @@ def harness() -> int:
             test("check-plan hallucinated path exits 0", False, f"exit {rc3}")
 
         # Scope expansion proposal
-        expand_proposal = {"read": ["vocab/reports.py", "vocab/cli.py"],
-                           "edit": ["vocab/reports.py"]}
+        expand_proposal = {"read": ["quale/reports.py", "quale/cli.py"],
+                           "edit": ["quale/reports.py"]}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(expand_proposal, f)
             expand_path = f.name
@@ -217,7 +217,7 @@ def harness() -> int:
     # ===== verify =====
     print("\n\033[1m=== verify ===\033[0m")
     for label, path, files in [
-        ("verify (vocab reports.py)", VOCAB_ROOT, "vocab/reports.py"),
+        ("verify (vocab reports.py)", VOCAB_ROOT, "quale/reports.py"),
         ("verify (agent typed-evidence)", AGENT, "packages/core/src/typed-evidence.ts"),
     ]:
         o, e, rc = run_vocab([

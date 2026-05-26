@@ -6,8 +6,8 @@ import random
 import string
 import sys
 
-from vocab.segmenter import segment
-from vocab.index import _int_to_base36, _base36_to_int, encode_indices, decode_indices
+from quale.segmenter import segment
+from quale.index import _int_to_base36, _base36_to_int, encode_indices, decode_indices
 
 
 def _random_text(max_len: int = 500) -> str:
@@ -139,8 +139,8 @@ class TestVocabularyBuildStability(unittest.TestCase):
     """build_vocabulary must be deterministic."""
 
     def test_build_from_segment(self):
-        from vocab.vocabulary import build_vocabulary
-        from vocab.segmenter import segment
+        from quale.vocabulary import build_vocabulary
+        from quale.segmenter import segment
 
         text = "apple banana cherry apple banana date"
         seg = segment(text)
@@ -150,8 +150,8 @@ class TestVocabularyBuildStability(unittest.TestCase):
         self.assertEqual(v1.entries, v2.entries)
 
     def test_build_random_deterministic(self):
-        from vocab.vocabulary import build_vocabulary
-        from vocab.segmenter import segment
+        from quale.vocabulary import build_vocabulary
+        from quale.segmenter import segment
 
         for _ in range(30):
             text = _random_text(300)
@@ -162,8 +162,8 @@ class TestVocabularyBuildStability(unittest.TestCase):
             self.assertEqual(v1.entries, v2.entries)
 
     def test_empty_input(self):
-        from vocab.vocabulary import build_vocabulary
-        from vocab.segmenter import segment
+        from quale.vocabulary import build_vocabulary
+        from quale.segmenter import segment
 
         seg = segment("")
         v = build_vocabulary(seg.phrases, seg.strategy, seg.delimiter)

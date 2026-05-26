@@ -7,10 +7,10 @@ import re
 from collections import Counter
 from typing import TYPE_CHECKING
 
-from vocab import git as vgit
+from quale import git as vgit
 
 if TYPE_CHECKING:
-    from vocab.scanner import CodebaseAnalysis, FileVocab
+    from quale.scanner import CodebaseAnalysis, FileVocab
 
 
 _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
@@ -20,13 +20,13 @@ _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
 
 def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | None = None) -> dict:
     if analysis is None:
-        from vocab.scanner import scan_codebase
+        from quale.scanner import scan_codebase
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     if not analysis.file_vocabs:
         return {"files": [], "themes": []}
 
-    from vocab.scanner import _DEAD_CODE_EXTS, _is_lock_file, _is_generated
-    from vocab.bootstrap import _task_file_role
+    from quale.scanner import _DEAD_CODE_EXTS, _is_lock_file, _is_generated
+    from quale.bootstrap import _task_file_role
 
     identifier_file_count: Counter[str] = Counter()
     file_identifiers: list[tuple[str, str, set[str]]] = []
@@ -88,7 +88,7 @@ def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | N
 
 def _binding_concepts_from_analysis(analysis, limit=10):
     """Get binding concepts from a shared scan analysis."""
-    from vocab.scanner import _binding_concepts
+    from quale.scanner import _binding_concepts
     return _binding_concepts(analysis, limit=limit)
 
 
@@ -196,10 +196,10 @@ def _compute_themes(file_identifiers: list[tuple[str, str, set[str]]]) -> list[d
 
 def compute_modules(path: str, analysis: CodebaseAnalysis | None = None) -> dict:
     if analysis is None:
-        from vocab.scanner import scan_codebase
+        from quale.scanner import scan_codebase
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
 
-    from vocab.scanner import _DEAD_CODE_EXTS, _is_lock_file, _is_generated
+    from quale.scanner import _DEAD_CODE_EXTS, _is_lock_file, _is_generated
 
     token = re.compile(r'\b[A-Z][A-Za-z0-9_]{4,40}\b')
 
@@ -333,7 +333,7 @@ def compute_modules(path: str, analysis: CodebaseAnalysis | None = None) -> dict
 def _task_file_role(path: str) -> str:
     parts = [p.lower() for p in path.split("/")]
     if any(x in parts for x in ("test", "tests", "testdata")):
-        from vocab.scanner import _is_test_path
+        from quale.scanner import _is_test_path
         if _is_test_path(path):
             return "test"
     if "examples" in parts or "example" in parts:
@@ -384,7 +384,7 @@ def _compute_agent_notes(path: str, explore_data: dict, modules_data: dict,
 
 
 def bootstrap_repo(path: str, task: str | None = None) -> dict:
-    from vocab.scanner import scan_codebase, _is_generated, _code_file_vocabs
+    from quale.scanner import scan_codebase, _is_generated, _code_file_vocabs
 
     analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     explore_data = explore_repo(path, themes=True, analysis=analysis)
@@ -398,7 +398,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
     if file_count > 2000:
         pass
     else:
-        from vocab.reports import compute_stability
+        from quale.reports import compute_stability
         stable_data = compute_stability(path, weeks=12)
     stability_data = stable_data
 
@@ -479,7 +479,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
     low_relevance = []
     if keywords and analysis:
         lowered = [k.lower() for k in keywords if len(k) >= 4]
-        from vocab.scanner import _code_file_vocabs, _is_generated, _is_lock_file
+        from quale.scanner import _code_file_vocabs, _is_generated, _is_lock_file
         related_paths = {r["file"] for r in related}
         for fv in _code_file_vocabs(analysis):
             if fv.path in related_paths:
@@ -530,7 +530,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
 
 
 def _rank_related_files(path: str, keywords: list[str], analysis: CodebaseAnalysis | None = None) -> list[dict]:
-    from vocab.scanner import scan_codebase, _code_file_vocabs, _is_generated
+    from quale.scanner import scan_codebase, _code_file_vocabs, _is_generated
 
     if analysis is None:
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)

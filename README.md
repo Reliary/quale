@@ -1,6 +1,6 @@
-# vocab — structural grounding for coding agents
+# quale — structural grounding for coding agents
 
-vocab reads code as text — no ASTs, no parsers, no per-language config — and answers
+quale reads code as text — no ASTs, no parsers, no per-language config — and answers
 structural questions every agent and developer needs before changing anything.
 
 **It's useless on day zero.** No files, no structure to measure. After ~1 commit
@@ -10,14 +10,14 @@ structural questions every agent and developer needs before changing anything.
 
 Every model we tested — Qwen 235B, Gemma 31B, Nemotron 30B, Mistral 24B, Claude Opus 4,
 Gemma 4B (local CPU), deepseek-v4-flash — guesses the wrong test file on a plain prompt.
-With vocab, every single one picks the right file on the first try. That held across
+With quale, every single one picks the right file on the first try. That held across
 900+ harness trials, 12 repos, and 7 model families.
 
 This isn't a model quality problem. It's a structural blind spot — no model knows where
 you put your tests because that information is in your directory layout, not in training
 data. Vocab fills that gap.
 
-## What vocab isn't
+## What quale isn't
 
 - **Not a linter.** It doesn't check for bugs, style, or correctness.
 - **Not a coverage tool.** Test-file candidates are structural hints, not proof of coverage.
@@ -28,9 +28,9 @@ data. Vocab fills that gap.
 ## Quickstart
 
 ```bash
-vocab edit-context --files src/spool.ts --task "change upload" --format tool
-vocab verify-packet --files src/spool.ts --task "change upload" --format tool
-vocab guard --task "change upload"
+quale edit-context --files src/spool.ts --task "change upload" --format tool
+quale verify-packet --files src/spool.ts --task "change upload" --format tool
+quale guard --task "change upload"
 ```
 
 ## How it works
@@ -56,33 +56,33 @@ and what to leave alone. Measured effect (1,100 trials, 12 repos):
 | `edit-context --format tool` | 75% | 0.0 | 1,658 |
 | `verify_scope` (verification only) | 83% | 0.0 | 1,233 |
 
-Wrap in AGENTS.md or instruction files so any tool-calling model calls vocab:
+Wrap in AGENTS.md or instruction files so any tool-calling model calls quale:
 
 ```markdown
 Before editing any file, run:
-python3 -m vocab edit-context --files <FILE> --task "<TASK>" --format tool
+python3 -m quale edit-context --files <FILE> --task "<TASK>" --format tool
 ```
 
 ### Human: preflight and review
 
 ```bash
-vocab edit-context --files src/spool.ts --task "..."
-vocab edit-context --diff HEAD~1
-vocab ci-report origin/main HEAD --summary
+quale edit-context --files src/spool.ts --task "..."
+quale edit-context --diff HEAD~1
+quale ci-report origin/main HEAD --summary
 ```
 
 ### CI: structural drift gates
 
 ```bash
-vocab ci-report origin/main HEAD --fail-on-mirror-gap 0.70
-vocab ci-report origin/main HEAD --fail-on-blast-tier high
+quale ci-report origin/main HEAD --fail-on-mirror-gap 0.70
+quale ci-report origin/main HEAD --fail-on-blast-tier high
 ```
 
 ## Cross-model proof
 
 6 models on 2 private repos, the same structural blind spot in every one:
 
-| Model | Baseline | With vocab |
+| Model | Baseline | With quale |
 |-------|----------|------------|
 | Qwen 235B | guesses wrong path ✗ | correct ✓ |
 | Gemma 4 31B | wrong directory ✗ | correct ✓ |
@@ -91,13 +91,13 @@ vocab ci-report origin/main HEAD --fail-on-blast-tier high
 | Claude Opus 4 | `src/spool.test.ts` ✗ | correct ✓ |
 | Gemma 4B (local CPU) | blank JSON ✗ | correct ✓ |
 
-## The gap vocab leaves open
+## The gap quale leaves open
 
 - **No file content analysis.** Vocab measures phrase-level structure, not logic.
 - **No semantic understanding.** It doesn't know what code does.
 - **No new-repo support.** A repo with one file has nothing to measure.
 - **Verification accuracy ceiling ~80%.** When the candidate set doesn't contain the
-  right test file, vocab documents the gap honestly rather than hallucinating.
+  right test file, quale documents the gap honestly rather than hallucinating.
 
 This is by design. Vocab answers one question no other tool answers: "what's the
 structure of this codebase, and what should I touch first?"

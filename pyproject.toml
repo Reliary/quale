@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
-name = "vocab-cli"
+name = "quale"
 version = "0.7.0-dev"
 description = "Structural codebase analysis — no parsers, no config, any language"
 readme = "README.md"
@@ -15,10 +15,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/reliary/vocab"
+Homepage = "https://github.com/reliary/quale"
 
 [project.scripts]
-vocab = "vocab.cli:main"
+quale = "quale.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["vocab*"]
+include = ["quale*"]

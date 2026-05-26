@@ -37,7 +37,7 @@ class TestPerformance(unittest.TestCase):
     def test_scan_short_repo(self):
         tmp = self._make_repo(100)
         repo = Path(tmp.name)
-        from vocab.scanner import scan_codebase
+        from quale.scanner import scan_codebase
         start = time.time()
         analysis = scan_codebase(str(repo), quiet=True, max_files=500)
         elapsed = time.time() - start
@@ -47,7 +47,7 @@ class TestPerformance(unittest.TestCase):
     def test_scan_capped_on_giant(self):
         tmp = self._make_repo(300, body="export const N{idx} = true;\n")
         repo = Path(tmp.name)
-        from vocab.scanner import scan_codebase
+        from quale.scanner import scan_codebase
         start = time.time()
         analysis = scan_codebase(str(repo), quiet=True, max_files=100)
         elapsed = time.time() - start
@@ -57,7 +57,7 @@ class TestPerformance(unittest.TestCase):
     def test_bootstrap_returns_results(self):
         tmp = self._make_repo(100)
         repo = Path(tmp.name)
-        from vocab.bootstrap import bootstrap_repo
+        from quale.bootstrap import bootstrap_repo
         start = time.time()
         result = bootstrap_repo(str(repo))
         elapsed = time.time() - start
@@ -68,7 +68,7 @@ class TestPerformance(unittest.TestCase):
     def test_stability_empty_on_giant(self):
         tmp = self._make_repo(2500, body="export const N{idx} = true;\n")
         repo = Path(tmp.name)
-        from vocab.reports import compute_stability
+        from quale.reports import compute_stability
         start = time.time()
         stability = compute_stability(str(repo), weeks=4)
         elapsed = time.time() - start

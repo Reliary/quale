@@ -11,7 +11,7 @@ import os
 import re
 from typing import Any
 
-from vocab.segmenter import segment
+from quale.segmenter import segment
 
 _STRUCTURAL_PATTERNS = re.compile(
     r'^\s*[}\]\)]?\s*$|'          # bare closing brackets
