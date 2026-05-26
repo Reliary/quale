@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import os
-import yaml
+
+
+DEFAULT_CONFIG: dict = {
+    "agent": {"task": "", "max_files": 2500, "max_seconds": 30},
+}
 
 
 def load_config(path: str) -> dict:
-    """Load .quale.yml from path if it exists, else return defaults."""
+    """Load .quale.yml from repo root if it exists, else return defaults."""
     config_path = os.path.join(os.path.abspath(path), ".quale.yml")
     if not os.path.isfile(config_path):
         config_path = os.path.join(os.path.abspath(path), ".quale.yaml")

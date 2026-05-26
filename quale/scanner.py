@@ -7,14 +7,13 @@ import os
 import sys
 import re
 import time
-from pathlib import Path
 from collections import defaultdict, Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from quale.segmenter import segment
-from quale.vocabulary import build_vocabulary, Vocabulary
+from quale.vocabulary import build_vocabulary
 from quale.index import structural_similarity
-from quale.analyze import FileVocab, CoOccurrenceMatrix, classify_language, compute_uniqueness
+from quale.analyze import FileVocab, CoOccurrenceMatrix, classify_language
 from quale.concepts import cluster_labels
 from quale import git as vgit
 
@@ -262,7 +261,7 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
     clone_groups = _find_structural_clones(all_file_vocabs, max_files=min(100, len(all_file_vocabs))) if clones else []
 
     if not quiet:
-        print(f"  Computing landmarks...", file=sys.stderr)
+        print("  Computing landmarks...", file=sys.stderr)
     landmarks = _compute_landmarks(all_file_vocabs) if deep else []
 
     dead_exports = _find_dead_exports(all_file_vocabs)
@@ -593,7 +592,7 @@ def _compute_landmarks(file_vocabs: list[FileVocab]) -> list[dict]:
         for p in phrases:
             phrase_file_count[p] += 1
 
-    total_files = len(file_vocabs) or 1
+    len(file_vocabs) or 1
     landmarks = []
     for fv, (path, phrases) in zip(file_vocabs, file_phrases):
         if not phrases:

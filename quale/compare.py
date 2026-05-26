@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-from collections import defaultdict, Counter
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from quale import git as vgit
 
 if TYPE_CHECKING:
-    from quale.scanner import CodebaseAnalysis, FileVocab
+    from quale.scanner import FileVocab
 
 
 # ── Contract surface helpers ──────────────────────────────────────

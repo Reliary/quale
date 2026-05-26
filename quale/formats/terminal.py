@@ -281,7 +281,7 @@ def format_blast_radius(pr_files: list[str], results: dict, ref_a: str, ref_b: s
     h = lambda t: _color(t, "header")
     sh = lambda t: _color(t, "subheader")
     gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
+    lambda t: _color(t, "red")
     y = lambda t: _color(t, "yellow")
     gy = lambda t: _color(t, "gray")
 
@@ -364,9 +364,9 @@ def format_modules(modules_data: dict) -> str:
     """Terminal output for TDA module detection."""
     lines = []
     h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
+    lambda t: _color(t, "subheader")
     gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
+    lambda t: _color(t, "red")
     y = lambda t: _color(t, "yellow")
     gy = lambda t: _color(t, "gray")
 
@@ -567,7 +567,7 @@ def _why_inspect(data: dict) -> str:
     h = lambda t: _color(t, "header")
     sh = lambda t: _color(t, "subheader")
     gr = lambda t: _color(t, "green")
-    r = lambda t: _color(t, "red")
+    lambda t: _color(t, "red")
     y = lambda t: _color(t, "yellow")
     gy = lambda t: _color(t, "gray")
 
@@ -610,7 +610,7 @@ def _why_inspect(data: dict) -> str:
 
 def _why_ci_report(data: dict, ref_a: str, ref_b: str) -> str:
     h = lambda t: _color(t, "header")
-    sh = lambda t: _color(t, "subheader")
+    lambda t: _color(t, "subheader")
     gr = lambda t: _color(t, "green")
     r = lambda t: _color(t, "red")
     y = lambda t: _color(t, "yellow")

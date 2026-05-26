@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from quale import git as vgit
 
 if TYPE_CHECKING:
-    from quale.scanner import CodebaseAnalysis, FileVocab
+    from quale.scanner import CodebaseAnalysis
 
 
 _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
@@ -239,7 +239,6 @@ def compute_modules(path: str, analysis: CodebaseAnalysis | None = None) -> dict
         for ident in file_identifiers[f] & rare_ids:
             rare_file_sets.setdefault(ident, set()).add(idx)
 
-    from collections import defaultdict
     shared_count: dict[tuple[int, int], int] = Counter()
     for ident, idxs in rare_file_sets.items():
         idx_list = list(idxs)

@@ -6,7 +6,6 @@ top-N phrases by frequency. No pattern-based classification.
 
 from __future__ import annotations
 
-import re
 from collections import Counter
 from dataclasses import dataclass, field
 

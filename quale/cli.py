@@ -14,8 +14,7 @@ except ImportError:
     print("quale needs `typer` and `typing-extensions`. Install: pip install typer typing-extensions")
     sys.exit(1)
 
-from quale.scanner import (scan_codebase, search_cross_repo,
-                           search_cross_repo_ranked)
+from quale.scanner import (scan_codebase, search_cross_repo_ranked)
 from quale.bootstrap import (bootstrap_repo, explore_repo, compute_modules)
 from quale.reports import (ci_report, inspect_repo, repo_fingerprint,
                            compute_stability, compute_lifecycles, concept_timeline,
@@ -25,13 +24,11 @@ from quale.formats.terminal import (format_terminal, format_json, format_html, f
                                      format_lifecycles, format_blast_radius,
                                      format_lifecycles_json, format_blast_json,
                                      format_orphans_json, format_pr_report_markdown,
-                                     format_search_json, format_search_compact,
                                      format_modules, format_modules_json)
-from quale.index import encode_indices, decode_indices, index_sequence_hash, structural_similarity
+from quale.index import index_sequence_hash
 from quale.vocabulary import build_vocabulary
 from quale.segmenter import segment
 from quale import git as vgit
-from quale.config import load_config
 
 
 cli = typer.Typer(
@@ -305,7 +302,7 @@ def search(
 
         if related:
             typer.echo(f"    {_color('(co-occurs with:)', 'gray')}")
-            repo_path = next((p for p in paths if os.path.basename(p) == r["repo"] or p == r["repo"]), ".")
+            repo_path = next((p for p in [path] if os.path.basename(p) == r["repo"] or p == r["repo"]), ".")
             try:
                 analysis = scan_codebase(repo_path, quiet=True)
                 for f in r["files"][:1]:
@@ -1246,12 +1243,15 @@ def solve_cmd(
     from quale.reports import solve_report
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = solve_report(path=path_abs, top_n=top_n, focus=focus)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     if focus:
         typer.echo(f'Lens: {focus} — {len(data.get("bimoth_index",[]))} orbiting keys, {len(data.get("orbiting_files",[]))} files')
     else:
@@ -1267,14 +1267,17 @@ def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact") -
     from quale.reports import deflate_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     if not file or not diff:
         typer.echo("provide --file and --diff", err=True); raise typer.Exit(1)
     data = deflate_report(path=p, file_path=file, proposed_diff=diff, budget=int(budget))
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     used = data.get("net_new_count", 0)
     bud = data.get("budget", 5)
     if data.get("over_budget"):
@@ -1426,14 +1429,18 @@ def orient_cmd(path=".", task="", format="compact") -> None:
     from quale.reports import pipeline_orient
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     if not task:
-        typer.echo("provide --task", err=True); raise typer.Exit(1)
+        typer.echo("provide --task", err=True)
+        raise typer.Exit(1)
     data = pipeline_orient(path=p, task=task)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     typer.echo(f"Cipher keys: {', '.join(data.get('cipher_keys', [])[:5])}")
     typer.echo(f"Anchor: {', '.join(data.get('anchor', []))}")
     for m in data.get("recommended_modules", [])[:2]:
@@ -1450,12 +1457,15 @@ def health_cmd(
     from quale.reports import structural_health_score
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = structural_health_score(path=p, balance=balance)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     h = data.get("health", "?")
     c = "green" if h == "good" else ("yellow" if h == "moderate" else "red")
     typer.echo(f"Health: {_color(h.upper(), c)} (debt: {data.get('debt_acceleration',0):.3f})")
@@ -1474,21 +1484,24 @@ def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
     from quale.reports import heisenberg_check
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     if not file or not diff:
         typer.echo("provide --file and --diff", err=True); raise typer.Exit(1)
     data = heisenberg_check(path=p, file_path=file, proposed_diff=diff)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     if data.get("uncertainty_violated"):
         typer.echo(f'  {_color("HEISENBERG VIOLATION", "red")}')
         typer.echo(f'  New signal: {", ".join(data.get("new_signal_tokens", [])[:3])}')
         typer.echo(f'  Deleted anchors: {", ".join(data.get("deleted_anchors", [])[:3])}')
         typer.echo(f'  {data.get("mandate","")}')
     else:
-        typer.echo(f'  Heisenberg principle respected.')
+        typer.echo('  Heisenberg principle respected.')
 
 
 @cli.command(name="traffic-control", rich_help_panel="Maintenance")
@@ -1498,14 +1511,18 @@ def traffic_control_cmd(path=".", file="", intended_import="", format="compact")
     from quale.reports import traffic_control_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     if not file or not intended_import:
-        typer.echo("provide --file and --intended-import", err=True); raise typer.Exit(1)
+        typer.echo("provide --file and --intended-import", err=True)
+        raise typer.Exit(1)
     data = traffic_control_report(path=p, file_path=file, intended_import=intended_import)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     src = data.get("source_zone", "?")
     dst = data.get("import_zone", "?")
     if data.get("zoning_violation"):
@@ -1523,12 +1540,15 @@ def capillary_cmd(path=".", format="compact") -> None:
     from quale.reports import capillary_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = capillary_report(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     for c in data.get("capillaries", [])[:3]:
         typer.echo(f'  {c["file"]} ({c["edges"]} edges)')
 
@@ -1539,12 +1559,15 @@ def spectral_gap_cmd(path=".", format="compact") -> None:
     from quale.reports import spectral_gap_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = spectral_gap_report(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     g = data.get("spectral_gap", 0)
     m = data.get("modularity", "?")
     typer.echo(f'Gap: {g} ({m})')
@@ -1556,12 +1579,15 @@ def phantom_cmd(path=".", format="compact") -> None:
     from quale.reports import phantom_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = phantom_report(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     d = data.get("frameworks_detected", {})
     if d:
         typer.echo(f'  {" ".join(f"{k}({v})" for k,v in sorted(d.items(), key=lambda x:-x[1])[:5])}')
@@ -1575,14 +1601,18 @@ def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact") -> None:
     from quale.reports import parity_bit_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     if not ref_a or not ref_b:
-        typer.echo("provide --ref-a and --ref-b", err=True); raise typer.Exit(1)
+        typer.echo("provide --ref-a and --ref-b", err=True)
+        raise typer.Exit(1)
     data = parity_bit_report(path=p, ref_a=ref_a, ref_b=ref_b)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     u = data.get("mirror_unchanged", False)
     typer.echo(f'Mirror {"UNCHANGED" if u else "CHANGED"}')
 
@@ -1593,14 +1623,18 @@ def guide_cmd(path=".", file="", format="compact") -> None:
     from quale.reports import guide_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     if not file:
-        typer.echo("provide --file", err=True); raise typer.Exit(1)
+        typer.echo("provide --file", err=True)
+        raise typer.Exit(1)
     data = guide_report(path=p, file_path=file)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     g = data.get("guide", "")
     c = data.get("confidence", "")
     typer.echo(f"{g} [{c}]")
@@ -1615,14 +1649,18 @@ def decay_cmd(path=".", file="", weeks=12, half_life=30,
     from quale.reports import decay_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     if not file:
-        typer.echo("provide --file", err=True); raise typer.Exit(1)
+        typer.echo("provide --file", err=True)
+        raise typer.Exit(1)
     data = decay_report(path=p, file_path=file, lookback_weeks=weeks, half_life_days=half_life, active_metabolism=metabolism)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     dp = data.get("decaying_patterns", [])
     if dp:
         typer.echo(f'{_color("TOXICITY CLEARANCE REQUIRED", "red")}')
@@ -2184,7 +2222,7 @@ def _print_agent_checklist(data: dict, task: str | None):
                 ids = c(f" → {', '.join(item['distinctive_ids'][:3])}", "gray")
                 break
         typer.echo(f"    [{step}] READ   {c(first_task_read, 'green')}{ids}")
-        typer.echo(c(f"           Understand this file before making changes.", "gray"))
+        typer.echo(c("           Understand this file before making changes.", "gray"))
         seen_paths.add(first_task_read)
 
     # Phase 2: CONTEXT (architecture reads that differ from task read)
@@ -2197,7 +2235,7 @@ def _print_agent_checklist(data: dict, task: str | None):
         seen_paths.add(entry["file"])
         ids = c(f" → {', '.join(entry['distinctive_ids'][:3])}", "gray") if entry.get("distinctive_ids") else ""
         typer.echo(f"    [{step}] CONTEXT {c(entry['file'], 'cyan')}{ids}")
-        typer.echo(c(f"           Architecture context for the task.", "gray"))
+        typer.echo(c("           Architecture context for the task.", "gray"))
 
     # Phase 3: PREREQUISITE (binding concepts)
     bc_shown = 0
@@ -2230,7 +2268,7 @@ def _print_agent_checklist(data: dict, task: str | None):
         step += 1
         seen_paths.add(first_test)
         typer.echo(f"    [{step}] VERIFY {c(first_test, 'magenta')}")
-        typer.echo(c(f"           All tests must pass after edit.", "gray"))
+        typer.echo(c("           All tests must pass after edit.", "gray"))
 
     typer.echo("")
 
@@ -2424,7 +2462,7 @@ def _print_preflight(data: dict) -> None:
     cap = data.get("capability_boundary", "")
     if cap:
         typer.echo(c(f"  {cap}", "gray"))
-    typer.echo(c("  Mode: report-only; do not treat as semantic truth or coverage proof.", "gray"))
+    typer.echo(c("  Mode: report-only\n    do not treat as semantic truth or coverage proof.", "gray"))
 
 
 def _print_preflight_checklist(data: dict) -> None:
@@ -2544,7 +2582,8 @@ def agent_bootstrap(
         top = bc[0]
         typer.echo(f"    Binds: {c(top['concept'], 'yellow')} ({top['file_count']} files){c(' — read first to understand the dependency chain', 'gray')}")
         if len(bc) > 1:
-            typer.echo(f"           {c(bc[1]['concept'], 'yellow')} ({bc[1]['file_count']} files){c(f' — {bc[1]["files"][0]}', 'gray')}")
+            _f0 = bc[1]["files"][0]
+            typer.echo(f"           {c(bc[1]['concept'], 'yellow')} ({bc[1]['file_count']} files){c(' — ' + _f0, 'gray')}")
     typer.echo("")
 
     # Anti-guidance: files to NOT touch
@@ -2601,7 +2640,8 @@ def agent_bootstrap(
         typer.echo(c("  BINDING CONCEPTS:", "subheader"))
         for b in bc[:6]:
             files_str = ', '.join(b["files"][:3])
-            typer.echo(f"    {c(b['concept'], 'yellow'):<30} {c(f'{b["file_count"]:>4} files', 'cyan')}  {c(files_str, 'gray')}")
+            _nfiles = f"{b['file_count']:>4} files"
+            typer.echo(f"    {c(b['concept'], 'yellow'):<30} {c(_nfiles, 'cyan')}  {c(files_str, 'gray')}")
         typer.echo("")
 
     task_plan = data.get("task_plan", {})
@@ -2700,7 +2740,9 @@ def delta(
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c("  VOCAB DELTA", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(f"  Files: {c(str(data.get('old_files', 0)), 'gray')} → {c(str(data.get('new_files', 0)), 'cyan')} ({c(f'{data.get('file_delta', 0):+d}', 'green')})")
+    _fd = data.get('file_delta', 0)
+    _fd_str = f"{_fd:+d}" if _fd >= 0 else f"{_fd:+d}"
+    typer.echo(f"  Files: {c(str(data.get('old_files', 0)), 'gray')} → {c(str(data.get('new_files', 0)), 'cyan')} ({c(_fd_str, 'green')})")
     gen_delta = data.get('generated_delta', 0)
     if gen_delta:
         typer.echo(f"  Generated: {c(f'{gen_delta:+.1f}%', 'yellow')}")
@@ -2844,7 +2886,9 @@ def ci_report_cmd(
         typer.echo("")
 
     typer.echo(c("  GATE METRICS:", "subheader"))
-    typer.echo(f"    Mirror gap: {c(f'{data.get('mirror_gap_ratio', 0.0):.0%}', 'cyan')}")
+    _mg = data.get('mirror_gap_ratio', 0.0)
+    _mg_str = f"{_mg:.0%}"
+    typer.echo(f"    Mirror gap: {c(_mg_str, 'cyan')}")
     typer.echo(f"    Max blast tier: {c(data.get('max_blast_tier', 'none'), 'yellow')}")
     typer.echo(f"    Stable anchors touched: {c(str(data.get('stable_touched_count', 0)), 'cyan')}")
     for check in gate_checks:
@@ -2970,7 +3014,8 @@ def inspect(
         typer.echo(c("  DEBT CANDIDATES (low uniqueness + churn potential):", "subheader"))
         for d in debt[:8]:
             bar = _bar(d["debt"] * 100, 10)
-            typer.echo(f"    {bar} {c(f'{d['debt']:.2f}', 'red')}  {c(d['language'], 'gray'):<8} {d['file']}")
+            _dbt = f"{d['debt']:.2f}"
+            typer.echo(f"    {bar} {c(_dbt, 'red')}  {c(d['language'], 'gray'):<8} {d['file']}")
         typer.echo("")
 
     health = data.get("health_score")
@@ -3112,7 +3157,7 @@ def compare(
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(f"  {c('VOCABULARY ALIGNMENT', 'header')}: {result['repo_a']} <-> {result['repo_b']}")
     if result.get("contract_only"):
-        typer.echo(c(f"  (contract surface only — api/, client/, types)", "gray"))
+        typer.echo(c("  (contract surface only — api/, client/, types)", "gray"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(f"  {result['repo_a']}: {result['a_total_phrases']} concepts")
     typer.echo(f"  {result['repo_b']}: {result['b_total_phrases']} concepts")
@@ -3261,10 +3306,10 @@ search:
             seeded = seed_data.get("seeded_trials", 0)
             typer.echo(_color(f"done ({seeded} historical trials seeded).", "green"))
     else:
-        typer.echo("Not a git repository; skipping cache.")
+        typer.echo("Not a git repository\n        skipping cache.")
 
 
-def main():
+def _entry_main():
     if "--version" in sys.argv or "-V" in sys.argv:
         from quale import __version__
         typer.echo(f"quale-cli {__version__}")
@@ -3885,7 +3930,7 @@ def verify_scope(
     checksum = data.get("repo_checksum", "")
     if checksum and format != "json":
         typer.echo(c(f"  Receipt checksum: {checksum[:16]}...", "gray"))
-    typer.echo(c("  Mode: report-only receipt; identifies scope changes, not correctness.", "gray"))
+    typer.echo(c("  Mode: report-only receipt\n    identifies scope changes, not correctness.", "gray"))
 
 
 @cli.command(rich_help_panel="Utilities")
@@ -3983,12 +4028,15 @@ def escape_velocity_cmd(path=".", format="compact") -> None:
     from quale.reports import escape_velocity_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = escape_velocity_report(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     for t in data.get("tagged", [])[:5]:
         typer.echo(f'  {t["phrase"]}: {t["label"]}')
 @cli.command(name="trap", rich_help_panel="Code Analysis")
@@ -3998,14 +4046,18 @@ def trap_cmd(path=".", file_a="", file_b="", format="compact") -> None:
     from quale.reports import trap_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     if not file_a or not file_b:
-        typer.echo("provide --file-a and --file-b", err=True); raise typer.Exit(1)
+        typer.echo("provide --file-a and --file-b", err=True)
+        raise typer.Exit(1)
     data = trap_report(path=p, file_a=file_a, file_b=file_b)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     typer.echo(f'Overlap: {data["overlap"]:.1%} — {data["label"]}')
 
 @cli.command(name="hub-risk", rich_help_panel="Code Analysis")
@@ -4015,12 +4067,15 @@ def thanatosis_cmd(path=".", format="compact") -> None:
     from quale.reports import thanatosis_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = thanatosis_report(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     for f in data.get("files", [])[:3]:
         typer.echo(f'  {f["file"]}: cent={f["centrality"]} edits={f["edits"]} risk={f["risk_ratio"]}')
     typer.echo('  \033[90mNext: quale guard --file <file> | quale edit-context --files <file>\033[0m')
@@ -4032,14 +4087,18 @@ def trompe_cmd(path=".", file="", format="compact") -> None:
     from quale.reports import trompe_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     if not file:
-        typer.echo("provide --file", err=True); raise typer.Exit(1)
+        typer.echo("provide --file", err=True)
+        raise typer.Exit(1)
     data = trompe_report(path=p, file_path=file)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     typer.echo(f'Trompe: {data.get("trompe_ratio",0)} — {data.get("label","")}')
 
 @cli.command(name="porosity", rich_help_panel="Code Analysis")
@@ -4049,12 +4108,15 @@ def porosity_cmd(path=".", format="compact") -> None:
     from quale.reports import porosity_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = porosity_report(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     typer.echo(f'Porosity: {data.get("porosity",0):.6f}')
 
 @cli.command(name="extinct-exports", rich_help_panel="Maintenance")
@@ -4064,12 +4126,15 @@ def thylacine_cmd(path=".", format="compact") -> None:
     from quale.reports import thylacine_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = thylacine_report(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     thy = data.get("thylacines", [])
     typer.echo(f'Extinct exports: {len(thy)}')
     for t in thy[:3]:
@@ -4084,12 +4149,15 @@ def tensegrity_cmd(path=".", format="compact") -> None:
     from quale.reports import tensegrity_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = tensegrity_report(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     for tp in data.get("tensegrity_pairs", [])[:3]:
         typer.echo(f'  {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} im)')
 
@@ -4100,12 +4168,15 @@ def criticality_cmd(path=".", file="", format="compact") -> None:
     from quale.reports import criticality_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = criticality_report(path=p, file_path=file)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     for s in data.get("scores", [])[:5]:
         typer.echo(f'  {s["file"]}: k={s["k"]} ({s["class"]})')
 
@@ -4116,12 +4187,15 @@ def guard_cmd(path=".", file="", task="", format="compact") -> None:
     from quale.reports import guard_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = guard_report(path=p, file_path=file, task=task)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     for k, v in data.items():
         if k not in ("file", "task") and v:
             typer.echo(f'  {k}: {v}')
@@ -4132,12 +4206,15 @@ def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact") -> None
     from quale.reports import check_pr_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = check_pr_report(path=p, base_ref=base, head_ref=head)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     typer.echo(f'Parity: {"OK" if data.get("parity",{}).get("unchanged") else "CHANGED"}')
     for tp in data.get("trap", [])[:2]:
         typer.echo(f'  {tp.get("file_a","")} <-> {tp.get("file_b","")}: {tp.get("label","")}')
@@ -4149,12 +4226,15 @@ def cleanup_list_cmd(path=".", format="compact") -> None:
     from quale.reports import cleanup_list_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = cleanup_list_report(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     typer.echo(f'{data.get("free_to_delete",0)} free to delete')
     for i in data.get("items", [])[:5]:
         typer.echo(f'  {i["identifier"]}: {i["effort"]} ({i["files"]} files)')
@@ -4166,12 +4246,15 @@ def vulnerability_map_cmd(path=".", format="compact") -> None:
     from quale.reports import vulnerability_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = vulnerability_report(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     typer.echo(f'Don-touch: {len(data.get("don_touch",[]))}  Churn: {len(data.get("churn_hubs",[]))}  Critical: {len(data.get("critical",[]))}')
 
 @cli.command(name="health-score", rich_help_panel="CI")
@@ -4180,16 +4263,19 @@ def health_score_cmd(path=".", format="compact") -> None:
     from quale.reports import repo_health as health_score
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True); raise typer.Exit(1)
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
     data = health_score(path=p)
     if "error" in data:
-        typer.echo(data["error"], err=True); raise typer.Exit(1)
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2)); return
+        typer.echo(json.dumps(data, indent=2))
+        return
     coupling = "coupled" if data.get("excess_porosity", 0) < 0 else "sparse"
     mod = "gapped" if data.get("spectral_gap", 0) >= 2 else ("moderate" if data.get("spectral_gap", 0) >= 1 else "flat")
     typer.echo(f'{coupling} + {mod}')
 
 if __name__ == "__main__":
-    main()
+    _entry_main()
 
