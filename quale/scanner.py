@@ -673,7 +673,7 @@ def find_structure_clusters(file_vocabs: list[FileVocab], phrase_clusters: list[
                 file_scores.append((fv.path, matches, fv.language))
 
         if len(file_scores) >= min_file_count:
-            langs = Counter(l for _, _, l in file_scores)
+            langs = Counter(lang for _, _, lang in file_scores)
             top_lang = langs.most_common(1)[0][0]
             test_count = sum(1 for f, _, _ in file_scores
                              if "_test." in f or "/tests/" in f or ".test." in f)

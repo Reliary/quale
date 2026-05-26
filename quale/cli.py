@@ -653,7 +653,8 @@ def crystallography(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
 
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c("  VOCAB CRYSTALLOGRAPHY", "header"))
@@ -892,7 +893,8 @@ def deserts(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     ratio = data.get("mirror_ratio", 0.0)
     ratio_color = "green" if ratio >= 0.7 else ("yellow" if ratio >= 0.3 else "red")
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -1270,7 +1272,8 @@ def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact") -
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file or not diff:
-        typer.echo("provide --file and --diff", err=True); raise typer.Exit(1)
+        typer.echo("provide --file and --diff", err=True)
+        raise typer.Exit(1)
     data = deflate_report(path=p, file_path=file, proposed_diff=diff, budget=int(budget))
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -1487,7 +1490,8 @@ def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file or not diff:
-        typer.echo("provide --file and --diff", err=True); raise typer.Exit(1)
+        typer.echo("provide --file and --diff", err=True)
+        raise typer.Exit(1)
     data = heisenberg_check(path=p, file_path=file, proposed_diff=diff)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -1741,7 +1745,7 @@ def zk_proof_cmd(
         typer.echo(f"  All {data['code_identifiers']} identifiers valid against {data['allowed_count']}-item vocabulary.")
     else:
         typer.echo(_color("ZK-PROOF FAILED", "red"))
-        vc = data.get("violation_count", 0)
+        data.get("violation_count", 0)
         for v in data.get("violations", [])[:5]:
             alts = ", ".join(v.get("allowed_alternatives", [])[:2])
             typer.echo(f"  '{v['identifier']}' not in schema. Did you mean: {alts}?")
@@ -1939,7 +1943,8 @@ def route(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     action = data.get("action", "unknown")
     color = "green" if action == "verify" else ("yellow" if action == "contract" else "gray")
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -2022,7 +2027,8 @@ def timeline(
         typer.echo("No timeline data available.")
         return
 
-    c = lambda t, color: _color(t, color)
+    def c(t, color):
+        return _color(t, color)
 
     if format == "json":
         typer.echo(json.dumps({
@@ -2081,7 +2087,8 @@ def stable(
             typer.echo("Not enough snapshot data.")
         return
 
-    c = lambda t, color: _color(t, color)
+    def c(t, color):
+        return _color(t, color)
 
     if format == "json":
         typer.echo(json.dumps({
@@ -2151,7 +2158,8 @@ def explore(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c("  EXPLORE", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -2170,7 +2178,8 @@ def explore(
 
 
 def _print_agent_checklist(data: dict, task: str | None):
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
 
     reads = data.get("recommended_next_reads", [])
     related = data.get("related_files_for_task", [])
@@ -2186,14 +2195,13 @@ def _print_agent_checklist(data: dict, task: str | None):
     first_task_read = source_related[0]["file"] if source_related else None
     first_edit = likely[0] if likely else None
     first_test = test_related[0]["file"] if test_related else None
-    first_arch = None
     if first_task_read:
         for r in reads:
             if r["file"] != first_task_read:
-                first_arch = r["file"]
+                r["file"]
                 break
     elif reads:
-        first_arch = reads[0]["file"]
+        reads[0]["file"]
 
     # Header
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -2309,7 +2317,8 @@ def _print_agent_checklist(data: dict, task: str | None):
 
 
 def _print_preflight(data: dict) -> None:
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     risk_color = {"low": "green", "moderate": "yellow", "high": "red", "unknown": "gray"}.get(data.get("risk"), "gray")
     temp = data.get("temperature", "WARM")
     temp_color = {"HOT": "red", "WARM": "yellow", "COLD": "cyan"}.get(temp, "gray")
@@ -2466,7 +2475,8 @@ def _print_preflight(data: dict) -> None:
 
 
 def _print_preflight_checklist(data: dict) -> None:
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c("  VOCAB PREFLIGHT — CHECKLIST", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -2533,7 +2543,8 @@ def agent_bootstrap(
         label, color, reason = _relevance_label(score)
         typer.echo(_color(f"  Task relevance: {label} ({score:.0%}) - {reason}", color), err=True)
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     relevance = data.get("task_relevance_score", 1.0)
     relevance_label, relevance_color, relevance_reason = _relevance_label(relevance)
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -2703,7 +2714,8 @@ def skeleton(
         ]}, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     typer.echo(data.get("skeleton", ""))
     if data.get("generated_pct", 0) > 5:
         typer.echo(c(f"\n  Skip: {data['generated_pct']}% generated files — do not edit without confirmation.", "gray"))
@@ -2736,7 +2748,8 @@ def delta(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c("  VOCAB DELTA", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -2814,7 +2827,8 @@ def ci_report_cmd(
             raise typer.Exit(gate_failures[0][0])
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c(f"  CI REPORT: {data['base_ref']} → {data['head_ref']}", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -2945,7 +2959,8 @@ def inspect(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     explore_data = data.get("explore", {})
     modules_data = data.get("modules", {})
     timeline_data = data.get("timeline", [])
@@ -3153,7 +3168,8 @@ def compare(
                 raise typer.Exit(1)
         return
 
-    c = lambda t, color: _color(t, color)
+    def c(t, color):
+        return _color(t, color)
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(f"  {c('VOCABULARY ALIGNMENT', 'header')}: {result['repo_a']} <-> {result['repo_b']}")
     if result.get("contract_only"):
@@ -3380,7 +3396,8 @@ def lattice(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     summary = data.get("summary", {})
     defects = data.get("defects", {})
 
@@ -3452,7 +3469,8 @@ def patterns(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     patterns = data.get("patterns", [])
 
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -3522,7 +3540,8 @@ def stop(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     signal = data.get("stop_signal", "continue")
     sig_color = "green" if signal == "stop" else ("yellow" if signal == "slow" else "cyan")
 
@@ -3579,7 +3598,8 @@ def entropy(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     sig_color = "red" if data.get("signal") == "warning" else ("green" if data.get("signal") == "stable" else "cyan")
 
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -3627,7 +3647,8 @@ def genesis(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     summary = data.get("summary", {})
 
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -3692,7 +3713,8 @@ def bond(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     summary = data.get("summary", {})
 
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -3759,7 +3781,8 @@ def diff_structural(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c("  STRUCTURAL DIFF", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -3820,7 +3843,8 @@ def ask(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     ans = data.get("answer", {})
     if isinstance(ans, dict):
         typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -3887,7 +3911,8 @@ def verify_scope(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     receipt = data.get("receipt", {})
     scope_kept = receipt.get("scope_kept", False)
     typer.echo(c(f"{'━' * 60}", "cyan"))
@@ -3959,7 +3984,8 @@ def calibration(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    c = lambda t, col: _color(t, col)
+    def c(t, col):
+        return _color(t, col)
     records = data.get("records", 0)
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c("  VOCAB CALIBRATION", "header"))
