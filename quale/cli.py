@@ -162,6 +162,18 @@ def _bar(pct: float, width: int = 20) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+ICON_PRIMARY = "\u25cf"
+ICON_SECONDARY = "\u25cb"
+ICON_WARN = "\u26a0"
+ICON_CHECK = "\u2713"
+
+
+def print_header(title: str) -> None:
+    typer.echo(_color(f"{'━' * 60}", "cyan"))
+    typer.echo(_color(f"  {title}", "cyan"))
+    typer.echo(_color(f"{'━' * 60}", "cyan"))
+
+
 def _color(text: str, color: str) -> str:
     codes = {
         "header": "\033[1;36m", "subheader": "\033[1;33m",
@@ -739,9 +751,7 @@ def crystallography(
     def c(t, col):
         return _color(t, col)
 
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  VOCAB CRYSTALLOGRAPHY", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("VOCAB CRYSTALLOGRAPHY")
     typer.echo("")
     typer.echo(c("  Skeleton:", "subheader"))
     typer.echo(f"    {c(data.get('skeleton', ''), 'gray')}")
@@ -980,9 +990,7 @@ def deserts(
         return _color(t, col)
     ratio = data.get("mirror_ratio", 0.0)
     ratio_color = "green" if ratio >= 0.7 else ("yellow" if ratio >= 0.3 else "red")
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  TEST COVERAGE REPORT", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("TEST COVERAGE REPORT")
     typer.echo(f"  Source files: {data.get('source_files', 0)}  Test files: {data.get('test_files', 0)}")
     typer.echo(f"  Test mirror coverage: {c(f'{ratio:.0%}', ratio_color)}")
     typer.echo(f"  Confidence: {c(data.get('confidence', '?'), 'gray')}")
@@ -1608,13 +1616,13 @@ def heisenberg_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
     if data.get("uncertainty_violated"):
-        typer.echo(f'  \033[31m\u26a0 Mixed change detected\033[0m')
+        typer.echo(_color(f'  {ICON_WARN} Mixed change detected', 'red'))
         typer.echo(f'  New identifiers: {", ".join(data.get("new_signal_tokens", [])[:3])}')
         typer.echo(f'  Deleted identifiers: {", ".join(data.get("deleted_anchors", [])[:3])}')
         typer.echo(f'  {data.get("mandate","")}')
         typer.echo('  \033[90mSuggestion: split this change into separate refactor + feature edits.\033[0m')
     else:
-        typer.echo(f'  \033[32m\u2713 Change is focused\033[0m \u2014 no mixed refactor/feature detected.')
+        typer.echo(f'  \033[32m{ICON_CHECK} Change is focused\033[0m \u2014 no mixed refactor/feature detected.')
 
 
 @core_app.command(name="traffic-control", rich_help_panel="Maintenance")
@@ -1673,7 +1681,7 @@ def capillary_cmd(
     caps = data.get("capillaries", [])[:5]
     typer.echo(f"Files with the most inter-file connections ({len(caps)} shown):")
     for c in caps:
-        typer.echo(f'  \u25cf {c["file"]} \u2014 {c["edges"]} shared vocabulary links')
+        typer.echo(f'  {ICON_PRIMARY} {c["file"]} \u2014 {c["edges"]} shared vocabulary links')
 
 @core_app.command(name="spectral-gap", rich_help_panel="Code Analysis")
 def spectral_gap_cmd(
@@ -1728,7 +1736,7 @@ def phantom_cmd(
     typer.echo(f"Frameworks detected from import vocabulary:")
     if d:
         for k, v in sorted(d.items(), key=lambda x: -x[1])[:5]:
-            typer.echo(f'  \u25cf {k} \u2014 {v} files')
+            typer.echo(f'  {ICON_PRIMARY} {k} \u2014 {v} files')
     else:
         typer.echo('  None detected')
 
@@ -1849,10 +1857,10 @@ def entropy_cmd(
         return
     typer.echo(f"Directory vocabulary spread vs. rolling baseline:")
     if data.get("any_limit_exceeded"):
-        typer.echo(f"  \u26a0 Some directories have unusually high vocabulary fragmentation.")
+        typer.echo(f"  {ICON_WARN} Some directories have unusually high vocabulary fragmentation.")
     for d in data.get("directories", [])[:10]:
         exceeded = d["limit_exceeded"]
-        mark = "\u25cf" if exceeded else "\u25cb"
+        mark = ICON_PRIMARY if exceeded else ICON_SECONDARY
         note = " (fragmented)" if exceeded else ""
         typer.echo(f"  {mark} {d['directory']:35s} spread={d['entropy']:.2f} baseline={d['baseline']:.2f}{note}")
 
@@ -2113,9 +2121,7 @@ def route(
         return _color(t, col)
     action = data.get("action", "unknown")
     color = "green" if action == "verify" else ("yellow" if action == "contract" else "gray")
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  VOCAB ROUTE", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("VOCAB ROUTE")
     typer.echo(f"  Action: {c(action, color)}")
     typer.echo(f"  Tier: {c(action, color)}")
     if data.get("command"):
@@ -2329,9 +2335,7 @@ def explore(
 
     def c(t, col):
         return _color(t, col)
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  EXPLORE", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("EXPLORE")
     typer.echo("")
     typer.echo(c("  READ FIRST:", "subheader"))
     for f in files[:15]:
@@ -2373,9 +2377,7 @@ def _print_agent_checklist(data: dict, task: str | None):
         reads[0]["file"]
 
     # Header
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  AGENT BOOTSTRAP — EXECUTABLE CHECKLIST", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("AGENT BOOTSTRAP — EXECUTABLE CHECKLIST")
     if task:
         relevance = data.get("task_relevance_score", 0)
         rl, rc, rr = _relevance_label(relevance)
@@ -2496,9 +2498,7 @@ def _print_preflight(data: dict) -> None:
     caveat = data.get("guardrails", {}).get("caveat", "May be wrong; inspect before acting.")
     verbose = data.get("verbose", False)
 
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  PREFLIGHT ASSESSMENT", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("PREFLIGHT ASSESSMENT")
 
     # ── Phase 0: Structural Cohesion Warning ────────────────────────
     cohesion = data.get("cohesion")
@@ -2577,7 +2577,7 @@ def _print_preflight(data: dict) -> None:
             concepts = ", ".join(item.get("concepts", [])[:3])
             items.append(f"    {c(str(item.get('shared_concepts', 0)), 'yellow')} shared  {item.get('file')}  {c(concepts, 'gray')}")
         if items:
-            gotcha_sections.append((c("  HIDDEN DEPENDENCIES (Blast Radius):", "subheader"), items))
+            gotcha_sections.append((c("  DOWNSTREAM IMPACT (Ripple Effect):", "subheader"), items))
 
     # HISTORICAL BLIND SPOTS (co-change)
     co_change = data.get("co_change", [])
@@ -2646,9 +2646,7 @@ def _print_preflight(data: dict) -> None:
 def _print_preflight_checklist(data: dict) -> None:
     def c(t, col):
         return _color(t, col)
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  VOCAB PREFLIGHT — CHECKLIST", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("VOCAB PREFLIGHT — CHECKLIST")
     typer.echo(f"  Risk: {data.get('risk', 'unknown')} ({data.get('confidence', 'unknown')} confidence)")
     typer.echo(c(f"  Caveat: {data.get('guardrails', {}).get('caveat', 'May be wrong; inspect before acting.')}", "yellow"))
     typer.echo("")
@@ -2716,9 +2714,7 @@ def agent_bootstrap(
         return _color(t, col)
     relevance = data.get("task_relevance_score", 1.0)
     relevance_label, relevance_color, relevance_reason = _relevance_label(relevance)
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  AGENT BOOTSTRAP", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("AGENT BOOTSTRAP")
 
     reads = data.get("recommended_next_reads", [])
     related = data.get("related_files_for_task", [])
@@ -2919,9 +2915,7 @@ def delta(
 
     def c(t, col):
         return _color(t, col)
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  VOCAB DELTA", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("VOCAB DELTA")
     _fd = data.get('file_delta', 0)
     _fd_str = f"{_fd:+d}" if _fd >= 0 else f"{_fd:+d}"
     typer.echo(f"  Files: {c(str(data.get('old_files', 0)), 'gray')} → {c(str(data.get('new_files', 0)), 'cyan')} ({c(_fd_str, 'green')})")
@@ -3016,7 +3010,7 @@ def ci_report_cmd(
     else:
         typer.echo(f"  {c('INFO', 'cyan')}: no gates configured")
     typer.echo(
-        f"  {c('Metrics:', 'subheader')} mirror coverage {data.get('mirror_gap_ratio', 0.0):.0%}, "
+        f"  {c('Metrics:', 'subheader')} test coverageerage {data.get('mirror_gap_ratio', 0.0):.0%}, "
         f"blast {data.get('max_blast_tier', 'none')}, "
         f"stable touched {data.get('stable_touched_count', 0)}"
     )
@@ -3806,9 +3800,7 @@ def stop(
     signal = data.get("stop_signal", "continue")
     sig_color = "green" if signal == "stop" else ("yellow" if signal == "slow" else "cyan")
 
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  EXPLORATION ENTROPY", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("EXPLORATION ENTROPY")
     typer.echo(f"  Read: {c(str(data.get('files_read', 0)), 'cyan')}/{data.get('total_files', 0)} files")
     typer.echo(f"  Coverage: {c(str(data.get('coverage_pct', 0)) + '%', 'green')} of unique concepts")
     typer.echo(f"  Next file adds: {c(str(data.get('marginal_gain_next_file', 0)), 'yellow')} new concepts")
@@ -3863,9 +3855,7 @@ def entropy(
         return _color(t, col)
     sig_color = "red" if data.get("signal") == "warning" else ("green" if data.get("signal") == "stable" else "cyan")
 
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  ENTROPY VELOCITY", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("ENTROPY VELOCITY")
     typer.echo(f"  Velocity: {c(str(data.get('velocity')), 'cyan')}  "
                f"Accel: {c(str(data.get('acceleration')), 'yellow')}")
     typer.echo(f"  Trend: {c(data.get('trend', '?'), sig_color)}")
@@ -3912,9 +3902,7 @@ def genesis(
         return _color(t, col)
     summary = data.get("summary", {})
 
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  CONCEPT GENESIS", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("CONCEPT GENESIS")
     typer.echo(f"  Endogenous: {c(str(summary.get('endogenous_count', 0)), 'green')}  "
                f"Imported: {c(str(summary.get('imported_count', 0)), 'cyan')}  "
                f"Ambiguous: {c(str(summary.get('ambiguous_count', 0)), 'gray')}")
@@ -3978,9 +3966,7 @@ def bond(
         return _color(t, col)
     summary = data.get("summary", {})
 
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  CONCEPT BONDS", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("CONCEPT BONDS")
     typer.echo(f"  Always-together pairs: {c(str(summary.get('covalent_pairs', 0)), 'green')}  "
                f"2-file bridges: {c(str(summary.get('ionic_pairs', 0)), 'cyan')}  "
                f"Shared utility pool: {c(str(summary.get('metallic_concepts', 0)), 'gray')}")
@@ -4044,9 +4030,7 @@ def diff_structural(
 
     def c(t, col):
         return _color(t, col)
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  STRUCTURAL DIFF", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("STRUCTURAL DIFF")
     typer.echo(f"  Fingerprint changed: {c(str(data.get('fingerprint_changed', '?')), 'yellow')}")
     typer.echo(f"  Changed files: {c(str(data.get('changed_file_count', 0)), 'cyan')}")
     if data.get("diversity_acceleration") is not None:
@@ -4176,9 +4160,7 @@ def verify_scope(
         return _color(t, col)
     receipt = data.get("receipt", {})
     scope_kept = receipt.get("scope_kept", False)
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  SCOPE VERIFICATION", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("SCOPE VERIFICATION")
     typer.echo(f"  Scope matched: {c('YES' if scope_kept else 'NO', 'green' if scope_kept else 'red')}")
     typer.echo(f"  Expected files: {c(str(data.get('expected_count', 0)), 'cyan')}")
     typer.echo(f"  Actual files: {c(str(data.get('actual_count', 0)), 'cyan')}")
@@ -4248,9 +4230,7 @@ def calibration(
     def c(t, col):
         return _color(t, col)
     records = data.get("records", 0)
-    typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  VOCAB CALIBRATION", "header"))
-    typer.echo(c(f"{'━' * 60}", "cyan"))
+    print_header("VOCAB CALIBRATION")
     if records == 0:
         typer.echo(f"  {c(data.get('note', 'No records.'), 'yellow')}")
         return
@@ -4365,12 +4345,12 @@ def trap_cmd(
     overlap = data.get("overlap", 0)
     label = data.get("label", "")
     if overlap >= 0.8:
-        typer.echo(f'  \033[31m\u26a0 High merge risk\033[0m \u2014 {overlap:.0%} identifier overlap')
+        typer.echo(f'  \033[31m{ICON_WARN} High merge risk\033[0m \u2014 {overlap:.0%} identifier overlap')
         typer.echo('  \033[90mThese files share many identifiers. Concurrent edits risk naming conflicts.\033[0m')
     elif overlap >= 0.5:
-        typer.echo(f'  \033[33m\u25cf Moderate overlap\033[0m \u2014 {overlap:.0%}')
+        typer.echo(f'  \033[33m{ICON_PRIMARY} Moderate overlap\033[0m \u2014 {overlap:.0%}')
     else:
-        typer.echo(f'  \033[32m\u25cb Low overlap\033[0m \u2014 {overlap:.0%} \u2014 safe to edit concurrently')
+        typer.echo(f'  \033[32m{ICON_SECONDARY} Low overlap\033[0m \u2014 {overlap:.0%} \u2014 safe to edit concurrently')
 
 @core_app.command(name="hub-risk", rich_help_panel="Code Analysis")
 def thanatosis_cmd(
@@ -4394,7 +4374,7 @@ def thanatosis_cmd(
     files = data.get("files", [])[:5]
     typer.echo("Files that are highly coupled but rarely edited:")
     for f in files:
-        typer.echo(f'  \u25cf {f["file"]} \u2014 {f["centrality"]} file couplings, {f["edits"]} edits')
+        typer.echo(f'  {ICON_PRIMARY} {f["file"]} \u2014 {f["centrality"]} file couplings, {f["edits"]} edits')
     if files:
         typer.echo("These files touch many others but are not actively maintained.")
 
@@ -4475,7 +4455,7 @@ def thylacine_cmd(
     typer.echo(f'Exports declared in multiple files but never imported externally:')
     typer.echo(f'  Count: {len(thy)}')
     for t in thy[:5]:
-        typer.echo(f'  \u25cf {t["identifier"]} (defined in {t["files"]} files)')
+        typer.echo(f'  {ICON_PRIMARY} {t["identifier"]} (defined in {t["files"]} files)')
     if thy:
         typer.echo('  Next: quale core cleanup-list | quale core escape-velocity')
 
@@ -4501,7 +4481,7 @@ def tensegrity_cmd(
     pairs = data.get("tensegrity_pairs", [])
     typer.echo(f"Indirectly coupled file pairs (no direct edge):")
     for tp in pairs[:5]:
-        typer.echo(f'  \u25cf {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} indirect links)')
+        typer.echo(f'  {ICON_PRIMARY} {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} indirect links)')
     if not pairs:
         typer.echo("  None found \u2014 no indirect coupling detected.")
 
@@ -4528,7 +4508,7 @@ def criticality_cmd(
     scores = data.get("scores", [])
     typer.echo(f"Change amplification risk (k > 1 = changes cascade):")
     for s in scores[:5]:
-        marker = "\u26a0" if s["k"] > 1 else "\u25cb"
+        marker = ICON_WARN if s["k"] > 1 else ICON_SECONDARY
         typer.echo(f'  {marker} {s["file"]}: amp={s["k"]:.2f} ({s["class"]})')
     if not scores:
         typer.echo("  No files with notable amplification.")
@@ -4576,7 +4556,7 @@ def guard_cmd(
             typer.echo(f'  Risk score: {v} (0=low, higher=more coupling exposure)')
         elif isinstance(v, list):
             for item in v[:3]:
-                typer.echo(f'  \u25cf {item}')
+                typer.echo(f'  {ICON_PRIMARY} {item}')
         elif isinstance(v, dict):
             for sk, sv in v.items():
                 typer.echo(f'  {sk}: {sv}')
@@ -4604,14 +4584,14 @@ def check_pr_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
     unch = data.get("parity", {}).get("unchanged", False)
-    typer.echo(f"Structural hash: {'\u2713 unchanged' if unch else '\u26a0 changed since base ref'}")
+    typer.echo(f"Structural hash: {ICON_CHECK if unch else ICON_WARN} {'unchanged' if unch else 'changed since base ref'}")
     for tp in data.get("trap", [])[:3]:
         la = tp.get("label", "")
         fa = tp.get("file_a", "") or tp.get("file", "")
         fb = tp.get("file_b", "")
         if not fa and not fb:
             continue
-        mark = "\u26a0" if "HIGH" in la or "OVERLAP" in la.upper() else "\u25cf"
+        mark = ICON_WARN if "HIGH" in la or "OVERLAP" in la.upper() else ICON_PRIMARY
         pair = f"{fa} <-> {fb}" if fb else fa
         typer.echo(f'  {mark} {pair}: {la}')
 
@@ -4639,7 +4619,7 @@ def cleanup_list_cmd(
     for i in items[:5]:
         label = i.get("effort", "?")
         note = " (appears outside origin module)" if label == "ESCAPED" else (" (mostly contained)" if label == "BOUND" else "")
-        typer.echo(f'  \u25cf {i["identifier"]}: {label}{note} \u2014 {i["files"]} files')
+        typer.echo(f'  {ICON_PRIMARY} {i["identifier"]}: {label}{note} \u2014 {i["files"]} files')
 
 @core_app.command(name="vulnerability-map", rich_help_panel="Maintenance")
 def vulnerability_map_cmd(
@@ -4663,11 +4643,11 @@ def vulnerability_map_cmd(
     dt = len(data.get("don_touch", []))
     ch = len(data.get("churn_hubs", []))
     cr = len(data.get("critical", []))
-    typer.echo(f"  Don't-touch (hub-risk + capillary): {dt} files")
+    typer.echo(f"  Don't-touch (hub risk + connectivity): {dt} files")
     typer.echo(f"  Churn hubs (high edit + high coupling): {ch} files")
     typer.echo(f"  Critical (all three): {cr} files")
     if cr:
-        typer.echo("  \u26a0 These files are high-risk: coupled, connected, and critical.")
+        typer.echo(f"  {ICON_WARN} These files are high-risk: coupled, connected, and critical.")
 
 @core_app.command(name="health-score", rich_help_panel="CI")
 def health_score_cmd(
@@ -4736,11 +4716,11 @@ def review_cmd(
     for f in data.get("file_annotations", []):
         anns = f.get("annotations", [])
         if f["severity"] == "high":
-            mark = f"  \033[31m\u25cf {f['file']}\033[0m"
+            mark = f"  \033[31m{ICON_PRIMARY} {f['file']}\033[0m"
         elif f["severity"] == "medium":
-            mark = f"  \033[33m\u25cf {f['file']}\033[0m"
+            mark = f"  \033[33m{ICON_PRIMARY} {f['file']}\033[0m"
         else:
-            mark = f"  \033[32m\u25cb {f['file']}\033[0m"
+            mark = f"  \033[32m{ICON_SECONDARY} {f['file']}\033[0m"
         ann_text = f" \u2014 {', '.join(anns)}" if anns else ""
         typer.echo(f"{mark}{ann_text}")
 
@@ -4750,15 +4730,15 @@ def review_cmd(
     for tm in data.get("test_mirrors", []):
         if tm.get("has_mirror"):
             mf = tm["mirror_files"][0]
-            typer.echo(f"    \033[32m\u25cf {tm['source']} \u2192 {mf}\033[0m")
+            typer.echo(f"    \033[32m{ICON_PRIMARY} {tm['source']} \u2192 {mf}\033[0m")
         else:
-            typer.echo(f"    \033[33m\u25cb {tm['source']} \u2192 (no test mirror found)\033[0m")
+            typer.echo(f"    \033[33m{ICON_SECONDARY} {tm['source']} \u2192 (no test mirror found)\033[0m")
 
     # Risk flags from ci_report
     typer.echo("")
     typer.echo("  Risk flags:")
     for rf in data.get("risk_flags", []):
-        typer.echo(f"    \033[31m\u26a0 {rf}\033[0m")
+        typer.echo(f"    \033[31m{ICON_WARN} {rf}\033[0m")
     if not data.get("risk_flags"):
         typer.echo("    \033[32mNone\033[0m")
 
@@ -4837,14 +4817,14 @@ def onboard_cmd(
                 file_part = item["file"]
                 why_part = item.get("why", "")
                 if item.get("file") == "(none)":
-                    typer.echo(f"    \033[32m\u25cb {file_part} \u2014 {item.get('risk', '')}\033[0m")
+                    typer.echo(f"    \033[32m{ICON_SECONDARY} {file_part} \u2014 {item.get('risk', '')}\033[0m")
                 elif "risk" in item:
-                    typer.echo(f"    \033[33m\u26a0 {file_part} \u2014 {item.get('risk', '')}\033[0m")
+                    typer.echo(f"    \033[33m{ICON_WARN} {file_part} \u2014 {item.get('risk', '')}\033[0m")
                 else:
-                    typer.echo(f"    \033[36m\u25cf {file_part}\033[0m  \033[90m{why_part}\033[0m")
+                    typer.echo(f"    \033[36m{ICON_PRIMARY} {file_part}\033[0m  \033[90m{why_part}\033[0m")
             elif "module" in item:
                 samples = ", ".join(item.get("sample_files", [])[:2])
-                typer.echo(f"    \033[35m\u25cf {item['module']}\033[0m  \033[90m({item.get('file_count', 0)} files: {samples})\033[0m")
+                typer.echo(f"    \033[35m{ICON_PRIMARY} {item['module']}\033[0m  \033[90m({item.get('file_count', 0)} files: {samples})\033[0m")
 
 
 @cli.command(name="refactor-cost", rich_help_panel="Code Analysis")
