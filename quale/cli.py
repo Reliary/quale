@@ -1348,7 +1348,13 @@ def solve_cmd(
 
 
 @core_app.command(name="deflate", rich_help_panel="Maintenance")
-def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact") -> None:
+def deflate_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to deflate")] = "",
+    diff: Annotated[str, typer.Option("--diff", help="Git ref")] = "",
+    budget: Annotated[int, typer.Option("--budget", help="Token budget")] = 5,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+) -> None:
     """Cap net-new identifiers per edit."""
 
     from quale.reports import deflate_report
@@ -1511,7 +1517,11 @@ def epidemiology_cmd(
 
 
 @core_app.command(name="orient", rich_help_panel="Utilities")
-def orient_cmd(path=".", task="", format="compact") -> None:
+def orient_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    task: Annotated[str, typer.Option("--task", help="Task description")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+) -> None:
     """One-call orientation: solve + triangulate + isolate."""
 
     from quale.reports import pipeline_orient
@@ -1538,9 +1548,10 @@ def orient_cmd(path=".", task="", format="compact") -> None:
 
 @core_app.command(name="health", rich_help_panel="CI")
 def health_cmd(
-    path=".",
-               balance: Annotated[bool, typer.Option("--balance", help="Phototropism: check root-to-shoot vocabulary ratio")] = False,
-               format="compact"):
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    balance: Annotated[bool, typer.Option("--balance", help="Root-to-shoot ratio check")] = False,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+):
     """0-1 health from stability, mirror, churn, concept age. """
     from quale.reports import structural_health_score
     p = os.path.abspath(path)
@@ -1573,7 +1584,12 @@ def health_cmd(
 
 
 @core_app.command(name="heisenberg", rich_help_panel="Maintenance")
-def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
+def heisenberg_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to check")] = "",
+    diff: Annotated[str, typer.Option("--diff", help="Proposed diff ref")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Mixed refactor/feature edits that must be split."""
 
     from quale.reports import heisenberg_check
@@ -1602,7 +1618,12 @@ def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
 
 
 @core_app.command(name="traffic-control", rich_help_panel="Maintenance")
-def traffic_control_cmd(path=".", file="", intended_import="", format="compact") -> None:
+def traffic_control_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to check")] = "",
+    intended_import: Annotated[str, typer.Option("--intended-import", help="Intended import to verify")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Zone files by graph centrality percentile."""
 
     from quale.reports import traffic_control_report
@@ -1631,7 +1652,10 @@ def traffic_control_cmd(path=".", file="", intended_import="", format="compact")
 
 
 @core_app.command(name="capillary", rich_help_panel="Code Analysis")
-def capillary_cmd(path=".", format="compact") -> None:
+def capillary_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Files with the most inter-file vocabulary edges."""
 
     from quale.reports import capillary_report
@@ -1652,7 +1676,10 @@ def capillary_cmd(path=".", format="compact") -> None:
         typer.echo(f'  \u25cf {c["file"]} \u2014 {c["edges"]} shared vocabulary links')
 
 @core_app.command(name="spectral-gap", rich_help_panel="Code Analysis")
-def spectral_gap_cmd(path=".", format="compact") -> None:
+def spectral_gap_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Modularity score: largest cluster / second largest."""
 
     from quale.reports import spectral_gap_report
@@ -1679,7 +1706,10 @@ def spectral_gap_cmd(path=".", format="compact") -> None:
         typer.echo("  \u2192 Vocabulary is evenly distributed. No dominant cluster.")
 
 @core_app.command(name="phantom", rich_help_panel="Code Analysis")
-def phantom_cmd(path=".", format="compact") -> None:
+def phantom_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Detect framework/library from import/export vocabulary."""
 
     from quale.reports import phantom_report
@@ -1704,7 +1734,12 @@ def phantom_cmd(path=".", format="compact") -> None:
 
 
 @core_app.command(name="parity-bit", rich_help_panel="CI")
-def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact") -> None:
+def parity_bit_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    ref_a: Annotated[str, typer.Option("--ref-a", help="Base ref")] = "",
+    ref_b: Annotated[str, typer.Option("--ref-b", help="Head ref")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """SHA-1 of module phrase set. [GATE: CHANGED vs UNCHANGED]"""
     from quale.reports import parity_bit_report
     p = os.path.abspath(path)
@@ -1729,7 +1764,11 @@ def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact") -> None:
 
 
 @core_app.command(name="guide", rich_help_panel="Agent Safety")
-def guide_cmd(path=".", file="", format="compact") -> None:
+def guide_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to analyze")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """One-token file locator for a file. """
     from quale.reports import guide_report
     p = os.path.abspath(path)
@@ -1896,7 +1935,7 @@ def lagrange_cmd(
             typer.echo(f"    {p['code'][:80]}...")
     else:
         note = data.get("note", "none found")
-        typer.echo(f"No Lagrange Points: {note}")
+        typer.echo(f"No safe injection sites found: {note}")
 
 
 @core_app.command(name="migration-pairs", rich_help_panel="Maintenance")
@@ -2632,7 +2671,7 @@ def _print_preflight_checklist(data: dict) -> None:
 
 @core_app.command(name="agent-bootstrap",  rich_help_panel="Utilities")
 def agent_bootstrap(
-    path: Annotated[str, typer.Argument(help="Repository path")] = ".",
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description to find related files")] = None,
     verify_relevance: Annotated[bool, typer.Option("--verify-relevance", help="Verify surfaced files contain task keywords")] = False,
     summary: Annotated[bool, typer.Option("--summary", help="Only show the decision-oriented startup summary")] = False,
@@ -3061,7 +3100,7 @@ def ci_report_cmd(
 
 @cli.command(rich_help_panel="Getting Started")
 def inspect(
-    path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     path_opt: Annotated[str, typer.Option("--path", "-p", help="Path to repo", hidden=True)] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     anomalies: Annotated[bool, typer.Option("--anomalies", help="Load cached scan and show deltas")] = False,
@@ -3202,7 +3241,7 @@ def inspect(
 
 @core_app.command(rich_help_panel="Getting Started")
 def modules(
-    path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
 ):
     """Detect parser-free module boundaries from rare identifier overlap."""
@@ -3474,7 +3513,7 @@ def pr_report(
 
 @core_app.command(rich_help_panel="Utilities")
 def init(
-    path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     seed: Annotated[bool, typer.Option("--seed", "--no-seed", help="Seed fragment router from git history")] = True,
 ):
     """Generate a .quale.yml config file and cache repo-map scan.
@@ -3976,7 +4015,7 @@ def bond(
 
 @core_app.command(name="diff-structural",  rich_help_panel="Maintenance")
 def diff_structural(
-    path: Annotated[str, typer.Argument(help="Repository path")] = ".",
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     ref_a: Annotated[str | None, typer.Option("--before", help="Base ref (default: HEAD~1)")] = None,
     ref_b: Annotated[str | None, typer.Option("--after", help="Head ref (default: HEAD)")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -4094,7 +4133,7 @@ def ask(
 
 @core_app.command(name="verify-scope",  rich_help_panel="Agent Safety")
 def verify_scope(
-    path: Annotated[str, typer.Argument(help="Repository path")] = ".",
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Expected/contract files; repeat or comma-separate")] = None,
     diff: Annotated[str, typer.Option("--diff", help="Git ref to diff against")] = "HEAD",
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
@@ -4270,7 +4309,10 @@ def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
 
 
 @core_app.command(name="escape-velocity", rich_help_panel="Maintenance")
-def escape_velocity_cmd(path=".", format="compact") -> None:
+def escape_velocity_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Phrase removal difficulty: ESCAPED / BOUND / DEEP."""
 
     from quale.reports import escape_velocity_report
@@ -4297,7 +4339,12 @@ def escape_velocity_cmd(path=".", format="compact") -> None:
             note = " \u2014 internal only, safe to rename locally"
         typer.echo(f'  {t["label"]:<8} {t["phrase"]}{note}')
 @core_app.command(name="trap", rich_help_panel="Code Analysis")
-def trap_cmd(path=".", file_a="", file_b="", format="compact") -> None:
+def trap_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file_a: Annotated[str, typer.Option("--file-a", help="First file")] = "",
+    file_b: Annotated[str, typer.Option("--file-b", help="Second file")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Identifier overlap between two concurrently-edited files."""
 
     from quale.reports import trap_report
@@ -4318,15 +4365,18 @@ def trap_cmd(path=".", file_a="", file_b="", format="compact") -> None:
     overlap = data.get("overlap", 0)
     label = data.get("label", "")
     if overlap >= 0.8:
-        typer.echo(f'  \033[31m\u26a0 High merge risk\033[0m \u2014 {overlap:.0%} identifier overlap ({label})')
+        typer.echo(f'  \033[31m\u26a0 High merge risk\033[0m \u2014 {overlap:.0%} identifier overlap')
         typer.echo('  \033[90mThese files share many identifiers. Concurrent edits risk naming conflicts.\033[0m')
     elif overlap >= 0.5:
-        typer.echo(f'  \033[33m\u25cf Moderate overlap\033[0m \u2014 {overlap:.0%} ({label})')
+        typer.echo(f'  \033[33m\u25cf Moderate overlap\033[0m \u2014 {overlap:.0%}')
     else:
-        typer.echo(f'  \033[32m\u25cb Low overlap\033[0m \u2014 {overlap:.0%} ({label}) \u2014 safe to edit concurrently')
+        typer.echo(f'  \033[32m\u25cb Low overlap\033[0m \u2014 {overlap:.0%} \u2014 safe to edit concurrently')
 
 @core_app.command(name="hub-risk", rich_help_panel="Code Analysis")
-def thanatosis_cmd(path=".", format="compact") -> None:
+def thanatosis_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """High-centrality files with zero edits."""
 
     from quale.reports import thanatosis_report
@@ -4349,7 +4399,11 @@ def thanatosis_cmd(path=".", format="compact") -> None:
         typer.echo("These files touch many others but are not actively maintained.")
 
 @core_app.command(name="complexity-ratio", rich_help_panel="Code Analysis")
-def trompe_cmd(path=".", file="", format="compact") -> None:
+def trompe_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to analyze")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Apparent lines vs unique identifiers."""
 
     from quale.reports import trompe_report
@@ -4370,7 +4424,10 @@ def trompe_cmd(path=".", file="", format="compact") -> None:
     typer.echo(f'Trompe: {data.get("trompe_ratio",0)} — {data.get("label","")}')
 
 @core_app.command(name="porosity", rich_help_panel="Code Analysis")
-def porosity_cmd(path=".", format="compact") -> None:
+def porosity_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Sparse coupling estimate without computing co-occurrence."""
 
     from quale.reports import porosity_report
@@ -4396,7 +4453,10 @@ def porosity_cmd(path=".", format="compact") -> None:
     typer.echo("  Higher values = less co-occurrence = lower coupling (good).")
 
 @core_app.command(name="extinct-exports", rich_help_panel="Maintenance")
-def thylacine_cmd(path=".", format="compact") -> None:
+def thylacine_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Multi-file exports never imported externally."""
 
     from quale.reports import thylacine_report
@@ -4420,7 +4480,10 @@ def thylacine_cmd(path=".", format="compact") -> None:
         typer.echo('  Next: quale core cleanup-list | quale core escape-velocity')
 
 @core_app.command(name="coupling-chain", rich_help_panel="Code Analysis")
-def tensegrity_cmd(path=".", format="compact") -> None:
+def tensegrity_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Indirect coupling with no direct edge."""
 
     from quale.reports import tensegrity_report
@@ -4443,7 +4506,11 @@ def tensegrity_cmd(path=".", format="compact") -> None:
         typer.echo("  None found \u2014 no indirect coupling detected.")
 
 @core_app.command(name="criticality", rich_help_panel="Code Analysis")
-def criticality_cmd(path=".", file="", format="compact") -> None:
+def criticality_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to analyze")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """2-hop amplification ratio: changes amplify or dampen."""
 
     from quale.reports import criticality_report
@@ -4517,7 +4584,12 @@ def guard_cmd(
             typer.echo(f'  {k}: {v}')
 
 @core_app.command(name="check-pr", rich_help_panel="CI")
-def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact") -> None:
+def check_pr_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    base: Annotated[str, typer.Option("--base", help="Base git ref")] = "HEAD~1",
+    head: Annotated[str, typer.Option("--head", help="Target git ref")] = "HEAD",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """CI PR summary: parity-bit + trap + diff. [INFO: always exits 0]"""
     from quale.reports import check_pr_report
     p = os.path.abspath(path)
@@ -4544,7 +4616,10 @@ def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact") -> None
         typer.echo(f'  {mark} {pair}: {la}')
 
 @core_app.command(name="cleanup-list", rich_help_panel="Maintenance")
-def cleanup_list_cmd(path=".", format="compact") -> None:
+def cleanup_list_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Prioritized cleanup: extinct-exports x escape-velocity."""
 
     from quale.reports import cleanup_list_report
@@ -4567,7 +4642,10 @@ def cleanup_list_cmd(path=".", format="compact") -> None:
         typer.echo(f'  \u25cf {i["identifier"]}: {label}{note} \u2014 {i["files"]} files')
 
 @core_app.command(name="vulnerability-map", rich_help_panel="Maintenance")
-def vulnerability_map_cmd(path=".", format="compact") -> None:
+def vulnerability_map_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """Overlap of hub-risk and capillary."""
 
     from quale.reports import vulnerability_report
@@ -4592,7 +4670,10 @@ def vulnerability_map_cmd(path=".", format="compact") -> None:
         typer.echo("  \u26a0 These files are high-risk: coupled, connected, and critical.")
 
 @core_app.command(name="health-score", rich_help_panel="CI")
-def health_score_cmd(path=".", format="compact") -> None:
+def health_score_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
+) -> None:
     """2-axis health: coupling density x modularity. """
     from quale.reports import repo_health as health_score
     p = os.path.abspath(path)
@@ -4608,7 +4689,14 @@ def health_score_cmd(path=".", format="compact") -> None:
         return
     coupling = "coupled" if data.get("excess_porosity", 0) < 0 else "sparse"
     mod = "gapped" if data.get("spectral_gap", 0) >= 2 else ("moderate" if data.get("spectral_gap", 0) >= 1 else "flat")
-    typer.echo(f'{coupling} + {mod}')
+    if coupling == "coupled" and mod in ("gapped", "moderate"):
+        note = "High coupling with weak modularity. Consider refactoring."
+    elif coupling == "coupled":
+        note = "High coupling density. Files share many identifiers."
+    else:
+        note = "Low coupling, well-modularized."
+    typer.echo(f"Structural health: {coupling} + {mod}")
+    typer.echo(f"  {note}")
 
 
 @cli.command(name="review", rich_help_panel="Code Analysis")
@@ -4935,7 +5023,7 @@ def agent_edit(
 
 @agent_app.command(name="orient")
 def agent_orient(
-    path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
 ):
     """Token-optimized repo orientation for LLM Agents.
 
@@ -5006,11 +5094,11 @@ def ci_init(
     os.makedirs(workflow_dir, exist_ok=True)
     workflow_path = os.path.join(workflow_dir, "quale.yml")
     
-    content = """name: quale structural review
+    content = """name: quale guardrails
 on: [pull_request]
 
 jobs:
-  review:
+  guardrails:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -5018,10 +5106,19 @@ jobs:
           fetch-depth: 0
       - name: Install quale
         run: pip install quale
-      - name: CI check
+      - name: CI gate
         run: quale ci check origin/${{ github.base_ref }} HEAD
-      - name: CI comment
+      - name: PR comment
         run: quale ci comment origin/${{ github.base_ref }} HEAD
+      - name: Smoke test — all commands
+        run: python -m pytest tests/test_cli_smoke.py -v
+      - name: Output contracts
+        run: python -m pytest tests/test_output_contracts.py -v
+      - name: Dogfood — self-review
+        run: |
+          quale review --path .
+          quale onboard --path .
+          quale agent orient --path .
 """
     with open(workflow_path, "w") as f:
         f.write(content)
