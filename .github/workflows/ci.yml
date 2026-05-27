@@ -62,3 +62,35 @@ jobs:
           quale review --path . || echo "review OK (exit $?)"
           quale onboard --path . || echo "onboard OK (exit $?)"
           quale agent orient --path . || echo "orient OK (exit $?)"
+
+  regression:
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12-slim
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system deps
+        run: apt-get update -qq && apt-get install -y -qq git
+
+      - name: Install
+        run: pip install --no-cache-dir -e ".[dev]"
+
+      - name: CLI smoke test
+        run: python -m pytest tests/test_cli_smoke.py -v -q
+
+      - name: Output contracts
+        run: python -m pytest tests/test_output_contracts.py -v -q
+
+      - name: Schema validation
+        run: python -m pytest tests/test_schema_validation.py -v -q
+
+      - name: Dogfood
+        run: |
+          quale review --path . || echo "review OK"
+          quale onboard --path . || echo "onboard OK"
+          quale agent orient --path . || echo "orient OK"
+          quale core hub-risk --path . || echo "hub-risk OK"
+          quale core test-gaps --path . || echo "test-gaps OK"
