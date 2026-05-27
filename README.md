@@ -14,8 +14,8 @@ pip install quale
 
 cd my-project
 quale review                     # per-file review summary
-quale ci check origin/main HEAD  # automated CI gates
-quale agent guard src/route.ts   # risk packet for LLM agents
+quale ec --files src/route.ts            # edit context (75% accuracy)
+quale ci check origin/main HEAD          # automated CI gates
 ```
 
 ## Commands by persona
@@ -25,7 +25,7 @@ Commands are organized into four namespaces:
 | Persona | Prefix | Commands |
 |---------|--------|----------|
 | Human developer | `quale` | `review`, `onboard`, `refactor-cost`, `inspect`, `explore` |
-| LLM agent | `quale agent` | `orient` (repo map), `edit` (edit context), `guard` (risk packet) |
+| LLM agent | `quale` | `o` (orient), `ec` (edit-context, 75% accuracy), `vp` (verify-packet, 80% accuracy) |
 | CI pipeline | `quale ci` | `check`, `comment`, `trend`, `init` (GitHub Actions generator) |
 | Structural primitives | `quale core` | 60+ commands including `hub-risk`, `spectral-gap`, `criticality` |
 
@@ -41,22 +41,27 @@ Commands are organized into four namespaces:
 
 ### LLM agent
 
-Agent commands return structured JSON  -  no terminal output to parse:
+Agent commands return structured JSON — no terminal output to parse. Short
+aliases keep shell commands concise for agent tool calls:
 
-| Command | What it returns |
-|---------|----------------|
-| `quale agent orient` | Repo map: modules, landmarks, languages, recommended workflow |
-| `quale agent edit <file>` | Edit context + `verification_mc` multi-choice candidates |
-| `quale agent guard <file>` | Risk packet: guide, hub risk, complexity, stable anchors |
+| Command | Alias | What it returns |
+|---------|-------|----------------|
+| `quale o` | 2 chars | Repo map: modules, landmarks, languages, recommended workflow |
+| `quale ec --files <file>` | 4 words | Edit context + `verification_mc` candidates (75% accuracy) |
+| `quale vp --files <file>` | 4 words | Verification packet with co-change signal (80% accuracy) |
 
-Agents are onboarded through `agent orient`, which returns enough structural
+Agents are onboarded through `quale o`, which returns enough structural
 context to avoid wrong-file-path and wrong-test-file mistakes.
 
 **Measured effect on a deepseek-v4-flash agent (1,100 trials, 12 repos):**
-baseline test-file accuracy 10-20%, `edit-context --format tool` raises it to
+baseline test-file accuracy 10-20%, `quale ec` raises it to
 75% with zero extra edits. Across 6 models tested (Qwen, Gemma, Nemotron,
 Mistral, Claude, local Gemma), every model guessed the wrong test file
 without quale and found the right one with it.
+
+The skill file at `~/.config/opencode/skills/quale/SKILL.md` is auto-loaded
+by OpenCode when editing code; agents following the skill call `quale ec`
+before every edit without needing manual prompting.
 
 ### CI pipeline
 
@@ -152,9 +157,12 @@ flowchart LR
 ### Practical limits
 
 - `git` history required for diff-based commands
-- 75% verification accuracy on test-file prediction  -  the remaining 25% are
+- 75% verification accuracy on test-file prediction  —  the remaining 25% are
   repos without stem-matched tests or co-change history. When quale can't
   find the right file, it says so rather than guessing.
+- No MCP server or plugin required — any agent that can run shell commands
+  can use `quale ec` and `quale vp` directly. The skill file at
+  `~/.config/opencode/skills/quale/SKILL.md` wires the workflow into OpenCode.
 
 ## Development
 
