@@ -1,0 +1,21 @@
+name: Stale
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-stale: 90
+          days-before-close: 30
+          stale-issue-message: >
+            This issue has been inactive for 90 days. If still relevant, please
+            comment or it will be closed in 30 days.
+          stale-pr-message: >
+            This PR has been inactive for 90 days. Please address feedback
+            or it will be closed in 30 days.
+          exempt-issue-labels: keep,pinned,security
+          exempt-pr-labels: keep,pinned

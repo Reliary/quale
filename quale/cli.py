@@ -5090,15 +5090,12 @@ jobs:
         run: quale ci check origin/${{ github.base_ref }} HEAD
       - name: PR comment
         run: quale ci comment origin/${{ github.base_ref }} HEAD
-      - name: Smoke test — all commands
-        run: python -m pytest tests/test_cli_smoke.py -v
+      - name: Smoke test
+        run: python -m pytest tests/test_cli_smoke.py -v -q
       - name: Output contracts
-        run: python -m pytest tests/test_output_contracts.py -v
-      - name: Dogfood — self-review
-        run: |
-          quale review --path .
-          quale onboard --path .
-          quale agent orient --path .
+        run: python -m pytest tests/test_output_contracts.py -v -q
+      - name: Schema validation
+        run: python -m pytest tests/test_schema_validation.py -v -q
 """
     with open(workflow_path, "w") as f:
         f.write(content)
