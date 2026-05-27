@@ -3670,6 +3670,10 @@ def _entry_main():
         from quale import __version__
         typer.echo(f"quale-cli {__version__}")
         return
+    if "--mcp" in sys.argv:
+        from quale.mcp_server import run
+        run()
+        return
     if "--agent-orient" in sys.argv:
         typer.echo(json.dumps({
             "schema_version": 1,
