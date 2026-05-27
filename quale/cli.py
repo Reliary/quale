@@ -137,6 +137,33 @@ def main(
     if help_all:
         _help_all(ctx)
     _version_callback(version)
+    if ctx.invoked_subcommand is None:
+        typer.echo("")
+        typer.echo(_color("  quale — structural codebase analysis.  ", "header"))
+        typer.echo("  No parsers, no config, any language.")
+        typer.echo("")
+        typer.echo(_color("  For humans:", "subheader"))
+        typer.echo("    review                   One-command code review for your PR")
+        typer.echo("    onboard                  Onboarding guide for a new repo")
+        typer.echo("    refactor-cost <file>     Estimate refactoring effort")
+        typer.echo("    inspect                  Full codebase overview")
+        typer.echo("    explore                  Map of best files to read")
+        typer.echo("")
+        typer.echo(_color("  For CI pipelines:", "subheader"))
+        typer.echo("    ci check <base> <head>   Run all structural gates (exits 0-7)")
+        typer.echo("    ci comment <base> <head> Post PR report to GitHub")
+        typer.echo("    ci trend                 CI metric trends")
+        typer.echo("")
+        typer.echo(_color("  For LLM agents:", "subheader"))
+        typer.echo("    agent edit <file>        Safety packet (JSON)")
+        typer.echo("    agent guard <file>       Combined guard (JSON)")
+        typer.echo("    agent orient             Repo map (JSON)")
+        typer.echo("")
+        typer.echo(_color("  Under the hood:", "subheader"))
+        typer.echo("    core <cmd>               45+ advanced structural primitives")
+        typer.echo("")
+        typer.echo("  Run 'quale <cmd> --help' or 'quale --help-all' for details.")
+        raise typer.Exit()
 
 
 def _bar(pct: float, width: int = 20) -> str:
@@ -285,6 +312,8 @@ def diff(
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
 
+    from quale.scanner import scan_codebase, _is_lock_file, _is_generated
+
     try:
         analysis_a = scan_codebase(path, git_ref=ref_a, quiet=True)
         analysis_b = scan_codebase(path, git_ref=ref_b, quiet=True)
@@ -292,12 +321,30 @@ def diff(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
+    def _skip_diff_phrase(p: str) -> bool:
+        low = p.lower()
+        if _is_generated(p) or _is_lock_file(p):
+            return True
+        if "// indirect" in low or "go.sum" in low:
+            return True
+        if any(kw in p for kw in ["v0.", "v1.", "v2.", "v3.", "v4.", "v5.", "go.sum"]):
+            return True
+        for ext in [".sum", ".mod", "-lock.json", "yarn.lock", "Cargo.lock", "Gemfile.lock"]:
+            if ext in p:
+                return True
+        return False
+
     phrases_a: set[str] = set()
     for fv in analysis_a.file_vocabs:
-        phrases_a.update(fv.vocabulary.keys())
+        if not _is_lock_file(fv.path) and not _is_generated(fv.path):
+            phrases_a.update(fv.vocabulary.keys())
     phrases_b: set[str] = set()
     for fv in analysis_b.file_vocabs:
-        phrases_b.update(fv.vocabulary.keys())
+        if not _is_lock_file(fv.path) and not _is_generated(fv.path):
+            phrases_b.update(fv.vocabulary.keys())
+
+    phrases_a = {p for p in phrases_a if not _skip_diff_phrase(p)}
+    phrases_b = {p for p in phrases_b if not _skip_diff_phrase(p)}
 
     new_concepts = phrases_b - phrases_a
     retired_concepts = phrases_a - phrases_b
@@ -2220,6 +2267,7 @@ def stable(
 @cli.command(rich_help_panel="Getting Started")
 def explore(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
+    path_opt: Annotated[str, typer.Option("--path", "-p", help="Path to codebase", hidden=True)] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
     themes: Annotated[bool, typer.Option("--themes", "-t", help="Also detect latent structural themes (slower)")] = False,
 ):
@@ -2231,6 +2279,8 @@ def explore(
     With --themes, runs deeper analysis to discover conceptual groupings
     across the codebase.
     """
+    if path_opt:
+        path = path_opt
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
@@ -2934,7 +2984,7 @@ def ci_report_cmd(
     else:
         typer.echo(f"  {c('INFO', 'cyan')}: no gates configured")
     typer.echo(
-        f"  {c('Metrics:', 'subheader')} mirror {data.get('mirror_gap_ratio', 0.0):.0%}, "
+        f"  {c('Metrics:', 'subheader')} mirror coverage {data.get('mirror_gap_ratio', 0.0):.0%}, "
         f"blast {data.get('max_blast_tier', 'none')}, "
         f"stable touched {data.get('stable_touched_count', 0)}"
     )
@@ -3019,6 +3069,7 @@ def ci_report_cmd(
 @cli.command(rich_help_panel="Getting Started")
 def inspect(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
+    path_opt: Annotated[str, typer.Option("--path", "-p", help="Path to repo", hidden=True)] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     anomalies: Annotated[bool, typer.Option("--anomalies", help="Load cached scan and show deltas")] = False,
     why: Annotated[bool, typer.Option("--why", help="Show why each section matters")] = False,
@@ -3028,6 +3079,8 @@ def inspect(
     Single command that tells you what matters about a codebase:
     top files, module boundaries, structural themes, stability, churn, health score.
     """
+    if path_opt:
+        path = path_opt
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
@@ -3522,41 +3575,23 @@ def _entry_main():
             "_agent_note": "See 'quale help-agent <TASK>' for task-specific command recommendations"
         }, indent=2))
         return
-    if len(sys.argv) == 1 or "--help-all" in sys.argv:
-        if "--help-all" in sys.argv:
-            _help_all(None)
-            sys.exit(0)
-        typer.echo("quale — grammar-free structural codebase analyzer")
-        typer.echo("Start here:")
-        typer.echo("  quale agent-bootstrap . --task \"fix upload\" --summary")
-        typer.echo("  quale inspect .")
-        typer.echo("  quale help-agent \"change API client\"")
-        typer.echo("")
-        typer.echo("CI / PR:")
-        typer.echo("  quale ci-report origin/main HEAD --summary")
-        typer.echo("  quale ci-report origin/main HEAD --fail-on-blast-tier high")
-        typer.echo("  quale blast origin/main HEAD")
-        typer.echo("  quale pr-report origin/main HEAD")
-        typer.echo("")
-        typer.echo("History / structure:")
-        typer.echo("  quale repo-map .               one-time repo summary (LLM)")
-        typer.echo("  quale vocabulary-trend --path .                vocabulary diversity over history")
-        typer.echo("  quale patterns --path .               refactoring pattern hints")
-        typer.echo("  quale anomalies --path .                structural defect summary")
-        typer.echo("  quale stable .")
-        typer.echo("  quale timeline . --format json")
-        typer.echo("  quale provenance SpoolManager . --format json")
-        typer.echo("  quale modules .")
-        typer.echo("  quale fingerprint .")
-        typer.echo("")
-        typer.echo("Cross-repo / search:")
-        typer.echo("  quale search SpoolManager ../repo-a ../repo-b")
-        typer.echo("  quale compare ../repo-a ../repo-b --format json")
-        typer.echo("")
-        typer.echo("Other commands: analyze, diff, lifecycle, explore, clone, landmarks, orphans, init, coupling, origins, stop")
-        typer.echo("Tip: most agent-facing commands support --format json.")
+    if len(sys.argv) == 1:
+        cli()
         return
-    cli()
+    if "--help-all" in sys.argv:
+        _help_all(None)
+        return
+    try:
+        cli()
+    except SystemExit as e:
+        if e.code == 2 and len(sys.argv) >= 2 and sys.argv[1] != "core":
+            cmd = sys.argv[1]
+            core_names = {c.name for c in core_app.registered_commands}
+            if cmd in core_names:
+                sys.argv.insert(1, "core")
+                cli()
+                return
+        raise
 
 
 @core_app.command(name="anomalies",  rich_help_panel="Maintenance")
@@ -4548,7 +4583,7 @@ def review_cmd(
     typer.echo(f"  Base: {base_ref}  Head: {head_ref}")
     typer.echo(f"  Files changed: {len(data.get('changed_files', []))}")
     typer.echo(f"  Blast radius:  {data.get('blast_radius_count', 0)} files")
-    typer.echo(f"  Mirror gap:    {data.get('mirror_gap_ratio', 1.0):.0%}")
+    typer.echo(f"  Mirror cov:    {data.get('mirror_gap_ratio', 1.0):.0%}")
     typer.echo(f"  Stable anchor: {data.get('stable_touched_count', 0)} touched")
     if data.get('hub_warning'):
         typer.echo(f"  \033[33mHub risk:\033[0m     {len(data.get('hub_risk_flagged', []))} file(s) in top 10% coupling")
@@ -4649,21 +4684,45 @@ def refactor_cost_cmd(
         color = yellow
     else:
         color = red
+    direct = data.get('direct_impact', 0)
+    transitive = data.get('transitive_estimate', 0)
+    escaped = data.get('escape_velocity', 'UNKNOWN') == 'ESCAPED'
+    hub_pct = data.get('hub_percentile', 0)
+    clones = data.get("clone_files", [])
+    pre = data.get("pre_clean", [])
+
     typer.echo("")
     typer.echo(f"  {teal}═══ Refactor Cost: {file_path} ═══{reset}")
-    typer.echo(f"  Direct impact:  {data.get('direct_impact', 0)} files share identifiers")
-    typer.echo(f"  Transitive:     ~{data.get('transitive_estimate', 0)} files via 1-hop coupling")
-    typer.echo(f"  Escape vel:     {data.get('escape_velocity', 'UNKNOWN')}")
-    clones = data.get("clone_files", [])
+    typer.echo("")
+    if direct <= 3 and not escaped:
+        typer.echo(f"  {green}Simple change — mostly self-contained.{reset}")
+    elif direct <= 15 and not escaped:
+        typer.echo(f"  {yellow}Moderate impact — changing this file will touch a few others.{reset}")
+    else:
+        typer.echo(f"  {red}High impact — this change touches {direct} files total. Plan carefully.{reset}")
+    typer.echo("")
+    typer.echo("  What this means:")
+    if direct > 0:
+        typer.echo(f"   • This file shares identifiers with {direct} file(s). If you rename a symbol, all of them need updating.")
+    if transitive > direct:
+        typer.echo(f"   • Indirectly, ~{transitive} files import those {direct} files — the ripple effect is wider than the direct count.")
+    if escaped:
+        typer.echo(f"   • Its vocabulary has \"escaped\" beyond the original module — other files now depend on concepts defined here.")
+    if hub_pct > 0:
+        typer.echo(f"   • It's more coupled than {100 - hub_pct}% of files in this repo.")
     if clones:
-        typer.echo(f"  Clone risk:     {len(clones)} structural clone(s): {', '.join(clones[:3])}")
-    typer.echo(f"  Hub perc:       {data.get('hub_percentile', 0)}%")
-    typer.echo(f"  {color}Effort: {effort}{reset}")
-    pre = data.get("pre_clean", [])
+        typer.echo(f"   • {len(clones)} structural clone(s) exist: {', '.join(clones[:3])}. Fixing one means fixing them all.")
+    typer.echo("")
+    if effort == "LOW":
+        typer.echo(f"  {color}Estimated effort: {effort} — straightforward, safe to start{reset}")
+    elif effort == "MEDIUM":
+        typer.echo(f"  {color}Estimated effort: {effort} — plan for an afternoon{reset}")
+    else:
+        typer.echo(f"  {color}Estimated effort: {effort} — may take a day or more{reset}")
     if pre:
-        typer.echo(f"  \033[33mPre-clean:\033[0m  Refactor clones first: {', '.join(pre[:3])}")
+        typer.echo(f"  Pre-clean: Refactor clones first: {', '.join(pre[:3])}")
     if data.get("risk_note"):
-        typer.echo(f"  \033[33mRisk:\033[0m      {data['risk_note']}")
+        typer.echo(f"  Risk: {data['risk_note']}")
 
 
 @core_app.command(name="ci-trend", rich_help_panel="CI")

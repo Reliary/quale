@@ -18,6 +18,18 @@ if TYPE_CHECKING:
 
 # ── CI Report ─────────────────────────────────────────────────────
 
+def _append_ci_metrics(path: str, metrics: dict) -> None:
+    """Append CI metric snapshot to .quale/ci-history.jsonl."""
+    try:
+        history_dir = os.path.join(os.path.abspath(path), ".quale")
+        os.makedirs(history_dir, exist_ok=True)
+        history_file = os.path.join(history_dir, "ci-history.jsonl")
+        with open(history_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(metrics) + "\n")
+    except Exception:
+        pass  # Non-fatal failure
+
+
 def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
     from quale.scanner import scan_codebase, _mirror_signals
 
@@ -120,6 +132,24 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
     mirror_gap_ratio = mirror.get("mirror_ratio", 0.0) if mirror else 0.0
     stable_touched_count = len([s for s in stable_touched if s["status"] == "stable_anchor"])
 
+    hub_risk_flagged = _check_hub_risk(path, changed, analysis)
+    clone_flagged = _check_clone_flag(path, changed, analysis, head_ref)
+    new_identifier_count = _count_new_identifiers(path, base_ref, head_ref)
+
+    _append_ci_metrics(path, {
+        "timestamp": time.time(),
+        "base_ref": base_ref,
+        "head_ref": head_ref,
+        "changed_files": len(changed),
+        "blast_radius_count": len(blast_results),
+        "mirror_gap_ratio": mirror_gap_ratio,
+        "stable_touched_count": stable_touched_count,
+        "max_blast_tier": max_blast_tier,
+        "hub_risk_flagged": hub_risk_flagged,
+        "clone_flagged": clone_flagged,
+        "new_identifier_count": new_identifier_count,
+    })
+
     return {
         "schema_version": 1,
         "base_ref": base_ref,
@@ -132,6 +162,9 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
         "stable_touched_count": stable_touched_count,
         "blast_tier_counts": blast_tier_counts,
         "stable_files_touched": stable_touched,
+        "hub_risk_flagged": hub_risk_flagged,
+        "clone_flagged": clone_flagged,
+        "new_identifier_count": new_identifier_count,
         "risk_flags": risk_flags,
         "summary": (
             f"{len(changed)} files changed. "
@@ -139,6 +172,329 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
             + (f"{len(stable_touched)} stable files touched." if stable_touched else "")
         ),
     }
+
+
+def review_summary(path: str = ".", base_ref: str = "HEAD~1", head_ref: str = "HEAD") -> dict:
+    """Single human review command: wraps ci_report + test-gaps + hub-risk."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository.", "review": "FAIL"}
+    try:
+        ci = ci_report(base_ref, head_ref, path)
+    except Exception:
+        return {"error": "ci_report failed", "review": "FAIL"}
+    if "error" in ci:
+        return ci
+    from quale.scanner import scan_codebase
+    try:
+        analysis = scan_codebase(path, git_ref=head_ref, quiet=False, max_files=2500, max_seconds=30)
+    except Exception:
+        analysis = None
+    gap_warnings = []
+    if ci.get("mirror_gap_ratio", 1.0) < 0.5:
+        gap_warnings.append(f"test coverage gap: only {ci.get('mirror_gap_ratio', 0.0):.0%} of changed files have matching test files")
+    if ci.get("stable_touched_count", 0) > 0:
+        gap_warnings.append(f"{ci['stable_touched_count']} stable file(s) changed")
+    hub_warning = any(ci.get("hub_risk_flagged", []))
+    clone_warning = any(ci.get("clone_flagged", []))
+    read_first = [r["file"] for r in ci.get("blast_radius", [])[:5]]
+    verify_with = []
+    if ci.get("mirror_signals"):
+        ms = ci["mirror_signals"]
+        if ms.get("mirror_files"):
+            verify_with = ms["mirror_files"][:5]
+    return {
+        "base_ref": base_ref,
+        "head_ref": head_ref,
+        "changed_files": ci.get("changed_files", []),
+        "blast_radius_count": len(ci.get("blast_radius", [])),
+        "mirror_gap_ratio": ci.get("mirror_gap_ratio", 1.0),
+        "stable_touched_count": ci.get("stable_touched_count", 0),
+        "hub_risk_flagged": ci.get("hub_risk_flagged", []),
+        "clone_flagged": ci.get("clone_flagged", []),
+        "warnings": gap_warnings,
+        "hub_warning": hub_warning,
+        "clone_warning": clone_warning,
+        "read_first": read_first,
+        "verify_with": verify_with,
+        "review": "FAIL" if (gap_warnings or hub_warning or clone_warning) else "PASS",
+    }
+
+
+def onboard_plan(path: str = ".") -> dict:
+    """Produce a 3-step onboarding plan from landmarks, modules, and safe islands."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    from quale.scanner import scan_codebase, _compute_landmarks, _DEAD_CODE_EXTS, _is_lock_file, _is_generated
+    from quale.bootstrap import compute_modules
+    path_abs = os.path.abspath(path)
+    try:
+        analysis = scan_codebase(path_abs, quiet=False, deep=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    all_landmarks = _compute_landmarks(analysis.file_vocabs) if analysis.file_vocabs else []
+    code_landmarks = []
+    for l in all_landmarks:
+        ext = os.path.splitext(l["path"])[1].lower()
+        if ext in _DEAD_CODE_EXTS and not _is_lock_file(l["path"]) and not _is_generated(l["path"]):
+            code_landmarks.append(l)
+    landmarks = code_landmarks[:5]
+    why_map = {
+        "go": "Go entry point — start here to understand the service wiring",
+        "ts": "TypeScript module — defines the main types and interfaces",
+        "py": "Python module — core business logic lives here",
+        "rs": "Rust module — performance-critical path",
+        "java": "Java class — primary data model",
+    }
+    step1 = []
+    for l in landmarks:
+        ext = os.path.splitext(l["path"])[1].lstrip(".")
+        why = why_map.get(ext, f"key {ext} file — representative vocabulary across the repo")
+        step1.append({"file": l["path"], "why": why})
+    mods = compute_modules(path_abs, analysis=analysis)
+    modules_list = mods.get("modules", []) if isinstance(mods, dict) else []
+    step2 = []
+    for m in modules_list[:5]:
+        files = m.get("files", [])
+        if not files:
+            continue
+        label = m.get("label", "unknown")
+        if label == "unknown" and files:
+            dirs = [os.path.dirname(f) for f in files]
+            label = os.path.commonpath(dirs) if len(dirs) > 1 else dirs[0]
+            label = label.replace(os.path.sep, " / ") or label
+        code_files = [f for f in files if os.path.splitext(f)[1].lower() in _DEAD_CODE_EXTS]
+        step2.append({"module": label, "file_count": len(code_files), "total_files": len(files), "sample_files": code_files[:3]})
+    safe = _safe_islands_data(analysis) if analysis.file_vocabs else []
+    step3 = [{"directory": d, "why": "low vocabulary volatility, isolated structure"} for d in safe[:5]]
+    why_steps = [
+        "These files have the most unique vocabulary — they define the concepts everything else imports. Read them to understand the domain language.",
+        "These are co-occurring file groups. Each module has its own vocabulary dialect. Understanding module boundaries helps you know where a change belongs.",
+        "These directories change infrequently and are structurally isolated. Safe for experimentation and quick fixes without breaking other code.",
+    ]
+    steps = []
+    for i, (s, w) in enumerate(zip(
+        [step1, step2, step3],
+        why_steps
+    )):
+        titles = ["Read these landmark files", "Understand these modules", "Safe to edit"]
+        steps.append({"step": i + 1, "title": titles[i], "why": w, "items": s})
+    return {
+        "steps": steps,
+        "landmark_count": len(code_landmarks),
+        "module_count": len(modules_list),
+        "safe_island_count": len(safe),
+    }
+
+
+def _safe_islands_data(analysis) -> list[str]:
+    """Find structurally isolated blocks safe to edit."""
+    safe: list[str] = []
+    dir_counts: dict[str, int] = {}
+    for fv in analysis.file_vocabs:
+        d = os.path.dirname(fv.path) or "."
+        dir_counts.setdefault(d, 0)
+        dir_counts[d] += len(fv.vocabulary)
+    dir_files: dict[str, int] = {}
+    for fv in analysis.file_vocabs:
+        d = os.path.dirname(fv.path) or "."
+        dir_files[d] = dir_files.get(d, 0) + 1
+    avg_phrases = sum(dir_counts.values()) / max(len(dir_counts), 1)
+    for d, count in sorted(dir_counts.items(), key=lambda x: -x[1]):
+        parts = d.split(os.path.sep)
+        if any(p.startswith(".") for p in parts if p):
+            continue
+        if count < avg_phrases * 0.3 and dir_files.get(d, 0) <= 3:
+            safe.append(d)
+    return sorted(safe)[:10]
+
+
+def refactor_effort(path: str = ".", file_path: str = "") -> dict:
+    """Estimate refactoring effort for a file: blast + escape + clones + hub."""
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path_abs = os.path.abspath(path)
+    from quale.scanner import scan_codebase, _mirror_signals, _find_structural_clones
+    try:
+        analysis = scan_codebase(path_abs, quiet=False, deep=True, max_files=2500, max_seconds=30)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+    matched = [fv for fv in analysis.file_vocabs if fv.path == file_path]
+    if not matched:
+        return {"error": f"File not found in scan: {file_path}"}
+    fv = matched[0]
+    blast = []
+    for v2 in analysis.file_vocabs:
+        if v2.path == file_path:
+            continue
+        shared = len(set(fv.vocabulary) & set(v2.vocabulary))
+        if shared >= 2:
+            blast.append({"file": v2.path, "shared_concepts": shared})
+    blast.sort(key=lambda x: -x["shared_concepts"])
+    blast_count = len(blast)
+    is_escaped = blast_count >= 8 and any(b["shared_concepts"] >= 5 for b in blast[:3])
+    clones = _find_structural_clones(analysis.file_vocabs)
+    clone_for_file = []
+    for group in clones:
+        if file_path in group.get("files", []):
+            others = [f for f in group["files"] if f != file_path]
+            clone_for_file = others[:3]
+            break
+    dirs = set(os.path.dirname(v.path) or "." for v in analysis.file_vocabs)
+    hub_pct = sum(1 for v in analysis.file_vocabs if len(v.vocabulary) >= len(fv.vocabulary))
+    hub_pct = round(hub_pct / max(len(analysis.file_vocabs), 1) * 100)
+    signals = []
+    if blast_count >= 12:
+        signals.append("high_blast")
+    elif blast_count >= 4:
+        signals.append("medium_blast")
+    if is_escaped:
+        signals.append("high_escape")
+    if clone_for_file:
+        signals.append("clones_exist")
+    if hub_pct <= 10:
+        signals.append("hub_file")
+    signal_count = len(signals)
+    if signal_count >= 3 or (blast_count >= 12 and clone_for_file):
+        effort_tier = "HIGH"
+    elif signal_count >= 1:
+        effort_tier = "MEDIUM"
+    else:
+        effort_tier = "LOW"
+    return {
+        "file": file_path,
+        "effort": effort_tier,
+        "direct_impact": blast_count,
+        "transitive_estimate": blast_count * 2,
+        "escape_velocity": "ESCAPED" if is_escaped else ("BOUND" if blast_count >= 3 else "CONTAINED"),
+        "clone_files": clone_for_file,
+        "hub_percentile": 100 - hub_pct,
+        "signals": signals,
+        "pre_clean": [c for c in clone_for_file],
+        "core_files": [b["file"] for b in blast[:3]],
+        "verify_with": [],
+        "risk_note": "Clones exist: refactor clones first to avoid divergence" if clone_for_file else "",
+        "summary": f"Refactoring {file_path} affects {blast_count} other files. Effort: {effort_tier}.",
+    }
+
+
+def ci_trend(path: str = ".", weeks: int = 12) -> dict:
+    """Read ci history file and report metric trends."""
+    history_file = os.path.join(os.path.abspath(path), ".quale", "ci-history.jsonl")
+    if not os.path.exists(history_file):
+        return {"error": "No CI history found. Run ci-report first.", "trends": []}
+    entries: list[dict] = []
+    with open(history_file, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    window = entries[-weeks:] if len(entries) > weeks else entries
+    if len(window) < 2:
+        return {"error": f"Insufficient history ({len(window)} entry). Need at least 2.", "trends": []}
+    def slope(values: list[float]) -> str:
+        if len(values) < 2:
+            return "insufficient"
+        first, last = values[0], values[-1]
+        avg = sum(values) / len(values)
+        if avg == 0:
+            return "stable"
+        pct_change = (last - first) / abs(avg) * 100
+        if pct_change > 15:
+            return "increasing"
+        if pct_change < -15:
+            return "decreasing"
+        return "stable"
+    blast_values = [e.get("blast_radius_count", 0) for e in window if "blast_radius_count" in e]
+    mirror_values = [e.get("mirror_gap_ratio", 0) for e in window if "mirror_gap_ratio" in e]
+    health_values = [e.get("health_score", 0) for e in window if "health_score" in e]
+    trends = {}
+    if blast_values:
+        trends["blast_radius"] = {"values": blast_values, "trend": slope(blast_values)}
+    if mirror_values:
+        trends["mirror_gap_ratio"] = {"values": mirror_values, "trend": slope(mirror_values)}
+    if health_values:
+        trends["health_score"] = {"values": health_values, "trend": slope(health_values)}
+    return {
+        "entries": len(entries),
+        "window": len(window),
+        "trends": trends,
+    }
+    """Find changed files in top 10% hub-risk percentile."""
+    if not analysis or not changed:
+        return []
+    import os
+    code_exts = frozenset({".go", ".ts", ".js", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".scala"})
+    hubs: list[tuple[str, int]] = []
+    for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in code_exts:
+            continue
+        degree = len(fv.vocabulary)
+        hubs.append((fv.path, degree))
+    hubs.sort(key=lambda x: -x[1])
+    threshold = max(len(hubs) // 10, 1)
+    top_hubs = set(h for h, _ in hubs[:threshold])
+    return [{"file": f, "hub_rank": i + 1} for i, f in enumerate(changed) if f in top_hubs]
+
+def _check_hub_risk(path: str, changed: list[str], analysis) -> list[dict]:
+    """Find changed files in top 10% hub-risk percentile."""
+    if not analysis or not changed:
+        return []
+    code_exts = frozenset({".go", ".ts", ".js", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".scala"})
+    hubs: list[tuple[str, int]] = []
+    for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in code_exts:
+            continue
+        degree = len(fv.vocabulary)
+        hubs.append((fv.path, degree))
+    hubs.sort(key=lambda x: -x[1])
+    threshold = max(len(hubs) // 10, 1)
+    top_hubs = set(h for h, _ in hubs[:threshold])
+    return [{"file": f, "hub_rank": i + 1} for i, f in enumerate(changed) if f in top_hubs]
+
+
+def _check_clone_flag(path: str, changed: list[str], analysis, head_ref: str) -> list[dict]:
+    """Find changed files that are structural clones of other files."""
+    if not analysis or not changed:
+        return []
+    from quale.scanner import _find_structural_clones
+    clones = _find_structural_clones(analysis.file_vocabs) if analysis.file_vocabs else []
+    changed_set = set(changed)
+    flagged: list[dict] = []
+    for group in clones:
+        clone_files = group.get("files", [])
+        overlapping = [f for f in clone_files if f in changed_set]
+        if overlapping:
+            flagged.append({
+                "file": overlapping[0],
+                "clone_group": [f for f in clone_files if f != overlapping[0]][:3],
+                "similarity": group.get("similarity", 0.0),
+            })
+    return flagged
+
+
+def _count_new_identifiers(path: str, base_ref: str, head_ref: str) -> int:
+    """Count identifiers in head that don't exist in base."""
+    import re
+    from quale.scanner import scan_codebase, _extract_identifiers
+    try:
+        base = scan_codebase(path, git_ref=base_ref, quiet=True, max_files=2500, max_seconds=15)
+        head = scan_codebase(path, git_ref=head_ref, quiet=True, max_files=2500, max_seconds=15)
+    except Exception:
+        return 0
+    base_ids: set[str] = set()
+    for fv in base.file_vocabs:
+        base_ids.update(_extract_identifiers(fv, min_len=4))
+    head_ids: set[str] = set()
+    for fv in head.file_vocabs:
+        head_ids.update(_extract_identifiers(fv, min_len=4))
+    new_ids = head_ids - base_ids
+    return len(new_ids)
 
 
 def _spectrum_analysis(file: str, analysis) -> dict:
