@@ -8,10 +8,18 @@ A CLI that tells you what to edit, what to test, and what to leave alone. Works 
 pip install quale
 
 cd my-project
-quale guard --task "fix upload" --format tool
+
+# For Humans: Review your current changes
+quale review
+
+# For CI: Automated gates
+quale ci check origin/main HEAD
+
+# For LLM Agents: JSON-formatted safety packet
+quale agent guard src/my_file.ts
 ```
 
-That's it. One command tells you which files to read, which test to run, and what not to touch. Output is JSON an agent can consume directly.
+That's it. One command tells you which files to read, which test to run, and what not to touch. 
 
 ## What it solves
 
@@ -19,31 +27,36 @@ Every LLM guesses the wrong test file path on a plain prompt. They all guess `sr
 
 quale reads your repo's structure and gives the model what it's missing. 900+ trials across 12 repos and 7 model families: the wrong-path mistake is universal, and quale fixes it every time.
 
-## Commands
+## Persona-Driven Commands
 
+Quale is organized into namespaces tailored for how you work:
+
+### 🧑‍💻 For Human Developers (Top-Level)
 | Command | What it does |
 |---------|-------------|
-| `quale --agent-orient` | JSON manifest: conventions, workflow, gotchas (run after install) |
-| `quale guard --task "..." --format tool` | Safety packet: what to read, what to test, what not to touch |
-| `quale edit-context --files path.ts --task "..." --format tool` | Pre-edit scope: read first, verify with, avoid |
-| `quale verify-packet --files path.ts --task "..." --format tool` | Test candidates only (priority, entangle, negative) |
-| `quale inspect .` | Onboarding: key files, modules, churn |
-| `quale ci-report origin/main HEAD --summary` | CI: blast radius, mirror gap, stable anchors |
+| `quale review` | Single human review summary: blast radius, test gaps, hub risk, clones |
+| `quale onboard` | 3-step onboarding plan (landmarks, modules, safe directories) |
+| `quale refactor-cost path/to/file` | Estimate refactoring effort (blast + escape + clones + hub) |
+| `quale explore .` | Onboarding map: best files to read first |
 
-For an agent:
+### 🤖 For LLM Agents (`quale agent`)
+Agents shouldn't waste tokens memorizing flags. Commands in the `agent` namespace inherently return optimized JSON/IR output.
+| Command | What it does |
+|---------|-------------|
+| `quale agent edit src/file.ts` | File-scoped edit context and risk card in JSON |
+| `quale agent guard src/file.ts` | Combined safety packet: guide + hub-risk + complexity |
+| `quale agent orient` | Token-optimized structural repo map |
 
-1. Run `quale --agent-orient` after pip install — returns a JSON manifest with flag conventions, workflow ordering, format types, and gotchas. The tool teaches itself.
-2. Then `quale help-agent "change upload behavior" --format tool` for task-specific recommendations.
+### 🚦 For CI Maintainers (`quale ci`)
+| Command | What it does |
+|---------|-------------|
+| `quale ci init` | Generates a ready-to-use GitHub Actions YAML |
+| `quale ci check base head` | Runs structural CI gates (`--fail-on-hub-risk`, `--fail-on-mirror-gap`, etc) |
+| `quale ci comment base head`| Posts the PR structural report as a GitHub comment |
+| `quale ci trend` | Tracks CI metric trends over time |
 
-Every agent-facing command (`edit-context`, `guard`, `contract`, `check-plan`, `verify-packet`) carries an `_agent_note` field in its `--format tool` JSON explaining the flag syntax for that command.
-
-There is no setup or "init" step. The first time the command runs on a repo, quale automatically scans the codebase and caches the structural map (takes 1-3 seconds). Subsequent calls are instant.
-
-For CI gates:
-
-> `quale ci-report origin/main HEAD --fail-on-blast-tier high`
-
-More commands: [docs/COMMANDS.md](docs/COMMANDS.md)
+### 🔬 For Advanced Analysis (`quale core`)
+Over 30 advanced mathematical and structural primitives (e.g., `spectral-gap`, `heisenberg`, `capillary`) are tucked away in the `core` namespace. See `quale core --help` for the full list.
 
 ## How it works
 
@@ -58,4 +71,5 @@ Reads code as text. Splits on delimiters, counts phrase frequency per file, meas
 ## Further reading
 
 - [docs/COMMANDS.md](docs/COMMANDS.md) (full reference)
+- [docs/CI_INTEGRATION.md](docs/CI_INTEGRATION.md) (CI setup)
 - [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md) (methodology and results)

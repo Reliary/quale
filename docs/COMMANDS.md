@@ -1,111 +1,66 @@
 # Command Reference
 
-## Agent: Getting Started (Install to Productive)
+## 🧑‍💻 Human Developer (Top-Level)
+
+The top-level commands are optimized for low-friction, actionable insights for developers working in the terminal.
 
 ```bash
-quale --agent-orient                                    # JSON manifest: conventions, workflow, gotchas
-quale help-agent "change upload behavior" --format tool  # task-specific recommendations + workflow
+quale review                          # Single human review summary: blast radius, test gaps, hub risk, clones
+quale onboard                         # 3-step onboarding plan (landmarks, modules, safe directories)
+quale refactor-cost src/spool.ts      # Estimate refactoring effort for a file: blast + escape + clones + hub
+quale inspect .                       # Comprehensive codebase overview: explore + modules + timeline + health
+quale explore . --themes              # Onboarding map: best files to read first
+quale search SpoolManager             # Find files containing a phrase or concept
+quale diff HEAD~1 HEAD                # Compare vocabulary between two git refs
 ```
 
-Every agent-facing command carries an `_agent_note` field in `--format tool` JSON
-explaining its flag syntax.
+## 🤖 LLM Agent (`quale agent`)
 
-## Agent: Scope Control (Proven)
+Agent commands are tucked away in the `agent` namespace and implicitly return tightly packed JSON or IR DSL. Agents no longer need to remember `--format json` flags.
 
 ```bash
-quale edit-context --files src/spool.ts --task "..." --format tool  # 75% accuracy, 0 scope creep
-quale edit-context --diff HEAD~1 --task "..." --format tool           # 75% accuracy (diff-scoped)
-quale edit-context --files src/spool.ts --task "..." --format verify  # 83% accuracy (test-only)
-quale guard --file src/spool.ts --task "..." --format tool          # combined safety packet
-quale contract --files src/spool.ts --task "..."                    # ID-coded scope (default tool)
-quale check-plan --contract c.json --proposal p.json               # validate LLM proposal
+quale agent edit src/spool.ts         # File-scoped edit context and risk card
+quale agent guard src/spool.ts        # Combined safety packet: guide + hub-risk + complexity + criticality
+quale agent orient                    # One-call orientation: solve + triangulate + isolate + repo-map
 ```
 
-## Agent: Orientation (Secondary)
+## 🚦 CI Maintainer (`quale ci`)
+
+CI commands are built to act as automated GitHub Actions steps. Exit codes map to specific gates.
 
 ```bash
-quale repo-map --path . --format json         # ~100 token repo skeleton
-quale agent-bootstrap . --task "..." --format checklist  # weak-model step-by-step
-quale help-agent "debug upload" --format tool              # discoverability + conventions + gotchas
+quale ci init                         # Generates a ready-to-use GH Actions YAML at .github/workflows/quale.yml
+quale ci check origin/main HEAD       # Runs all gates (exits 0-7)
+quale ci comment origin/main HEAD     # Posts the PR report as a GitHub comment
+quale ci trend                        # CI metric trends over time
 ```
 
-## Human: Overview & Health
+## 🔬 Core Primitives (`quale core`)
+
+Over 30 advanced architectural primitives and algorithms power the insights above. They are available via the `core` namespace.
 
 ```bash
-quale inspect .                         # comprehensive overview + health score
-quale explore . --themes                # onboarding map and themes
-quale modules .                         # parser-free module boundaries
-quale test-gaps --path .                  # source files with weak test mirrors
-quale stop --path . --read file1.ts        # exploration entropy gauge
+quale core blast                      # Vocabulary overlap with changed files
+quale core drift-check                # Structural anomaly velocity across directories
+quale core test-gaps                  # Source files with weak test mirrors
+quale core capillary                  # Files with the most inter-file vocabulary edges
+quale core spectral-gap               # Modularity score: largest cluster / second largest
+quale core phantom                    # Detect framework/library from import/export vocabulary
+quale core trap                       # Identifier overlap between two concurrently-edited files
+quale core hub-risk                   # High-centrality files with zero edits
+quale core escape-velocity            # Phrase removal difficulty: ESCAPED / BOUND / DEEP
+quale core heisenberg                 # Mixed refactor/feature edits that must be split
 ```
 
-## Human: Preflight & Guardrails
+## Exit codes (CI)
 
-```bash
-quale edit-context --files src/spool.ts --task "..."   # file-scoped risk card (human)
-quale edit-context --diff origin/main                   # diff-scoped risk card (human)
-quale verify --files src/spool.ts                    # multiple-choice verification
-quale route --files src/spool.ts --task "..."         # decide whether/how to use quale
-```
-
-## CI / PR Tools
-
-```bash
-quale ci-report origin/main HEAD --summary           # blast radius + mirror gap
-quale anomalies --path . --base main --head HEAD        # crystallographic defect detection
-quale patterns --path . --base HEAD~1                 # refactoring pattern recognition
-quale pr-report origin/main HEAD                      # consolidated markdown report
-```
-
-## History & Evolution
-
-```bash
-quale vocabulary-trend --path . --weeks 12                    # vocabulary trend velocity
-quale lifecycle . --weeks 24                         # phrase lifecycle (stable/decaying/etc)
-quale stable .                                       # stable anchors and churn hotspots
-quale provenance "SpoolManager" .                    # phrase history through git
-quale timeline . --weeks 4                           # concept entry/exit timeline
-quale origins --path .                               # concept origin tracing (endogenous vs imported)
-```
-
-## Cross-Repo & Analysis
-
-```bash
-quale compare ../repo-a ../repo-b --contract-only    # contract-surface drift
-quale search SpoolManager ../repo-a ../repo-b        # cross-repo phrase search
-quale skeleton --path .                              # prompt decompression: ~100-token skip directives
-quale fingerprint .                                  # repo structural identity
-quale coupling --path .                              # concept coupling classification
-quale diff --ref HEAD~10                             # vocabulary changes across git history
-quale landmarks .                                    # characteristic phrases
-quale delta --path .                                 # structural changes since `quale init`
-```
-
-## Structural Analysis
-
-```bash
-quale fold --file src/billing.ts --task "fix proration"           # fractional distillation
-quale drift-check --file src/billing.ts --snapshot                # structural baseline
-quale drift-check --file src/billing.ts                           # velocity spikes
-quale forecast --files src/billing.ts                             # regression risk
-quale latent-deps --files src/billing.ts                          # hidden dependencies
-quale isolate --task "Update billing" --format json               # module bisection
-quale heisenberg --file worker.ts --diff "$(cat patch)"           # refactor/feature separation
-quale traffic-control --file UserProfile.tsx --intended-import api_client.ts  # import zoning
-quale decay --file billing.ts --metabolism                        # legacy pattern clearance
-quale clone --threshold 0.90                                      # cross-directory clone detection
-```
-
-## Exit codes
-
-| Code | Meaning | Examples |
-|------|---------|---------|
-| 0 | Success | All commands |
-| 1 | General error | Invalid path, not a git repo, parse failure |
-| 2 | CI gate: blast tier | `ci-report --fail-on-blast-tier high` |
-| 3 | CI gate: stable anchor | `ci-report --fail-on-stable-touched` |
-
-## All commands (generated from CLI)
-
-See [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for the full auto-generated command list
-grouped by panel (Agent Safety, CI, Code Analysis, etc.).
+| Code | Gate | Flag |
+|------|------|------|
+| 0 | Pass | — |
+| 1 | Error | — |
+| 2 | Blast tier | `--fail-on-blast-tier <tier>` |
+| 3 | Stable anchor | `--fail-on-stable-touched` |
+| 4 | Mirror gap | `--fail-on-mirror-gap <ratio>` |
+| 5 | Hub risk | `--fail-on-hub-risk` |
+| 6 | Clone detected | `--fail-on-clone` |
+| 7 | Identifier explosion | `--fail-on-new-identifiers <N>` |
