@@ -55,10 +55,11 @@ class MCPServer:
             line = line.strip()
             if not line:
                 continue
+            req = None
             try:
                 req = json.loads(line)
             except json.JSONDecodeError as e:
-                self._respond(req.get("id") if isinstance(req, dict) else None, error=str(e))
+                self._respond(None, error=str(e))
                 continue
             method = req.get("method", "")
             req_id = req.get("id")

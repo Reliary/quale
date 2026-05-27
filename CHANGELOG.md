@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.4 — 2026-05-28
+
+- MCP server: `quale --mcp` exposes `edit_context`, `verify_packet`, `orient`
+  as typed MCP tools (JSON-RPC over stdio, zero deps)
+- MCP server: 12 unit tests covering tools/list, tools/call, error handling
+- MCP config: OpenCode, Claude Desktop, Claude Code, Cursor, VS Code
+
+## 0.9.3 — 2026-05-28
+
+- Short aliases: `quale ec` (edit-context, 4 words), `quale vp` (verify-packet,
+  4 words), `quale o` (orient, 2 characters)
+- Skill file: `~/.config/opencode/skills/quale/SKILL.md` auto-loaded by OpenCode
+- Trial results: skill-only 3/3 correct test file on Mistral-7B
+
 ## 0.9.2 — 2026-05-27
 
 - CI: unified workflows, issue/PR templates, stale bot, funding

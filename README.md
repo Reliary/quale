@@ -63,6 +63,10 @@ The skill file at `~/.config/opencode/skills/quale/SKILL.md` is auto-loaded
 by OpenCode when editing code; agents following the skill call `quale ec`
 before every edit without needing manual prompting.
 
+Quale also includes an **MCP server** (`quale --mcp`) exposing the same 3
+proven commands as typed tools for any MCP-compatible agent. See
+[docs/MCP_SETUP.md](docs/MCP_SETUP.md) for setup instructions.
+
 ### CI pipeline
 
 | Command | What it does |
@@ -178,6 +182,7 @@ mypy quale/ --ignore-missing-imports
 
 ## Deep dive
 
+- [docs/MCP_SETUP.md](docs/MCP_SETUP.md)  -  MCP server setup for agents
 - [docs/ALGORITHM.md](docs/ALGORITHM.md)  -  vocabulary extraction and co-occurrence data flow
 - [docs/COMMANDS.md](docs/COMMANDS.md)  -  full command reference
 - [docs/CI_INTEGRATION.md](docs/CI_INTEGRATION.md)  -  CI setup guide
