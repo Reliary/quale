@@ -1364,7 +1364,7 @@ def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact") -
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file or not diff:
-        typer.echo("provide --file and --diff", err=True)
+        typer.echo("provide --file <path> and --diff <ref> (e.g. --file src/main.go --diff HEAD~1)", err=True)
         raise typer.Exit(1)
     data = deflate_report(path=p, file_path=file, proposed_diff=diff, budget=int(budget))
     if "error" in data:
@@ -1563,7 +1563,14 @@ def health_cmd(
         return
     h = data.get("health", "?")
     c = "green" if h == "good" else ("yellow" if h == "moderate" else "red")
+    if h == "good":
+        summary = "Good structural health \u2014 low coupling, good modularity."
+    elif h == "moderate":
+        summary = "Moderate \u2014 some coupling debt, refactoring may help."
+    else:
+        summary = "Poor \u2014 high coupling or weak modularity. Consider refactoring."
     typer.echo(f"Health: {_color(h.upper(), c)} (debt: {data.get('debt_acceleration',0):.3f})")
+    typer.echo(f"  {summary}")
     if balance and data.get("root_shoot_ratio"):
         ratio = data["root_shoot_ratio"]
         clr = "red" if ratio > 3 else ("green" if ratio < 0.5 else "yellow")
@@ -1582,7 +1589,7 @@ def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file or not diff:
-        typer.echo("provide --file and --diff", err=True)
+        typer.echo("provide --file <path> and --diff <ref> (e.g. --file src/main.go --diff HEAD~1)", err=True)
         raise typer.Exit(1)
     data = heisenberg_check(path=p, file_path=file, proposed_diff=diff)
     if "error" in data:
@@ -1711,7 +1718,7 @@ def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact") -> None:
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not ref_a or not ref_b:
-        typer.echo("provide --ref-a and --ref-b", err=True)
+        typer.echo("provide --ref-a and --ref-b (e.g. --ref-a HEAD~1 --ref-b HEAD)", err=True)
         raise typer.Exit(1)
     data = parity_bit_report(path=p, ref_a=ref_a, ref_b=ref_b)
     if "error" in data:
@@ -1910,9 +1917,13 @@ def phase_shift_cmd(
     Example:
       quale phase-shift --repo-a ./pre-migration --repo-b ./post-migration
     """
-    from quale.reports import phase_shift_report
     if not repo_a or not repo_b:
         typer.echo("provide --repo-a and --repo-b", err=True)
+        raise typer.Exit(1)
+    try:
+        from quale.reports import phase_shift_report
+    except ImportError:
+        typer.echo("phase-shift report not available (function removed)", err=True)
         raise typer.Exit(1)
     data = phase_shift_report(path_a=repo_a, path_b=repo_b, min_freq=min_freq)
     if "error" in data:
@@ -4396,11 +4407,12 @@ def thylacine_cmd(path=".", format="compact") -> None:
         typer.echo(json.dumps(data, indent=2))
         return
     thy = data.get("thylacines", [])
-    typer.echo(f'Extinct exports: {len(thy)}')
-    for t in thy[:3]:
-        typer.echo(f'  {t["identifier"]} ({t["files"]} files)')
+    typer.echo(f'Exports declared in multiple files but never imported externally:')
+    typer.echo(f'  Count: {len(thy)}')
+    for t in thy[:5]:
+        typer.echo(f'  \u25cf {t["identifier"]} (defined in {t["files"]} files)')
     if thy:
-        typer.echo('  \033[90mNext: quale cleanup-list | quale escape-velocity\033[0m')
+        typer.echo('  Next: quale core cleanup-list | quale core escape-velocity')
 
 @core_app.command(name="coupling-chain", rich_help_panel="Code Analysis")
 def tensegrity_cmd(path=".", format="compact") -> None:
@@ -4518,8 +4530,13 @@ def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact") -> None
     typer.echo(f"Structural hash: {'\u2713 unchanged' if unch else '\u26a0 changed since base ref'}")
     for tp in data.get("trap", [])[:3]:
         la = tp.get("label", "")
+        fa = tp.get("file_a", "") or tp.get("file", "")
+        fb = tp.get("file_b", "")
+        if not fa and not fb:
+            continue
         mark = "\u26a0" if "HIGH" in la or "OVERLAP" in la.upper() else "\u25cf"
-        typer.echo(f'  {mark} {tp.get("file_a","")} <-> {tp.get("file_b","")}: {la}')
+        pair = f"{fa} <-> {fb}" if fb else fa
+        typer.echo(f'  {mark} {pair}: {la}')
 
 @core_app.command(name="cleanup-list", rich_help_panel="Maintenance")
 def cleanup_list_cmd(path=".", format="compact") -> None:
@@ -4537,9 +4554,12 @@ def cleanup_list_cmd(path=".", format="compact") -> None:
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    typer.echo(f'{data.get("free_to_delete",0)} free to delete')
-    for i in data.get("items", [])[:5]:
-        typer.echo(f'  {i["identifier"]}: {i["effort"]} ({i["files"]} files)')
+    items = data.get("items", [])
+    typer.echo(f'{len(items)} candidates for cleanup:')
+    for i in items[:5]:
+        label = i.get("effort", "?")
+        note = " (appears outside origin module)" if label == "ESCAPED" else (" (mostly contained)" if label == "BOUND" else "")
+        typer.echo(f'  \u25cf {i["identifier"]}: {label}{note} \u2014 {i["files"]} files')
 
 @core_app.command(name="vulnerability-map", rich_help_panel="Maintenance")
 def vulnerability_map_cmd(path=".", format="compact") -> None:

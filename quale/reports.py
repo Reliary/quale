@@ -379,6 +379,7 @@ def refactor_effort(path: str = ".", file_path: str = "") -> dict:
 
 def ci_trend(path: str = ".", weeks: int = 12) -> dict:
     """Read ci history file and report metric trends."""
+    import os
     history_file = os.path.join(os.path.abspath(path), ".quale", "ci-history.jsonl")
     if not os.path.exists(history_file):
         return {"error": "No CI history found. Run ci-report first.", "trends": []}
