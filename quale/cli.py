@@ -582,34 +582,7 @@ def preflight(
         typer.echo(json.dumps(verify_data, separators=(",", ":")))
         return
     if format == "tool":
-        tool_data = {
-            "schema_version": 1,
-            "risk": data.get("risk", "unknown"),
-            "confidence": data.get("confidence", "unknown"),
-            "reason": "; ".join(data.get("reasons", [])),
-            "changed_files": data.get("changed_files", []),
-            "read_first": data.get("fused_first", data.get("read_first", [])),
-            "verification_mc": {
-                "question": "Which file would verify this change?",
-                "candidates": verify_candidates[:5] if verify_candidates else [],
-                "max_selections": 1,
-                "types": vtypes,
-            },
-            "verification_confidence": ver_confidence,
-            "expansion_risk": data.get("expansion_risk", data.get("avoid_expanding_into", [])),
-            "scope_creep_guard": {**scope_creep, "instruction": scope_creep_instruction},
-            "desert_warning": _desert_text(ver_confidence, data.get("changed_files", [])),
-            "guardrails": data.get("guardrails", {}),
-            "spectrum": data.get("spectrum"),
-            "deficit": data.get("deficit"),
-            "cascade": data.get("cascade"),
-            "cross_cutting": data.get("cross_cutting"),
-            "risk_vector": data.get("risk_vector"),
-            "acceleration": data.get("acceleration"),
-            "boundary": data.get("boundary"),
-            "module_exposure": data.get("module_exposure"),
-            "_agent_note": "--files takes comma-separated paths, not repeated flags; pipe via 2>/dev/null for clean JSON",
-        }
+        tool_data = _build_edit_tool_format(data, verify_candidates, vtypes, ver_confidence, scope_creep, scope_creep_instruction)
         typer.echo(json.dumps(tool_data, separators=(",", ":")))
         return
     if format == "full":
@@ -4822,27 +4795,65 @@ def ci_trend_cmd(
         trend = info.get("trend", "unknown")
         typer.echo(f"  {metric:<20} {', '.join(str(v) for v in vals)} ({trend})")
 
+def _build_edit_tool_format(data, verify_candidates, vtypes, ver_confidence, scope_creep, scope_creep_instruction):
+    return {
+        "schema_version": 1,
+        "risk": data.get("risk", "unknown"),
+        "confidence": data.get("confidence", "unknown"),
+        "reason": "; ".join(data.get("reasons", [])),
+        "changed_files": data.get("changed_files", []),
+        "read_first": data.get("fused_first", data.get("read_first", [])),
+        "verification_mc": {
+            "question": "Which file would verify this change?",
+            "candidates": verify_candidates[:5] if verify_candidates else [],
+            "max_selections": 1,
+            "types": vtypes,
+        },
+        "verification_confidence": ver_confidence,
+        "expansion_risk": data.get("expansion_risk", data.get("avoid_expanding_into", [])),
+        "scope_creep_guard": {**scope_creep, "instruction": scope_creep_instruction},
+        "desert_warning": _desert_text(ver_confidence, data.get("changed_files", [])),
+        "guardrails": data.get("guardrails", {}),
+        "spectrum": data.get("spectrum"),
+        "deficit": data.get("deficit"),
+        "cascade": data.get("cascade"),
+        "cross_cutting": data.get("cross_cutting"),
+        "risk_vector": data.get("risk_vector"),
+        "acceleration": data.get("acceleration"),
+        "boundary": data.get("boundary"),
+        "module_exposure": data.get("module_exposure"),
+        "_agent_note": "--files takes comma-separated paths, not repeated flags; pipe via 2>/dev/null for clean JSON",
+    }
+
 # ── Agent Namespace ────────────────────────────────────────────────────────
 
 @agent_app.command(name="edit")
 def agent_edit(
     file: Annotated[str, typer.Argument(help="File being edited")],
     task: Annotated[str, typer.Option("--task", help="The goal of the edit")] = "",
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
 ):
-    """File-scoped edit context and risk card for LLM Agents."""
+    """File-scoped edit context and risk card (proven tool format)."""
     import json
     from quale.reports import preflight_report
-    from quale.scanner import scan_codebase
     import os
-    path = os.path.abspath(".")
-    try:
-        analysis = scan_codebase(path, quiet=True)
-    except Exception as e:
-        typer.echo(json.dumps({"error": str(e)}))
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
-    
-    report = preflight_report(path, [file], diff_ref=None, task=task)
-    typer.echo(json.dumps(report, indent=2))
+    report = preflight_report(p, [file], diff_ref=None, task=task)
+    if "error" in report:
+        typer.echo(report["error"], err=True)
+        raise typer.Exit(1)
+    cand = report.get("verification_candidates", report.get("verify_with", []))
+    vc = report.get("verification_confidence", {})
+    sc = report.get("scope_creep_guard", {})
+    wa = sc.get("warnings", [])
+    qs = [w.get("question_extras", "").strip() for w in wa if w.get("question_extras")]
+    sci = "Before broadening scope, verify each extra file: " + "; ".join(qs) if qs else "Do not propose extra_edits unless the task explicitly requires them."
+    vt = _classify_verify_types(cand[:5] if cand else [], report.get("changed_files", []))
+    tool_data = _build_edit_tool_format(report, cand, vt, vc, sc, sci)
+    typer.echo(json.dumps(tool_data, separators=(",", ":")))
 
 @agent_app.command(name="orient")
 def agent_orient(
@@ -4864,21 +4875,33 @@ def agent_orient(
 def agent_guard(
     file: Annotated[str, typer.Argument(help="File to guard")],
     task: Annotated[str, typer.Option("--task", help="The goal of the edit")] = "",
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
 ):
-    """Returns combined safety packet for LLM Agents."""
+    """Combined safety packet (tool format)."""
     import json
-    from quale.reports import preflight_report
-    from quale.scanner import scan_codebase
+    from quale.reports import guard_report
     import os
-    path = os.path.abspath(".")
-    try:
-        analysis = scan_codebase(path, quiet=True)
-    except Exception as e:
-        typer.echo(json.dumps({"error": str(e)}))
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
-    
-    report = preflight_report(path, [file], task=task)
-    typer.echo(json.dumps(report, indent=2))
+    data = guard_report(p, file_path=file, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    tool_data = {
+        "schema_version": 1,
+        "file": data.get("file"),
+        "risk": data.get("risk", "unknown"),
+        "guide": data.get("guide"),
+        "hub_risk": data.get("hub_risk", []),
+        "complexity_ratio": data.get("complexity_ratio"),
+        "criticality": data.get("criticality", {}),
+        "stable_anchors_touched": data.get("stable_anchors_touched", []),
+        "reverse_blast": data.get("reverse_blast", []),
+        "_agent_note": "--file takes a single file path; no comma-separation",
+    }
+    typer.echo(json.dumps(tool_data, separators=(",", ":")))
 
 
 # ── CI Namespace ──────────────────────────────────────────────────────────
