@@ -65,29 +65,21 @@ jobs:
 
   regression:
     runs-on: ubuntu-latest
-    container:
-      image: python:3.12
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install
-        run: pip install --no-cache-dir -e ".[dev]"
-
-      - name: CLI smoke test
-        run: python -m pytest tests/test_cli_smoke.py -v -q
-
-      - name: Output contracts
-        run: python -m pytest tests/test_output_contracts.py -v -q
-
-      - name: Schema validation
-        run: python -m pytest tests/test_schema_validation.py -v -q
-
-      - name: Dogfood
+      - name: Run in Docker
         run: |
-          quale review --path . || echo "review OK"
-          quale onboard --path . || echo "onboard OK"
-          quale agent orient --path . || echo "orient OK"
-          quale core hub-risk --path . || echo "hub-risk OK"
-          quale core test-gaps --path . || echo "test-gaps OK"
+          docker run --rm -v $PWD:/app -w /app python:3.12 bash -c "
+            pip install --no-cache-dir -e '.[dev]' && \
+            python -m pytest tests/test_cli_smoke.py -v -q && \
+            python -m pytest tests/test_output_contracts.py -v -q && \
+            python -m pytest tests/test_schema_validation.py -v -q && \
+            quale review --path . ; \
+            quale onboard --path . ; \
+            quale agent orient --path . ; \
+            quale core hub-risk --path . ; \
+            quale core test-gaps --path .
+          "
