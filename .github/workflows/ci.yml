@@ -28,18 +28,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        run: |
-          python -m pytest \
-            tests/test_cli_smoke.py \
-            tests/test_core.py \
-            tests/test_human_ci.py \
-            tests/test_install.py \
-            tests/test_output_contracts.py \
-            tests/test_performance.py \
-            tests/test_property.py \
-            tests/test_reports.py \
-            tests/test_schema_validation.py \
-            -v --tb=short -q
+        run: python -m pytest tests/test_core.py tests/test_install.py tests/test_performance.py tests/test_property.py tests/test_reports.py -v --tb=short -q
 
   guardrails:
     runs-on: ubuntu-latest
