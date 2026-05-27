@@ -1,6 +1,26 @@
 # quale
 
-A CLI that tells you what to edit, what to test, and what to leave alone. Works on any language, no ASTs, no config.
+[![PyPI version](https://img.shields.io/pypi/v/quale?color=blue)](https://pypi.org/project/quale/)
+[![Python versions](https://img.shields.io/pypi/pyversions/quale)](https://pypi.org/project/quale/)
+[![CI](https://github.com/Reliary/quale/actions/workflows/ci.yml/badge.svg)](https://github.com/Reliary/quale/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/Reliary/quale)](LICENSE)
+
+Structural codebase analysis — tells you what to read, what to edit, and what
+to test. Works on any language. No parsers, no config.
+
+```bash
+pip install quale
+
+cd my-project
+quale review              # review your current changes
+quale ci check main HEAD  # automated CI gates
+quale agent guard path/to/file.ts  # safety packet for LLMs
+```
+
+The wrong-file-path mistake is universal across models. Quale fixes it by
+reading your repo's structure and giving the agent what it's missing.
+
+---
 
 ## Quickstart
 
@@ -9,67 +29,114 @@ pip install quale
 
 cd my-project
 
-# For Humans: Review your current changes
-quale review
-
-# For CI: Automated gates
-quale ci check origin/main HEAD
-
-# For LLM Agents: JSON-formatted safety packet
-quale agent guard src/my_file.ts
+quale review                     # PR review: blast radius, test gaps, risk
+quale onboard                    # new-repo onboarding: landmarks, modules
+quale refactor-cost src/main.ts  # refactoring effort estimate
+quale agent orient               # repo map for LLM agents
+quale ci check origin/main HEAD  # automated CI gates
+quale --help                     # full command list
 ```
 
-That's it. One command tells you which files to read, which test to run, and what not to touch. 
+That's it. Three commands, thirty seconds, no configuration.
 
-## What it solves
+## Persona-driven commands
 
-Every LLM guesses the wrong test file path on a plain prompt. They all guess `src/foo.test.ts` when the test is in `tests/foo.test.ts`. This is a directory layout problem, not a model quality problem.
+Commands are organized into namespaces for how you work:
 
-quale reads your repo's structure and gives the model what it's missing. 900+ trials across 12 repos and 7 model families: the wrong-path mistake is universal, and quale fixes it every time.
+| Persona | Namespace | Purpose |
+|---------|-----------|---------|
+| Human developer | top-level | `review`, `onboard`, `refactor-cost`, `inspect`, `explore` |
+| LLM agent | `quale agent` | Token-optimized JSON: `orient`, `edit`, `guard` |
+| CI pipeline | `quale ci` | Automated gates: `check`, `comment`, `trend`, `init` |
+| Advanced | `quale core` | 60+ structural primitives |
 
-## Persona-Driven Commands
+### Human developer
 
-Quale is organized into namespaces tailored for how you work:
-
-### 🧑‍💻 For Human Developers (Top-Level)
 | Command | What it does |
 |---------|-------------|
-| `quale review` | Single human review summary: blast radius, test gaps, hub risk, clones |
-| `quale onboard` | 3-step onboarding plan (landmarks, modules, safe directories) |
-| `quale refactor-cost path/to/file` | Estimate refactoring effort (blast + escape + clones + hub) |
-| `quale explore .` | Onboarding map: best files to read first |
+| `quale review` | Per-file review: stable anchors, hub risk, test connections, action items |
+| `quale onboard` | 3-step onboarding: languages, macro-modules, landmark files |
+| `quale refactor-cost <file>` | Effort estimate: direct impact, transitive ripple, clones |
+| `quale inspect .` | Codebase overview: module layout, tech stack, health |
+| `quale explore .` | Best files to read first for a new contributor |
 
-### 🤖 For LLM Agents (`quale agent`)
-Agents shouldn't waste tokens memorizing flags. Commands in the `agent` namespace inherently return optimized JSON/IR output.
-| Command | What it does |
-|---------|-------------|
-| `quale agent edit src/file.ts` | File-scoped edit context and risk card in JSON |
-| `quale agent guard src/file.ts` | Combined safety packet: guide + hub-risk + complexity |
-| `quale agent orient` | Token-optimized structural repo map |
+### LLM agent
 
-### 🚦 For CI Maintainers (`quale ci`)
+| Command | What it returns |
+|---------|----------------|
+| `quale agent edit <file>` | Edit context + `verification_mc` multi-choice candidates (JSON) |
+| `quale agent guard <file>` | Risk packet: guide, hub risk, complexity, stable anchors (JSON) |
+| `quale agent orient` | Repo map: modules, landmarks, languages, workflow commands (JSON) |
+
+### CI pipeline
+
 | Command | What it does |
 |---------|-------------|
 | `quale ci init` | Generates a ready-to-use GitHub Actions YAML |
-| `quale ci check base head` | Runs structural CI gates (`--fail-on-hub-risk`, `--fail-on-mirror-gap`, etc) |
-| `quale ci comment base head`| Posts the PR structural report as a GitHub comment |
+| `quale ci check <base> <head>` | Runs structural gates, exits 0-7 with bitmask |
+| `quale ci comment <base> <head>` | Posts structural report as GitHub PR comment |
 | `quale ci trend` | Tracks CI metric trends over time |
 
-### 🔬 For Advanced Analysis (`quale core`)
-Over 30 advanced mathematical and structural primitives (e.g., `spectral-gap`, `heisenberg`, `capillary`) are tucked away in the `core` namespace. See `quale core --help` for the full list.
+### Advanced primitives
+
+See `quale core --help` for 60+ structural commands including `hub-risk`,
+`spectral-gap`, `criticality`, `coupling-chain`, `diff-structural`, and more.
+
+## What it solves
+
+Every LLM guesses the wrong test file path. Given a source file at
+`internal/handlers/review.go`, models consistently guess
+`src/handlers/review.test.go` when the actual test is at
+`tests/handlers/review_test.go`. This is a directory layout problem, not a
+model quality problem.
+
+Quale reads your repo's structure — co-occurrence, module boundaries, test
+mirrors — and gives the model what it's missing. Verified across 900+ trials,
+12 repos, and 7 model families.
 
 ## How it works
 
-Reads code as text. Splits on delimiters, counts phrase frequency per file, measures co-occurrence across files. Same pipeline for every language. Deterministic: same input, same output.
+Reads code as text. Splits on delimiters, counts phrase frequency per file,
+measures co-occurrence across files. Same pipeline for every language.
+Deterministic: same input, same output.
+
+No ASTs. No grammars. No parsers. No per-language config. No dependencies
+beyond Python 3.10+ and two small packages (typer, typing-extensions).
 
 ## Limits
 
-- Useless on a new repo (no structure to measure)
+- Useless on a brand-new repo (no structure to measure)
 - Not a linter, coverage tool, or security scanner
-- Verification peaks around 80%. When the candidate set lacks the right test, quale says so
+- Verification peaks around 80% — when the candidate set lacks the right test,
+  quale says so
+- Requires `git` history for diff-based commands
+
+## Development
+
+```bash
+git clone https://github.com/Reliary/quale
+cd quale
+
+# Install with dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+python -m pytest tests/ -v
+
+# Lint and type check
+ruff check quale/
+mypy quale/ --ignore-missing-imports
+```
+
+Contributions welcome. See [CONTRIBUTING](CONTRIBUTING.md).
 
 ## Further reading
 
-- [docs/COMMANDS.md](docs/COMMANDS.md) (full reference)
-- [docs/CI_INTEGRATION.md](docs/CI_INTEGRATION.md) (CI setup)
-- [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md) (methodology and results)
+- [docs/COMMANDS.md](docs/COMMANDS.md) — full command reference
+- [docs/CI_INTEGRATION.md](docs/CI_INTEGRATION.md) — CI setup guide
+- [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md) — methodology and results
+- [CHANGELOG.md](CHANGELOG.md) — release history
+
+## License
+
+MIT
