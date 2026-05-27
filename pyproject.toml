@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quale"
-version = "0.8.0"
+version = "0.8.1"
 description = "Structural codebase analysis — no parsers, no config, any language"
 readme = "README.md"
 license = "MIT"

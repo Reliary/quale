@@ -1,6 +1,7 @@
 """Property-based tests: random inputs on deterministic primitives."""
 from __future__ import annotations
 
+import os
 import unittest
 import random
 import string
@@ -197,3 +198,38 @@ class TestTokenExtraction(unittest.TestCase):
             matches = pattern.findall(text)
             for m in matches:
                 self.assertGreaterEqual(len(m), 4)
+
+
+class TestNewFeaturesDeterministic(unittest.TestCase):
+    """New human/CI commands must produce same output on same input."""
+
+    def _make_repo(self):
+        import tempfile, subprocess
+        tmp = tempfile.TemporaryDirectory()
+        repo = tmp.name
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+        def write(rel, content):
+            path = os.path.join(repo, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+        write("src/a.ts", "export function Handler() { return 'a'; }\n")
+        write("tests/a.test.ts", "import { Handler } from '../src/a';\ntest('a', Handler);\n")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@t.test", "commit", "-q", "-m", "init"],
+                       cwd=repo, check=True, capture_output=True)
+        return tmp, repo
+
+    def test_onboard_output_stable(self):
+        from quale.reports import onboard_plan
+        tmp, repo = self._make_repo()
+        r1 = onboard_plan(path=repo)
+        r2 = onboard_plan(path=repo)
+        self.assertEqual(r1, r2)
+
+    def test_review_stable_on_empty(self):
+        from quale.reports import review_summary
+        tmp, repo = self._make_repo()
+        r1 = review_summary(path=repo)
+        r2 = review_summary(path=repo)
+        self.assertEqual(r1, r2)

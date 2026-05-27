@@ -1,6 +1,7 @@
 """Unit tests for pure functions in reports.py and bootstrap.py."""
 from __future__ import annotations
 
+import subprocess
 import unittest
 from unittest.mock import MagicMock
 
@@ -20,6 +21,10 @@ from quale.reports import (
 )
 from quale.bootstrap import _task_file_role, _task_role_rank
 from quale.scanner import FileVocab, _structural_information_score, _is_actionable_identifier
+from quale.reports import (
+    _check_hub_risk, _check_clone_flag,
+)
+from unittest.mock import MagicMock
 
 
 class TestSourceStem(unittest.TestCase):
@@ -371,3 +376,61 @@ class TestTaskRoleRank(unittest.TestCase):
 
     def test_unknown_returns_lowest(self):
         self.assertEqual(_task_role_rank("unknown"), 4)
+
+
+class TestCheckHubRisk(unittest.TestCase):
+
+    def test_no_analysis_returns_empty(self):
+        self.assertEqual(_check_hub_risk("path", ["a.ts"], None), [])
+
+    def test_no_changed_returns_empty(self):
+        mock = MagicMock()
+        mock.file_vocabs = []
+        self.assertEqual(_check_hub_risk("path", [], mock), [])
+
+    def test_empty_file_vocabs(self):
+        mock = MagicMock()
+        mock.file_vocabs = []
+        self.assertEqual(_check_hub_risk("path", ["a.ts"], mock), [])
+
+
+class TestCheckCloneFlag(unittest.TestCase):
+
+    def test_no_analysis_returns_empty(self):
+        self.assertEqual(_check_clone_flag("path", ["a.ts"], None, "HEAD"), [])
+
+    def test_no_changed_returns_empty(self):
+        mock = MagicMock()
+        mock.file_vocabs = []
+        self.assertEqual(_check_clone_flag("path", [], mock, "HEAD"), [])
+
+
+class TestReviewSummaryPure(unittest.TestCase):
+
+    def test_review_summary_required_fields(self):
+        from quale.reports import review_summary
+        import tempfile, os
+        tmp = tempfile.TemporaryDirectory()
+        repo = os.path.join(tmp.name, "repo")
+        os.makedirs(os.path.join(repo, "src"))
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        with open(os.path.join(repo, "src", "a.ts"), "w") as f:
+            f.write("export const A = 1;\n")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@t.test", "commit", "-q", "-m", "init"], cwd=repo, check=True)
+        with open(os.path.join(repo, "src", "a.ts"), "w") as f:
+            f.write("export const A = 2;\n")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@t.test", "commit", "-q", "-m", "change"], cwd=repo, check=True)
+        result = review_summary(path=repo, base_ref="HEAD~1", head_ref="HEAD")
+        self.assertIn("review", result)
+        self.assertIn("changed_files", result)
+        self.assertIn("blast_radius_count", result)
+
+
+class TestCiGateCodes(unittest.TestCase):
+
+    def test_gate_codes_are_unique(self):
+        from quale.cli import GATE_CODES
+        codes = list(GATE_CODES.values())
+        self.assertEqual(len(codes), len(set(codes)))

@@ -1017,10 +1017,10 @@ def deserts(
     ratio = data.get("mirror_ratio", 0.0)
     ratio_color = "green" if ratio >= 0.7 else ("yellow" if ratio >= 0.3 else "red")
     typer.echo(c(f"{'━' * 60}", "cyan"))
-    typer.echo(c("  VERIFICATION DESERTS", "header"))
+    typer.echo(c("  TEST COVERAGE REPORT", "header"))
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(f"  Source files: {data.get('source_files', 0)}  Test files: {data.get('test_files', 0)}")
-    typer.echo(f"  Structural mirror ratio: {c(f'{ratio:.0%}', ratio_color)}")
+    typer.echo(f"  Test mirror coverage: {c(f'{ratio:.0%}', ratio_color)}")
     typer.echo(f"  Confidence: {c(data.get('confidence', '?'), 'gray')}")
     typer.echo("")
     for item in data.get("deserts", [])[:top]:
@@ -1672,8 +1672,10 @@ def capillary_cmd(path=".", format="compact") -> None:
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    for c in data.get("capillaries", [])[:3]:
-        typer.echo(f'  {c["file"]} ({c["edges"]} edges)')
+    caps = data.get("capillaries", [])[:5]
+    typer.echo(f"Files with the most inter-file connections ({len(caps)} shown):")
+    for c in caps:
+        typer.echo(f'  \u25cf {c["file"]} \u2014 {c["edges"]} shared vocabulary links')
 
 @core_app.command(name="spectral-gap", rich_help_panel="Code Analysis")
 def spectral_gap_cmd(path=".", format="compact") -> None:
@@ -1693,7 +1695,14 @@ def spectral_gap_cmd(path=".", format="compact") -> None:
         return
     g = data.get("spectral_gap", 0)
     m = data.get("modularity", "?")
-    typer.echo(f'Gap: {g} ({m})')
+    if g >= 3.0:
+        typer.echo(f"Module separation: high \u2014 largest cluster is {g}x the second largest")
+        typer.echo("  \u2192 Check for a monolith. One module dominates vocabulary.")
+    elif g >= 1.5:
+        typer.echo(f"Module separation: moderate (gap={g})")
+    else:
+        typer.echo(f"Module separation: flat (gap={g})")
+        typer.echo("  \u2192 Vocabulary is evenly distributed. No dominant cluster.")
 
 @core_app.command(name="phantom", rich_help_panel="Code Analysis")
 def phantom_cmd(path=".", format="compact") -> None:
@@ -1712,10 +1721,12 @@ def phantom_cmd(path=".", format="compact") -> None:
         typer.echo(json.dumps(data, indent=2))
         return
     d = data.get("frameworks_detected", {})
+    typer.echo(f"Frameworks detected from import vocabulary:")
     if d:
-        typer.echo(f'  {" ".join(f"{k}({v})" for k,v in sorted(d.items(), key=lambda x:-x[1])[:5])}')
+        for k, v in sorted(d.items(), key=lambda x: -x[1])[:5]:
+            typer.echo(f'  \u25cf {k} \u2014 {v} files')
     else:
-        typer.echo('  none detected')
+        typer.echo('  None detected')
 
 
 @core_app.command(name="parity-bit", rich_help_panel="CI")
@@ -1820,13 +1831,14 @@ def entropy_cmd(
     if format == "json":
         typer.echo(json.dumps(data, indent=2, default=str))
         return
+    typer.echo(f"Directory vocabulary spread vs. rolling baseline:")
     if data.get("any_limit_exceeded"):
-        typer.echo(_color("ISOTHERMAL LIMIT EXCEEDED", "red"))
-    else:
-        typer.echo(_color("Entropy within limits", "green"))
-    for d in data.get("directories", [])[:8]:
-        label = _color("HOT", "red") if d["limit_exceeded"] else _color("COLD", "green")
-        typer.echo(f"  [{label}] {d['directory']:30s} entropy={d['entropy']:.2f} baseline={d['baseline']:.2f}")
+        typer.echo(f"  \u26a0 Some directories have unusually high vocabulary fragmentation.")
+    for d in data.get("directories", [])[:10]:
+        exceeded = d["limit_exceeded"]
+        mark = "\u25cf" if exceeded else "\u25cb"
+        note = " (fragmented)" if exceeded else ""
+        typer.echo(f"  {mark} {d['directory']:35s} spread={d['entropy']:.2f} baseline={d['baseline']:.2f}{note}")
 
 
 @core_app.command(name="zk-proof", rich_help_panel="Agent Safety")
@@ -3584,13 +3596,15 @@ def _entry_main():
     try:
         cli()
     except SystemExit as e:
-        if e.code == 2 and len(sys.argv) >= 2 and sys.argv[1] != "core":
+        if e.code == 2 and len(sys.argv) >= 2:
             cmd = sys.argv[1]
             core_names = {c.name for c in core_app.registered_commands}
             if cmd in core_names:
                 sys.argv.insert(1, "core")
                 cli()
                 return
+            # ci and agent are already routed by Typer; only catch sys.exit(2)
+            # from core commands that don't have their namespace prefix
         raise
 
 
@@ -4290,8 +4304,17 @@ def escape_velocity_cmd(path=".", format="compact") -> None:
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    for t in data.get("tagged", [])[:5]:
-        typer.echo(f'  {t["phrase"]}: {t["label"]}')
+    tagged = data.get("tagged", [])
+    typer.echo(f"Identifier reach across the repo:")
+    for t in tagged[:8]:
+        note = ""
+        if t["label"] == "ESCAPED":
+            note = " \u2014 appears outside origin module, hard to rename/remove"
+        elif t["label"] == "BOUND":
+            note = " \u2014 mostly contained, moderate removal difficulty"
+        elif t["label"] == "DEEP":
+            note = " \u2014 internal only, safe to rename locally"
+        typer.echo(f'  {t["label"]:<8} {t["phrase"]}{note}')
 @core_app.command(name="trap", rich_help_panel="Code Analysis")
 def trap_cmd(path=".", file_a="", file_b="", format="compact") -> None:
     """Identifier overlap between two concurrently-edited files."""
@@ -4329,9 +4352,12 @@ def thanatosis_cmd(path=".", format="compact") -> None:
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    for f in data.get("files", [])[:3]:
-        typer.echo(f'  {f["file"]}: cent={f["centrality"]} edits={f["edits"]} risk={f["risk_ratio"]}')
-    typer.echo('  \033[90mNext: quale guard --file <file> | quale edit-context --files <file>\033[0m')
+    files = data.get("files", [])[:5]
+    typer.echo("Files that are highly coupled but rarely edited:")
+    for f in files:
+        typer.echo(f'  \u25cf {f["file"]} \u2014 {f["centrality"]} file couplings, {f["edits"]} edits')
+    if files:
+        typer.echo("These files touch many others but are not actively maintained.")
 
 @core_app.command(name="complexity-ratio", rich_help_panel="Code Analysis")
 def trompe_cmd(path=".", file="", format="compact") -> None:
@@ -4370,7 +4396,15 @@ def porosity_cmd(path=".", format="compact") -> None:
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    typer.echo(f'Porosity: {data.get("porosity",0):.6f}')
+    p = data.get("porosity", 0)
+    if p > 0.9:
+        label = "High (low coupling)"
+    elif p > 0.5:
+        label = "Moderate"
+    else:
+        label = "Low (dense coupling)"
+    typer.echo(f"Coupling sparsity: {p:.4f} \u2014 {label}")
+    typer.echo("  Higher values = less co-occurrence = lower coupling (good).")
 
 @core_app.command(name="extinct-exports", rich_help_panel="Maintenance")
 def thylacine_cmd(path=".", format="compact") -> None:
@@ -4411,8 +4445,12 @@ def tensegrity_cmd(path=".", format="compact") -> None:
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    for tp in data.get("tensegrity_pairs", [])[:3]:
-        typer.echo(f'  {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} im)')
+    pairs = data.get("tensegrity_pairs", [])
+    typer.echo(f"Indirectly coupled file pairs (no direct edge):")
+    for tp in pairs[:5]:
+        typer.echo(f'  \u25cf {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} indirect links)')
+    if not pairs:
+        typer.echo("  None found \u2014 no indirect coupling detected.")
 
 @core_app.command(name="criticality", rich_help_panel="Code Analysis")
 def criticality_cmd(path=".", file="", format="compact") -> None:
@@ -4430,8 +4468,13 @@ def criticality_cmd(path=".", file="", format="compact") -> None:
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    for s in data.get("scores", [])[:5]:
-        typer.echo(f'  {s["file"]}: k={s["k"]} ({s["class"]})')
+    scores = data.get("scores", [])
+    typer.echo(f"Change amplification risk (k > 1 = changes cascade):")
+    for s in scores[:5]:
+        marker = "\u26a0" if s["k"] > 1 else "\u25cb"
+        typer.echo(f'  {marker} {s["file"]}: amp={s["k"]:.2f} ({s["class"]})')
+    if not scores:
+        typer.echo("  No files with notable amplification.")
 
 
 @core_app.command(name="guard", rich_help_panel="Agent Safety")
@@ -4470,7 +4513,17 @@ def guard_cmd(
         typer.echo(json.dumps(tool_data, separators=(",", ":")))
         return
     for k, v in data.items():
-        if k not in ("file", "task") and v:
+        if k in ("file", "task") or not v:
+            continue
+        if k in ("risk",):
+            typer.echo(f'  Risk score: {v} (0=low, higher=more coupling exposure)')
+        elif isinstance(v, list):
+            for item in v[:3]:
+                typer.echo(f'  \u25cf {item}')
+        elif isinstance(v, dict):
+            for sk, sv in v.items():
+                typer.echo(f'  {sk}: {sv}')
+        else:
             typer.echo(f'  {k}: {v}')
 
 @core_app.command(name="check-pr", rich_help_panel="CI")
@@ -4488,9 +4541,12 @@ def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact") -> None
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    typer.echo(f'Parity: {"OK" if data.get("parity",{}).get("unchanged") else "CHANGED"}')
-    for tp in data.get("trap", [])[:2]:
-        typer.echo(f'  {tp.get("file_a","")} <-> {tp.get("file_b","")}: {tp.get("label","")}')
+    unch = data.get("parity", {}).get("unchanged", False)
+    typer.echo(f"Structural hash: {'\u2713 unchanged' if unch else '\u26a0 changed since base ref'}")
+    for tp in data.get("trap", [])[:3]:
+        la = tp.get("label", "")
+        mark = "\u26a0" if "HIGH" in la or "OVERLAP" in la.upper() else "\u25cf"
+        typer.echo(f'  {mark} {tp.get("file_a","")} <-> {tp.get("file_b","")}: {la}')
 
 @core_app.command(name="cleanup-list", rich_help_panel="Maintenance")
 def cleanup_list_cmd(path=".", format="compact") -> None:
@@ -4528,7 +4584,14 @@ def vulnerability_map_cmd(path=".", format="compact") -> None:
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    typer.echo(f'Don-touch: {len(data.get("don_touch",[]))}  Churn: {len(data.get("churn_hubs",[]))}  Critical: {len(data.get("critical",[]))}')
+    dt = len(data.get("don_touch", []))
+    ch = len(data.get("churn_hubs", []))
+    cr = len(data.get("critical", []))
+    typer.echo(f"  Don't-touch (hub-risk + capillary): {dt} files")
+    typer.echo(f"  Churn hubs (high edit + high coupling): {ch} files")
+    typer.echo(f"  Critical (all three): {cr} files")
+    if cr:
+        typer.echo("  \u26a0 These files are high-risk: coupled, connected, and critical.")
 
 @core_app.command(name="health-score", rich_help_panel="CI")
 def health_score_cmd(path=".", format="compact") -> None:
@@ -4778,17 +4841,7 @@ def agent_edit(
         typer.echo(json.dumps({"error": str(e)}))
         raise typer.Exit(1)
     
-    report = preflight_report(path, [file], task, diff_ref=None, format="tool", analysis=analysis)
-    
-    # Enrich structure
-    if analysis:
-        from quale.reports import _fused_priority_ranking, _blast_radius_analysis, _hub_risk_report
-        blast, _ = _blast_radius_analysis(path, [file], analysis)
-        hub = _hub_risk_report(path, [file], analysis)
-        report["structural_context"] = {
-            "blast_radius": blast,
-            "hub_risk": hub,
-        }
+    report = preflight_report(path, [file], diff_ref=None, task=task)
     typer.echo(json.dumps(report, indent=2))
 
 @agent_app.command(name="orient")
@@ -4824,8 +4877,7 @@ def agent_guard(
         typer.echo(json.dumps({"error": str(e)}))
         raise typer.Exit(1)
     
-    # We call preflight_report with tool format
-    report = preflight_report(path, [file], task, format="tool", analysis=analysis)
+    report = preflight_report(path, [file], task=task)
     typer.echo(json.dumps(report, indent=2))
 
 
@@ -4898,17 +4950,16 @@ def ci_check(
             pass
             
     ci_report_cmd(
-        base_ref=base_ref,
-        head_ref=head_ref,
+        ref_a=base_ref,
+        ref_b=head_ref,
         path=path,
-        format="terminal",
         summary=True,
-        fail_on_blast_tier=blast_tier,
-        fail_on_mirror_gap=mirror_gap,
-        fail_on_stable_touched=stable_touched,
-        fail_on_hub_risk=hub_risk,
-        fail_on_clone=clone_fail,
-        fail_on_new_identifiers=new_identifiers
+        fail_blast_tier=blast_tier,
+        fail_mirror_gap=mirror_gap,
+        fail_stable_touched=stable_touched,
+        fail_hub_risk=hub_risk,
+        fail_clone=clone_fail,
+        fail_new_identifiers=new_identifiers
     )
 
 
@@ -4921,7 +4972,7 @@ def ci_comment(
 ):
     """Posts the PR report."""
     from quale.cli import pr_report
-    pr_report(base_ref=base_ref, head_ref=head_ref, path=path, post_comment=True, pr_number=pr_number)
+    pr_report(ref_a=base_ref, ref_b=head_ref, path=path, post_comment=True, pr_number=pr_number)
 
 
 @ci_app.command(name="trend")
