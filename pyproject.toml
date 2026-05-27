@@ -63,3 +63,10 @@ exclude = ["tests/fixtures/"]
 [tool.codespell]
 skip = "tests/fixtures/*,.git/*,.quale/*"
 ignore-words-list = "ist,nto,teh"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
