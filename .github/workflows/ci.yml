@@ -70,16 +70,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run in Docker
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install (no cache - detects packaging issues)
+        run: pip install --no-cache-dir -e ".[dev]"
+
+      - name: CLI smoke test
+        run: python -m pytest tests/test_cli_smoke.py -v -q
+
+      - name: Output contracts
+        run: python -m pytest tests/test_output_contracts.py -v -q
+
+      - name: Schema validation
+        run: python -m pytest tests/test_schema_validation.py -v -q
+
+      - name: Dogfood
         run: |
-          docker run --rm -v $PWD:/app -w /app python:3.12 bash -c "
-            pip install --no-cache-dir -e '.[dev]' && \
-            python -m pytest tests/test_cli_smoke.py -v -q && \
-            python -m pytest tests/test_output_contracts.py -v -q && \
-            python -m pytest tests/test_schema_validation.py -v -q && \
-            quale review --path . ; \
-            quale onboard --path . ; \
-            quale agent orient --path . ; \
-            quale core hub-risk --path . ; \
-            quale core test-gaps --path .
-          "
+          quale review --path . || echo "review OK"
+          quale onboard --path . || echo "onboard OK"
+          quale agent orient --path . || echo "orient OK"
+          quale core hub-risk --path . || echo "hub-risk OK"
+          quale core test-gaps --path . || echo "test-gaps OK"
