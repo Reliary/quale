@@ -189,39 +189,90 @@ def review_summary(path: str = ".", base_ref: str = "HEAD~1", head_ref: str = "H
         analysis = scan_codebase(path, git_ref=head_ref, quiet=False, max_files=2500, max_seconds=30)
     except Exception:
         analysis = None
+    stable_map = {}
+    for s in ci.get("stable_files_touched", []):
+        stable_map[s["file"]] = s
+
+    mirror_gap = ci.get("mirror_gap_ratio", 1.0)
+    stable_anchors = [s for s in ci.get("stable_files_touched", []) if s.get("status") == "stable_anchor"]
+    hub_flagged = ci.get("hub_risk_flagged", [])
+    clone_flagged = ci.get("clone_flagged", [])
+    risk_flags = ci.get("risk_flags", [])
+
     gap_warnings = []
-    if ci.get("mirror_gap_ratio", 1.0) < 0.5:
-        gap_warnings.append(f"test coverage gap: only {ci.get('mirror_gap_ratio', 0.0):.0%} of changed files have matching test files")
-    if ci.get("stable_touched_count", 0) > 0:
-        gap_warnings.append(f"{ci['stable_touched_count']} stable file(s) changed")
-    hub_warning = any(ci.get("hub_risk_flagged", []))
-    clone_warning = any(ci.get("clone_flagged", []))
     read_first = [r["file"] for r in ci.get("blast_radius", [])[:5]]
     verify_with = []
     if ci.get("mirror_signals"):
         ms = ci["mirror_signals"]
         if ms.get("mirror_files"):
             verify_with = ms["mirror_files"][:5]
+
+    # Per-file annotations
+    changed = ci.get("changed_files", [])
+    file_annotations = []
+    for cf in changed:
+        annotations = []
+        severity = "low"
+        if cf in stable_map:
+            s = stable_map[cf]
+            annotations.append(f"{s.get('status', 'stable').replace('_', ' ')} (persistence {s.get('persistence', 0):.0%})")
+            severity = "high"
+        if cf in hub_flagged:
+            annotations.append("top 10% coupling")
+            severity = "high" if severity != "high" else severity
+        if cf in clone_flagged:
+            annotations.append("structural clone")
+            severity = "medium" if severity != "high" else severity
+        file_annotations.append({"file": cf, "annotations": annotations, "severity": severity})
+
+    # Test mirror per file (naming convention)
+    test_mirrors = []
+    for cf in changed:
+        stem = os.path.splitext(os.path.basename(cf))[0]
+        dir_path = os.path.dirname(cf)
+        # Strip common test suffixes for matching
+        source_stem = stem.replace("_test", "").replace(".test", "").replace("_spec", "").replace(".spec", "")
+        if source_stem != stem:
+            continue
+        # Check for test files in same dir or adjacent test dir
+        p = os.path.abspath(path)
+        test_candidates = []
+        test_patterns = [
+            os.path.join(dir_path, f"{source_stem}_test.{os.path.splitext(cf)[1].lstrip('.')}"),
+            os.path.join(dir_path, f"{source_stem}.test.{os.path.splitext(cf)[1].lstrip('.')}"),
+            os.path.join(dir_path, f"{source_stem}_spec.{os.path.splitext(cf)[1].lstrip('.')}"),
+        ]
+        parent_dir = os.path.dirname(dir_path) if dir_path else ""
+        if parent_dir:
+            test_patterns.append(os.path.join(parent_dir, "tests", os.path.basename(cf)))
+        for tp in test_patterns:
+            if os.path.exists(tp):
+                test_candidates.append(tp)
+                break
+        test_mirrors.append({"source": cf, "mirror_files": test_candidates, "has_mirror": len(test_candidates) > 0})
+
     return {
         "base_ref": base_ref,
         "head_ref": head_ref,
-        "changed_files": ci.get("changed_files", []),
+        "changed_files": changed,
+        "file_annotations": file_annotations,
+        "test_mirrors": test_mirrors,
         "blast_radius_count": len(ci.get("blast_radius", [])),
-        "mirror_gap_ratio": ci.get("mirror_gap_ratio", 1.0),
-        "stable_touched_count": ci.get("stable_touched_count", 0),
-        "hub_risk_flagged": ci.get("hub_risk_flagged", []),
-        "clone_flagged": ci.get("clone_flagged", []),
+        "mirror_gap_ratio": mirror_gap,
+        "stable_anchors_touched": [s["file"] for s in stable_anchors],
+        "hub_risk_flagged": hub_flagged,
+        "clone_flagged": clone_flagged,
+        "risk_flags": risk_flags,
         "warnings": gap_warnings,
-        "hub_warning": hub_warning,
-        "clone_warning": clone_warning,
         "read_first": read_first,
         "verify_with": verify_with,
-        "review": "FAIL" if (gap_warnings or hub_warning or clone_warning) else "PASS",
+        "review": "PASS" if not (risk_flags or hub_flagged or clone_flagged) else "FAIL",
+        "summary": ci.get("summary", ""),
     }
 
 
 def onboard_plan(path: str = ".") -> dict:
-    """Produce a 3-step onboarding plan from landmarks, modules, and safe islands."""
+    """Produce a 3-step onboarding plan: landmarks, modules, and watch-outs."""
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     from quale.scanner import scan_codebase, _compute_landmarks, _DEAD_CODE_EXTS, _is_lock_file, _is_generated
@@ -231,58 +282,92 @@ def onboard_plan(path: str = ".") -> dict:
         analysis = scan_codebase(path_abs, quiet=False, deep=True, max_files=2500, max_seconds=30)
     except Exception as e:
         return {"error": f"scan failed: {e}"}
+
+    # Step 1: Landmark files (most distinctive vocabulary)
     all_landmarks = _compute_landmarks(analysis.file_vocabs) if analysis.file_vocabs else []
     code_landmarks = []
     for l in all_landmarks:
         ext = os.path.splitext(l["path"])[1].lower()
         if ext in _DEAD_CODE_EXTS and not _is_lock_file(l["path"]) and not _is_generated(l["path"]):
             code_landmarks.append(l)
-    landmarks = code_landmarks[:5]
     why_map = {
-        "go": "Go entry point — start here to understand the service wiring",
-        "ts": "TypeScript module — defines the main types and interfaces",
-        "py": "Python module — core business logic lives here",
-        "rs": "Rust module — performance-critical path",
-        "java": "Java class — primary data model",
+        "go": "Go source — entry points, routing, handlers",
+        "ts": "TypeScript — types, interfaces, client SDK",
+        "py": "Python — business logic, scripts",
+        "rs": "Rust — performance-critical",
+        "java": "Java — data model",
+        "yaml": "YAML — config, CI, deploy",
     }
     step1 = []
-    for l in landmarks:
+    for l in code_landmarks[:6]:
         ext = os.path.splitext(l["path"])[1].lstrip(".")
-        why = why_map.get(ext, f"key {ext} file — representative vocabulary across the repo")
+        why = why_map.get(ext, f"key {ext} file — distinctive vocabulary")
         step1.append({"file": l["path"], "why": why})
+
+    # Step 2: Macro-modules (>3 files, excludes generated/lock)
     mods = compute_modules(path_abs, analysis=analysis)
     modules_list = mods.get("modules", []) if isinstance(mods, dict) else []
     step2 = []
-    for m in modules_list[:5]:
+    for m in modules_list:
         files = m.get("files", [])
-        if not files:
-            continue
-        label = m.get("label", "unknown")
-        if label == "unknown" and files:
-            dirs = [os.path.dirname(f) for f in files]
-            label = os.path.commonpath(dirs) if len(dirs) > 1 else dirs[0]
-            label = label.replace(os.path.sep, " / ") or label
         code_files = [f for f in files if os.path.splitext(f)[1].lower() in _DEAD_CODE_EXTS]
-        step2.append({"module": label, "file_count": len(code_files), "total_files": len(files), "sample_files": code_files[:3]})
-    safe = _safe_islands_data(analysis) if analysis.file_vocabs else []
-    step3 = [{"directory": d, "why": "low vocabulary volatility, isolated structure"} for d in safe[:5]]
-    why_steps = [
-        "These files have the most unique vocabulary — they define the concepts everything else imports. Read them to understand the domain language.",
-        "These are co-occurring file groups. Each module has its own vocabulary dialect. Understanding module boundaries helps you know where a change belongs.",
-        "These directories change infrequently and are structurally isolated. Safe for experimentation and quick fixes without breaking other code.",
+        if len(code_files) < 4:
+            continue
+        label = m.get("label", "") or ""
+        if not label or label == "unknown":
+            if files:
+                dirs = [os.path.dirname(f) for f in files if os.path.dirname(f)]
+                if dirs:
+                    label = os.path.commonpath(dirs) if len(dirs) > 1 else dirs[0]
+                    label = label.replace(os.path.sep, " / ") or label
+        if not label:
+            label = "unnamed module"
+        step2.append({"module": label, "file_count": len(code_files), "sample_files": code_files[:3]})
+        if len(step2) >= 6:
+            break
+
+    # Step 3: Files to watch out for (hub-risk, extinct exports)
+    try:
+        hub = thanatosis_report(path_abs)
+    except Exception:
+        hub = {}
+    watch_out = []
+    for f in hub.get("files", [])[:5]:
+        watch_out.append({
+            "file": f.get("file", ""),
+            "risk": f"coupled to {f.get('centrality', 0)} files, edited {f.get('edits', 0)} times",
+        })
+    if not watch_out:
+        watch_out.append({"file": "(none)", "risk": "no high-risk files detected"})
+
+    lang_map: dict[str, int] = {}
+    for fv in analysis.file_vocabs:
+        lang_map[fv.language] = lang_map.get(fv.language, 0) + 1
+    sorted_langs = sorted(lang_map.items(), key=lambda x: -x[1])
+
+    steps = [
+        {
+            "step": 1, "title": "Read these landmark files",
+            "why": "These files define the concepts everything else imports. Read them to understand the domain language.",
+            "items": step1,
+        },
+        {
+            "step": 2, "title": "Understand these macro-modules",
+            "why": "Each module has its own vocabulary. Understanding module boundaries helps you know where a change belongs.",
+            "items": step2,
+        },
+        {
+            "step": 3, "title": "Watch out for these files",
+            "why": "These files are highly coupled but rarely edited — changing them has wide impact.",
+            "items": watch_out,
+        },
     ]
-    steps = []
-    for i, (s, w) in enumerate(zip(
-        [step1, step2, step3],
-        why_steps
-    )):
-        titles = ["Read these landmark files", "Understand these modules", "Safe to edit"]
-        steps.append({"step": i + 1, "title": titles[i], "why": w, "items": s})
     return {
         "steps": steps,
+        "languages": sorted_langs[:6],
         "landmark_count": len(code_landmarks),
-        "module_count": len(modules_list),
-        "safe_island_count": len(safe),
+        "module_count": len([m for m in modules_list if len(m.get("files", [])) >= 4]),
+        "total_files": analysis.total_files,
     }
 
 
@@ -8164,6 +8249,67 @@ def repo_fingerprint(path: str, git_ref: str | None = None) -> dict:
         "total_phrases": analysis.total_phrases,
         "total_indices": total_indices,
         "languages": len(analysis.languages),
+    }
+
+
+def orient_report(path: str) -> dict:
+    """LLM-oriented repo map: what to read, avoid, and do next."""
+    from quale.scanner import scan_codebase, _compute_landmarks
+    from quale.bootstrap import compute_modules
+
+    p = os.path.abspath(path)
+    analysis = scan_codebase(p, quiet=True, max_files=2500, max_seconds=30)
+    if not analysis or not analysis.file_vocabs:
+        return {"error": "scan failed"}
+
+    # Language map
+    lang_map: dict[str, int] = {}
+    for fv in analysis.file_vocabs:
+        lang_map[fv.language] = lang_map.get(fv.language, 0) + 1
+    sorted_langs = sorted(lang_map.items(), key=lambda x: -x[1])
+
+    # Landmarks
+    all_landmarks = _compute_landmarks(analysis.file_vocabs)
+    why_map = {
+        "go": "Go source — entry points, routing, handlers",
+        "ts": "TypeScript — types, interfaces, client SDK",
+        "py": "Python — business logic, scripts",
+        "rs": "Rust — performance-critical",
+        "java": "Java — data model",
+        "yaml": "YAML — config, CI, deploy",
+    }
+    landmarks = []
+    for l in all_landmarks[:8]:
+        ext = os.path.splitext(l["path"])[1].lstrip(".")
+        why = why_map.get(ext, "key file — distinctive vocabulary")
+        landmarks.append({"file": l["path"], "why": why})
+
+    # Modules (macro only: >3 files)
+    mods = compute_modules(path=p, analysis=analysis)
+    modules_list = mods.get("modules", []) if isinstance(mods, dict) else []
+    modules = []
+    for m in modules_list:
+        files = m.get("files", [])
+        if len(files) < 4:
+            continue
+        label = m.get("label", "unknown")
+        if label == "unknown" and files:
+            dirs = [os.path.dirname(f) for f in files]
+            label = os.path.commonpath(dirs) if len(dirs) > 1 else dirs[0]
+            label = label.replace(os.path.sep, " / ") or label
+        modules.append({"module": label, "files": len(files), "sample": files[:3]})
+        if len(modules) >= 8:
+            break
+
+    return {
+        "schema_version": 1,
+        "total_files": analysis.total_files,
+        "languages": sorted_langs[:8],
+        "landmarks": landmarks,
+        "modules": modules,
+        "recommended_workflow": ["edit-context", "guard", "verify-packet"],
+        "guard_list": ["hub-risk", "test-gaps", "extinct-exports"],
+        "_agent_note": "Run `quale agent edit <FILE> --task \"<TASK>\"` to start editing",
     }
 
 

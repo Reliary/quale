@@ -35,25 +35,16 @@ cli = typer.Typer(
     help="""
     quale — structural codebase analysis. No parsers, no config, any language.
 
-    Find the right command for you:
-      HUMAN  explore (what's here), inspect (deep tour), hub-risk (don't touch),
-             extinct-exports (cleanup), edit-context (what breaks?)
-      CI     ci-report [GATE], check-diff [GATE], parity-bit [GATE], check-pr [INFO], pr-report [INFO]
-      AGENT  edit-context, guard, contract, verify
+    Run `quale review` for a PR review, `quale onboard` for new-repo orientation,
+    or `quale agent orient` for LLM agent setup.
 
-    Run ``quale help-agent "your task"`` if you're not sure which command.
+    Personas:
+      HUMAN  review (PR check), onboard (new repo), refactor-cost, inspect, explore
+      CI     check (CI gates), comment (PR comment), trend (metrics over time), init (GitHub Action)
+      AGENT  orient (repo map), edit (edit context), guard (risk check)
+      CORE   60+ structural primitives — run ``quale core --help``
 
-    By question (all commands):
-      WHAT'S HERE?        explore, inspect, analyze, repo-map, modules, skeleton
-      WHAT WILL BREAK?    edit-context, guard, hub-risk, coupling-chain, criticality, capillary, latent-deps
-      WHERE ARE TESTS?    verify, verify-packet, verify-scope, test-gaps, reverse-verify, mirage
-      WHAT CHANGED?       diff, blast, ci-report, check-pr, check-diff, parity-bit, pr-report, delta
-      WHAT TO CLEAN?      extinct-exports, escape-velocity, cleanup-list, decay, safe-islands
-      WHAT'S THE STORY?   timeline, lifecycle, stable, provenance, origins, patterns, file-epochs, concept-flow
-      ARE REPOS DRIFTING? compare, coupling, migration-pairs, concept-fragments
-      ADVANCED            capillary, phantom, trap, porosity, spectral-gap, complexity-ratio, escape-velocity,
-                          entropy, solve, deflate, heisenberg, traffic-control, anomalies, vocabulary-trend,
-                          diff-structural, fingerprint, orphans, stop, ask, calibration, orient, clone, landmarks
+    Run ``quale core help-agent "your task"`` for command recommendations.
     """,
     add_completion=False,
     context_settings={"help_option_names": ["--help", "-h"]},
@@ -1346,12 +1337,14 @@ def solve_cmd(
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
+    total_phrases = data.get("total_phrases", 0)
+    total_keys = len(data.get("bimoth_index", []))
     if focus:
-        typer.echo(f'Lens: {focus} — {len(data.get("bimoth_index",[]))} orbiting keys, {len(data.get("orbiting_files",[]))} files')
+        typer.echo(f"Top identifiers related to \033[36m{focus}\033[0m \u2014 {total_keys} keys, {len(data.get('orbiting_files',[]))} files")
     else:
-        typer.echo(data["summary"])
-    for i, p in enumerate(data.get("bimoth_index", [])[:5]):
-        typer.echo(f"  {i+1}. {p['phrase']} (freq={p['frequency']}) — {', '.join(p['top_files'][:2])}")
+        typer.echo(f"Top {total_keys} non-dictionary identifiers across {total_phrases} total phrases in repo:")
+    for i, p in enumerate(data.get("bimoth_index", [])[:8]):
+        typer.echo(f"  {i+1}. \033[33m{p['phrase']}\033[0m (appears {p['frequency']} times) \u2014 e.g. {', '.join(p['top_files'][:2])}")
 
 
 @core_app.command(name="deflate", rich_help_panel="Maintenance")
@@ -1599,12 +1592,13 @@ def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
         typer.echo(json.dumps(data, indent=2))
         return
     if data.get("uncertainty_violated"):
-        typer.echo(f'  {_color("HEISENBERG VIOLATION", "red")}')
-        typer.echo(f'  New signal: {", ".join(data.get("new_signal_tokens", [])[:3])}')
-        typer.echo(f'  Deleted anchors: {", ".join(data.get("deleted_anchors", [])[:3])}')
+        typer.echo(f'  \033[31m\u26a0 Mixed change detected\033[0m')
+        typer.echo(f'  New identifiers: {", ".join(data.get("new_signal_tokens", [])[:3])}')
+        typer.echo(f'  Deleted identifiers: {", ".join(data.get("deleted_anchors", [])[:3])}')
         typer.echo(f'  {data.get("mandate","")}')
+        typer.echo('  \033[90mSuggestion: split this change into separate refactor + feature edits.\033[0m')
     else:
-        typer.echo('  Heisenberg principle respected.')
+        typer.echo(f'  \033[32m\u2713 Change is focused\033[0m \u2014 no mixed refactor/feature detected.')
 
 
 @core_app.command(name="traffic-control", rich_help_panel="Maintenance")
@@ -1721,6 +1715,9 @@ def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact") -> None:
         typer.echo("provide --ref-a and --ref-b (e.g. --ref-a HEAD~1 --ref-b HEAD)", err=True)
         raise typer.Exit(1)
     data = parity_bit_report(path=p, ref_a=ref_a, ref_b=ref_b)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
     if "error" in data:
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
@@ -1893,7 +1890,7 @@ def lagrange_cmd(
         return
     pts = data.get("lagrange_points", [])
     if pts:
-        typer.echo(_color(f"Lagrange Points: {len(pts)} safe injection sites", "green"))
+        typer.echo(f"Safe injection sites found: {len(pts)}")
         for p in pts[:3]:
             typer.echo(f"  Lines {p['start']}-{p['end']} ({p['lines']} lines, {p['identifier_count']} identifiers)")
             typer.echo(f"    {p['code'][:80]}...")
@@ -4318,7 +4315,15 @@ def trap_cmd(path=".", file_a="", file_b="", format="compact") -> None:
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    typer.echo(f'Overlap: {data["overlap"]:.1%} — {data["label"]}')
+    overlap = data.get("overlap", 0)
+    label = data.get("label", "")
+    if overlap >= 0.8:
+        typer.echo(f'  \033[31m\u26a0 High merge risk\033[0m \u2014 {overlap:.0%} identifier overlap ({label})')
+        typer.echo('  \033[90mThese files share many identifiers. Concurrent edits risk naming conflicts.\033[0m')
+    elif overlap >= 0.5:
+        typer.echo(f'  \033[33m\u25cf Moderate overlap\033[0m \u2014 {overlap:.0%} ({label})')
+    else:
+        typer.echo(f'  \033[32m\u25cb Low overlap\033[0m \u2014 {overlap:.0%} ({label}) \u2014 safe to edit concurrently')
 
 @core_app.command(name="hub-risk", rich_help_panel="Code Analysis")
 def thanatosis_cmd(path=".", format="compact") -> None:
@@ -4635,27 +4640,69 @@ def review_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
     typer.echo("")
-    typer.echo(_color("═══ Review Summary ═══", "header"))
-    typer.echo(f"  Base: {base_ref}  Head: {head_ref}")
-    typer.echo(f"  Files changed: {len(data.get('changed_files', []))}")
-    typer.echo(f"  Blast radius:  {data.get('blast_radius_count', 0)} files")
-    typer.echo(f"  Mirror cov:    {data.get('mirror_gap_ratio', 1.0):.0%}")
-    typer.echo(f"  Stable anchor: {data.get('stable_touched_count', 0)} touched")
-    if data.get('hub_warning'):
-        typer.echo(f"  \033[33mHub risk:\033[0m     {len(data.get('hub_risk_flagged', []))} file(s) in top 10% coupling")
-    if data.get('clone_warning'):
-        typer.echo(f"  \033[33mClone risk:\033[0m   {len(data.get('clone_flagged', []))} file(s) are structural clones")
-    if data.get('read_first'):
-        typer.echo(f"  \033[36mRead first:\033[0m   {', '.join(data['read_first'][:5])}")
-    if data.get('verify_with'):
-        typer.echo(f"  \033[36mVerify with:\033[0m {', '.join(data['verify_with'][:5])}")
+    typer.echo(_color(f"═══ Review: {base_ref} \u2192 {head_ref} ({len(data.get('changed_files', []))} files) ═══", "header"))
+    typer.echo("")
+
+    # Per-file annotations
+    typer.echo("  Changes:")
+    for f in data.get("file_annotations", []):
+        anns = f.get("annotations", [])
+        if f["severity"] == "high":
+            mark = f"  \033[31m\u25cf {f['file']}\033[0m"
+        elif f["severity"] == "medium":
+            mark = f"  \033[33m\u25cf {f['file']}\033[0m"
+        else:
+            mark = f"  \033[32m\u25cb {f['file']}\033[0m"
+        ann_text = f" \u2014 {', '.join(anns)}" if anns else ""
+        typer.echo(f"{mark}{ann_text}")
+
+    # Test connections
+    typer.echo("")
+    typer.echo("  Test connections:")
+    for tm in data.get("test_mirrors", []):
+        if tm.get("has_mirror"):
+            mf = tm["mirror_files"][0]
+            typer.echo(f"    \033[32m\u25cf {tm['source']} \u2192 {mf}\033[0m")
+        else:
+            typer.echo(f"    \033[33m\u25cb {tm['source']} \u2192 (no test mirror found)\033[0m")
+
+    # Risk flags from ci_report
+    typer.echo("")
+    typer.echo("  Risk flags:")
+    for rf in data.get("risk_flags", []):
+        typer.echo(f"    \033[31m\u26a0 {rf}\033[0m")
+    if not data.get("risk_flags"):
+        typer.echo("    \033[32mNone\033[0m")
+
+    # Action items
+    action_items = []
+    stable_anchors = data.get("stable_anchors_touched", [])
+    for sa in stable_anchors:
+        action_items.append(f"Review {sa} carefully \u2014 stable file, rarely changes")
+    mirror_gap = data.get("mirror_gap_ratio", 1.0)
+    if mirror_gap < 0.5:
+        action_items.append(f"Add or update tests \u2014 only {mirror_gap:.0%} of changed files have test mirrors")
+    if data.get("hub_risk_flagged"):
+        action_items.append("Check hub-risk files \u2014 they have high coupling")
+    if data.get("clone_flagged"):
+        action_items.append("Review structural clones \u2014 similar files may need refactoring")
+    if data.get("blast_radius_count", 0) > 0:
+        action_items.append(f"Run `quale core diff-structural` for full structural diff")
+    typer.echo("")
+    typer.echo("  Action items:")
+    for i, ai in enumerate(action_items[:5], 1):
+        typer.echo(f"    {i}. {ai}")
+    if not action_items:
+        typer.echo("    \033[32mNo action items \u2014 clean change set.\033[0m")
+
+    # Verdict line
+    typer.echo("")
     verdict = data.get("review", "FAIL")
+    summary = data.get("summary", "")
     if verdict == "PASS":
-        typer.echo(f"  \033[32mReview: {verdict}\033[0m")
+        typer.echo(f"  \033[32mResult: PASS \u2014 {summary}\033[0m")
     else:
-        for w in data.get("warnings", []):
-            typer.echo(f"  \033[33mWarning:\033[0m {w}")
-        typer.echo(f"  \033[31mReview: {verdict}\033[0m")
+        typer.echo(f"  \033[31mResult: {verdict} \u2014 {summary}\033[0m")
 
 
 @cli.command(name="onboard", rich_help_panel="Code Analysis")
@@ -4686,6 +4733,11 @@ def onboard_cmd(
         return
     typer.echo("")
     typer.echo(_color("═══ Onboarding Plan ═══", "header"))
+    langs = data.get("languages", [])
+    if langs:
+        lang_str = ", ".join(f"{l}({c})" for l, c in langs)
+        typer.echo(f"  Languages: {lang_str}")
+        typer.echo(f"  Total files: {data.get('total_files', 0)}")
     for step in data.get("steps", []):
         n = step.get("step", 0)
         title = step.get("title", "")
@@ -4694,11 +4746,17 @@ def onboard_cmd(
         typer.echo(f"  \033[36mStep {n}\033[0m \033[1m{title}\033[0m")
         for item in items[:5]:
             if "file" in item:
-                typer.echo(f"    {item['file']}  \033[90m({item.get('why', '')})\033[0m")
+                file_part = item["file"]
+                why_part = item.get("why", "")
+                if item.get("file") == "(none)":
+                    typer.echo(f"    \033[32m\u25cb {file_part} \u2014 {item.get('risk', '')}\033[0m")
+                elif "risk" in item:
+                    typer.echo(f"    \033[33m\u26a0 {file_part} \u2014 {item.get('risk', '')}\033[0m")
+                else:
+                    typer.echo(f"    \033[36m\u25cf {file_part}\033[0m  \033[90m{why_part}\033[0m")
             elif "module" in item:
-                typer.echo(f"    {item['module']}  \033[90m({item.get('file_count', 0)} files: {', '.join(item.get('sample_files', []))})\033[0m")
-            elif "directory" in item:
-                typer.echo(f"    {item['directory']}  \033[90m({item.get('why', '')})\033[0m")
+                samples = ", ".join(item.get("sample_files", [])[:2])
+                typer.echo(f"    \033[35m\u25cf {item['module']}\033[0m  \033[90m({item.get('file_count', 0)} files: {samples})\033[0m")
 
 
 @cli.command(name="refactor-cost", rich_help_panel="Code Analysis")
@@ -4879,14 +4937,21 @@ def agent_edit(
 def agent_orient(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
 ):
-    """Returns token-optimized repo map for LLM Agents."""
+    """Token-optimized repo orientation for LLM Agents.
+
+    Returns a structured JSON payload: repo map, landmarks (what to read),
+    modules, and a recommended workflow.
+    """
     import json
-    from quale.reports import repo_fingerprint
+    from quale.reports import orient_report
     import os
     p = os.path.abspath(path)
     try:
-        fp = repo_fingerprint(p)
-        typer.echo(json.dumps(fp, indent=2))
+        data = orient_report(p)
+        if "error" in data:
+            typer.echo(json.dumps(data), err=True)
+            raise typer.Exit(1)
+        typer.echo(json.dumps(data, indent=2))
     except Exception as e:
         typer.echo(json.dumps({"error": str(e)}))
         raise typer.Exit(1)
@@ -4927,11 +4992,17 @@ def agent_guard(
 # ── CI Namespace ──────────────────────────────────────────────────────────
 
 @ci_app.command(name="init")
-def ci_init():
+def ci_init(
+    path: Annotated[str, typer.Option("--path", "-p", help="Repo root")] = ".",
+):
     """Generates GH Actions YAML."""
     import os
     import yaml
-    workflow_dir = ".github/workflows"
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    workflow_dir = os.path.join(p, ".github/workflows")
     os.makedirs(workflow_dir, exist_ok=True)
     workflow_path = os.path.join(workflow_dir, "quale.yml")
     

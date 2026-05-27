@@ -82,7 +82,7 @@ class TestHumanCIIntegration(unittest.TestCase):
         tmp, repo = self._make_repo()
         result = self.run_cli("review", "--path", repo)
         self.assertEqual(result.returncode, 0)
-        self.assertIn("Review Summary", result.stdout)
+        self.assertIn("Review:", result.stdout)
 
     def test_review_json_format(self):
         tmp, repo = self._make_repo()
@@ -113,7 +113,7 @@ class TestHumanCIIntegration(unittest.TestCase):
         tmp, repo = self._make_repo()
         result = self.run_cli("onboard", "--path", repo)
         self.assertEqual(result.returncode, 0)
-        self.assertIn("Onboarding Plan", result.stdout)
+        self.assertIn("Onboarding", result.stdout)
 
     def test_onboard_json_format(self):
         tmp, repo = self._make_repo()
