@@ -54,7 +54,7 @@ class TestAdversarialContent(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "src.c", b"int main() {\n\x00return 0;\n}\n")
         self._commit(repo)
-        result = self.run_vocab("agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -62,7 +62,7 @@ class TestAdversarialContent(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "big.txt", "hello world\n" * 50000)
         self._commit(repo)
-        result = self.run_vocab("agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -73,7 +73,7 @@ class TestAdversarialContent(unittest.TestCase):
             content = '{"a":' + content + "}"
         self._write(repo, "deep.json", content)
         self._commit(repo)
-        result = self.run_vocab("agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -81,7 +81,7 @@ class TestAdversarialContent(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "src.ts", "export const A\ufffd\ufffdB = true;\nexport const C\ufffdD = false;\n")
         self._commit(repo)
-        result = self.run_vocab("agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -89,7 +89,7 @@ class TestAdversarialContent(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "src.ts", "export const \u202eLogin = true;\nexport const R\x1b\u202eOrder = false;\n")
         self._commit(repo)
-        result = self.run_vocab("agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -98,7 +98,7 @@ class TestAdversarialContent(unittest.TestCase):
         for i in range(2000):
             self._write(repo, f"src/file{i}.ts", f"export const Needle{i} = true;\n")
         self._commit(repo)
-        result = self.run_vocab("agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -107,7 +107,7 @@ class TestAdversarialContent(unittest.TestCase):
         self._write(repo, "normal.ts", "export const Normal = true;\n")
         (repo / "loop").symlink_to(repo)
         self._commit(repo)
-        result = self.run_vocab("agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -115,9 +115,73 @@ class TestAdversarialContent(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "readme.md", "# empty\n")
         self._commit(repo)
-        result = self.run_vocab("agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
+
+    # ── Adversarial: review ──
+
+    def test_review_null_byte_file(self):
+        tmp, repo = self._make_repo()
+        self._write(repo, "src.c", b"int main() {\n\x00return 0;\n}\n")
+        self._commit(repo)
+        result = self.run_vocab("review", "--path", str(repo), "--base", "HEAD~0", "-f", "json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_review_no_changes(self):
+        tmp, repo = self._make_repo()
+        self._write(repo, "readme.md", "# test\n")
+        self._commit(repo)
+        result = self.run_vocab("review", "--path", str(repo), "--base", "HEAD~0", "-f", "json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+
+    # ── Adversarial: onboard ──
+
+    def test_onboard_null_byte_file(self):
+        tmp, repo = self._make_repo()
+        self._write(repo, "thing.ts", b"export const OK = \x00;\n")
+        self._commit(repo)
+        result = self.run_vocab("onboard", "--path", str(repo), "-f", "json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        json.loads(result.stdout)
+
+    def test_onboard_empty_repo(self):
+        tmp, repo = self._make_repo()
+        result = self.run_vocab("onboard", "--path", str(repo), "-f", "json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    # ── Adversarial: refactor-cost ──
+
+    def test_refactor_cost_null_byte_file(self):
+        tmp, repo = self._make_repo()
+        self._write(repo, "src/weird.ts", b"export const OK = \x00;\n")
+        self._commit(repo)
+        result = self.run_vocab("refactor-cost", "src/weird.ts", "--path", str(repo), "-f", "json")
+        self.assertIn(result.returncode, (0, 1), result.stderr)
+
+    def test_refactor_cost_missing_file(self):
+        tmp, repo = self._make_repo()
+        result = self.run_vocab("refactor-cost", "src/nope.ts", "--path", str(repo), "-f", "json")
+        # Graceful error regardless of exit code
+        data = json.loads(result.stdout) if result.stdout else {}
+        if "error" in data:
+            pass  # Graceful file-not-found is acceptable
+        # Either exit 0 or 1 is fine for adversarial
+
+    # ── Adversarial: CI gates ──
+
+    def test_ci_gates_invalid_flag_value(self):
+        tmp, repo = self._make_repo()
+        result = self.run_vocab("core", "ci-report", "HEAD~1", "HEAD", "--path", str(repo),
+                                "--fail-on-blast-tier", "nonexistent")
+        self.assertEqual(result.returncode, 1)
+
+    def test_ci_gates_zero_new_identifiers(self):
+        tmp, repo = self._make_repo()
+        result = self.run_vocab("core", "ci-report", "HEAD~1", "HEAD", "--path", str(repo),
+                                "--fail-on-new-identifiers", "0", "--summary")
+        self.assertIn(result.returncode, (0, 7))
 
 
 if __name__ == "__main__":

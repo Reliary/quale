@@ -59,6 +59,15 @@ cli = typer.Typer(
     context_settings={"help_option_names": ["--help", "-h"]},
 )
 
+ci_app = typer.Typer(help="CI actions and automated gates.")
+agent_app = typer.Typer(help="LLM Agent optimized commands (JSON/IR outputs).")
+core_app = typer.Typer(help="Advanced structural primitives and codebase analysis.")
+
+cli.add_typer(ci_app, name="ci")
+cli.add_typer(agent_app, name="agent")
+cli.add_typer(core_app, name="core")
+
+
 
 def _version_callback(show_version: bool) -> None:
     if show_version:
@@ -73,22 +82,48 @@ def _help_all(ctx: typer.Context) -> None:
     with open(__file__, encoding="utf-8") as f:
         src = f.read()
     panels: dict[str, list[tuple[str, str]]] = {}
-    for c in cli.registered_commands:
-        name = c.name or ""
-        doc = (c.callback.__doc__ or "").strip().split("\n")[0] if c.callback else ""
-        # Find panel from source
-        m = re.search(rf'@cli\.command\([^)]*name="{name}"[^)]*rich_help_panel="([^"]+)"', src)
-        panel = m.group(1) if m else "Other"
-        panels.setdefault(panel, []).append((name, doc))
+
+    def register_cmds(typer_app, prefix=""):
+        for c in typer_app.registered_commands:
+            name = c.name
+            if not name and c.callback:
+                name = c.callback.__name__.replace("_", "-")
+            if not name:
+                continue
+            full_name = f"{prefix}{name}"
+            doc = (c.callback.__doc__ or "").strip().split("\n")[0] if c.callback else ""
+            
+            # Simple heuristic: Look for rich_help_panel="Panel" near the definition
+            m = re.search(rf'@[a-z_]+\.command\([^)]*rich_help_panel="([^"]+)"[^)]*\)', src)
+            
+            # A more robust regex: match the command name inside the file
+            # Since doing full AST parsing is hard, we just regex for it.
+            # Find the command decorator that defines this function
+            func_name = c.callback.__name__ if c.callback else ""
+            m2 = re.search(rf'@(?:[a-z_]+)\.command\([^)]*rich_help_panel="([^"]+)"[^)]*\)\s*\n\s*def {func_name}', src)
+            if not m2:
+                m2 = re.search(rf'@(?:[a-z_]+)\.command\([^)]*name="{name}"[^)]*rich_help_panel="([^"]+)"', src)
+            if not m2:
+                m2 = re.search(rf'@(?:[a-z_]+)\.command\([^)]*rich_help_panel="([^"]+)"[^)]*name="{name}"', src)
+                
+            panel = m2.group(1) if m2 else "Other"
+            if prefix == "ci ": panel = "CI"
+            if prefix == "agent ": panel = "Agent Safety"
+            panels.setdefault(panel, []).append((full_name, doc))
+
+    register_cmds(cli)
+    register_cmds(core_app, "core ")
+    register_cmds(ci_app, "ci ")
+    register_cmds(agent_app, "agent ")
 
     for panel in ["Getting Started", "Agent Safety", "Verification", "CI",
                    "Code Analysis", "History", "Maintenance", "Cross-Repo",
-                   "Utilities"]:
+                   "Utilities", "Other"]:
         cmds = panels.get(panel, [])
         if not cmds:
             continue
         typer.echo(f"\n\033[1m{panel}:\033[0m")
-        for name, doc in cmds:
+        for name, doc in sorted(cmds):
             typer.echo(f"  {name:<25s} {doc[:60]}")
     sys.exit(0)
 
@@ -119,16 +154,32 @@ def _color(text: str, color: str) -> str:
     return f"{codes.get(color, '')}{text}{codes['reset']}"
 
 
-def _gate_evaluation(data: dict, fail_mirror_gap: float | None,
-                     fail_blast_tier: str | None,
-                     fail_stable_touched: bool) -> tuple[list[tuple[int, str]], list[str]]:
+GATE_CODES = {
+    "mirror_gap": 4,
+    "hub_risk": 5,
+    "clone": 6,
+    "new_identifiers": 7,
+    "blast_tier": 2,
+    "stable_touched": 3,
+}
+
+
+def _gate_evaluation(
+    data: dict,
+    fail_mirror_gap: float | None,
+    fail_blast_tier: str | None,
+    fail_stable_touched: bool,
+    fail_hub_risk: bool = False,
+    fail_clone: bool = False,
+    fail_new_identifiers: int | None = None,
+) -> tuple[list[tuple[int, str]], list[str]]:
     failures = []
     checks = []
     if fail_mirror_gap is not None:
         ratio = data.get("mirror_gap_ratio", 1.0)
         checks.append(f"mirror gap {ratio:.0%} >= {fail_mirror_gap:.0%}")
         if ratio < fail_mirror_gap:
-            failures.append((1, f"mirror gap {ratio:.0%} < {fail_mirror_gap:.0%}"))
+            failures.append((GATE_CODES["mirror_gap"], f"mirror gap {ratio:.0%} < {fail_mirror_gap:.0%}"))
     if fail_blast_tier is not None:
         tier_order = {"none": 0, "local": 1, "moderate": 2, "high": 3, "critical": 4}
         threshold = tier_order.get(fail_blast_tier.lower())
@@ -137,12 +188,27 @@ def _gate_evaluation(data: dict, fail_mirror_gap: float | None,
         current_tier = data.get("max_blast_tier", "none")
         checks.append(f"blast tier {current_tier} < {fail_blast_tier.lower()}")
         if tier_order.get(current_tier, 0) >= threshold:
-            failures.append((2, f"blast tier {current_tier} >= {fail_blast_tier.lower()}"))
+            failures.append((GATE_CODES["blast_tier"], f"blast tier {current_tier} >= {fail_blast_tier.lower()}"))
     if fail_stable_touched:
         count = data.get("stable_touched_count", 0)
         checks.append(f"stable anchors touched {count} == 0")
         if count > 0:
-            failures.append((3, f"{count} stable anchors touched"))
+            failures.append((GATE_CODES["stable_touched"], f"{count} stable anchors touched"))
+    if fail_hub_risk:
+        flagged = data.get("hub_risk_flagged", [])
+        checks.append(f"hub risk files {len(flagged)} == 0")
+        if flagged:
+            failures.append((GATE_CODES["hub_risk"], f"{len(flagged)} changed file(s) in top 10% hub-risk: {', '.join(f['file'] for f in flagged[:5])}"))
+    if fail_clone:
+        flagged = data.get("clone_flagged", [])
+        checks.append(f"clone files {len(flagged)} == 0")
+        if flagged:
+            failures.append((GATE_CODES["clone"], f"{len(flagged)} changed file(s) are structural clones: {', '.join(f['file'] for f in flagged[:5])}"))
+    if fail_new_identifiers is not None:
+        count = data.get("new_identifier_count", 0)
+        checks.append(f"new identifiers {count} <= {fail_new_identifiers}")
+        if count > fail_new_identifiers:
+            failures.append((GATE_CODES["new_identifiers"], f"{count} new identifiers introduced (limit {fail_new_identifiers})"))
     return failures, checks
 
 
@@ -162,7 +228,7 @@ def _validate_refs(path: str, *refs: str) -> None:
         raise ValueError(f"Unknown git ref(s): {', '.join(missing)}")
 
 
-@cli.command(rich_help_panel="Getting Started")
+@core_app.command(rich_help_panel="Getting Started")
 def analyze(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json, html, quick")] = "terminal",
@@ -324,7 +390,7 @@ def search(
             typer.echo(f"  … and {remaining} more matches")
 
 
-@cli.command(rich_help_panel="History")
+@core_app.command(rich_help_panel="History")
 def lifecycle(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 24,
@@ -356,7 +422,7 @@ def lifecycle(
         typer.echo(format_lifecycles(data, weeks, show_all=False))
 
 
-@cli.command(rich_help_panel="CI")
+@core_app.command(rich_help_panel="CI")
 def blast(
     ref_a: Annotated[str, typer.Argument(help="Base git ref")],
     ref_b: Annotated[str, typer.Argument(help="Target git ref")],
@@ -396,7 +462,7 @@ def blast(
         typer.echo(format_blast_radius(pr_files, results, ref_a, ref_b))
 
 
-@cli.command(name="edit-context",  rich_help_panel="Agent Safety")
+@core_app.command(name="edit-context",  rich_help_panel="Agent Safety")
 def preflight(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
@@ -558,7 +624,7 @@ def preflight(
         typer.echo(_why_edit_context(data))
 
 
-@cli.command(rich_help_panel="Agent Safety")
+@core_app.command(rich_help_panel="Agent Safety")
 def contract(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Allowed edit file(s); repeat or comma-separate")] = None,
@@ -594,7 +660,7 @@ def contract(
     typer.echo(json.dumps(data, separators=(",", ":")))
 
 
-@cli.command(name="check-plan",  rich_help_panel="Agent Safety")
+@core_app.command(name="check-plan",  rich_help_panel="Agent Safety")
 def check_plan(
     contract_file: Annotated[Path, typer.Option("--contract", "-c", help="Contract JSON file")],
     proposal_file: Annotated[Path | None, typer.Option("--proposal", "-p", help="Proposal JSON file; stdin when omitted")] = None,
@@ -632,7 +698,7 @@ def check_plan(
     typer.echo(json.dumps(result, separators=(",", ":")))
 
 
-@cli.command(name="repo-map",  rich_help_panel="Getting Started")
+@core_app.command(name="repo-map",  rich_help_panel="Getting Started")
 def crystallography(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -713,7 +779,7 @@ def crystallography(
         typer.echo(c(f"  Caveat: {caveat}", "yellow"))
 
 
-@cli.command(rich_help_panel="Verification")
+@core_app.command(rich_help_panel="Verification")
 def verify(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -771,7 +837,7 @@ def verify(
     typer.echo('Return the label of the best candidate (e.g., "A").')
 
 
-@cli.command(name="reverse-verify",  rich_help_panel="Verification")
+@core_app.command(name="reverse-verify",  rich_help_panel="Verification")
 def reverse_verify(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed test file(s); repeat or comma-separate")] = [],
@@ -804,7 +870,7 @@ def reverse_verify(
         typer.echo(f"  {c['path']}  ({c['reason']})")
 
 
-@cli.command(name="verify-classify",  rich_help_panel="Verification")
+@core_app.command(name="verify-classify",  rich_help_panel="Verification")
 def verify_classify(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -828,7 +894,7 @@ def verify_classify(
         typer.echo(f"  🧬 {v}")
 
 
-@cli.command(name="verify-bonds",  rich_help_panel="Verification")
+@core_app.command(name="verify-bonds",  rich_help_panel="Verification")
 def verify_bonds(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -849,7 +915,7 @@ def verify_bonds(
         typer.echo("No bonded test pairs found.")
 
 
-@cli.command(name="verify-drift",  rich_help_panel="Verification")
+@core_app.command(name="verify-drift",  rich_help_panel="Verification")
 def verify_drift(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     commits: Annotated[int, typer.Option("--commits", "-n", help="Commits to inspect")] = 10,
@@ -873,7 +939,7 @@ def verify_drift(
         typer.echo("  No drift detected.")
 
 
-@cli.command(name="test-gaps",  rich_help_panel="Verification")
+@core_app.command(name="test-gaps",  rich_help_panel="Verification")
 def deserts(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -919,7 +985,7 @@ def deserts(
     typer.echo("")
 
 
-@cli.command(name="co-change",  rich_help_panel="Verification")
+@core_app.command(name="co-change",  rich_help_panel="Verification")
 def entangle(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     lookback: Annotated[int, typer.Option("--lookback", "-n", help="Commits to scan")] = 200,
@@ -951,7 +1017,7 @@ def entangle(
         typer.echo(f"  {p['file_a']:45s} ↔ {p['file_b']:45s}  count={p['co_change_count']:3d} prob={p['co_change_probability']:.2f}{marker}")
 
 
-@cli.command(name="cascade-verify", rich_help_panel="Agent Safety")
+@core_app.command(name="cascade-verify", rich_help_panel="Agent Safety")
 def cascade_verify_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -1001,7 +1067,7 @@ def cascade_verify_cmd(
                     f"{'(safe to skip LLM)' if data.get('cohesion', 0) >= 0.7 else '(needs LLM)'}")
 
 
-@cli.command(name="veto-cascade", rich_help_panel="Agent Safety")
+@core_app.command(name="veto-cascade", rich_help_panel="Agent Safety")
 def veto_cascade_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s)")] = [],
@@ -1042,7 +1108,7 @@ def veto_cascade_cmd(
         typer.echo(f"Veto cascade: progressive  Candidates: {len(cands)}  Tokens: {tok}  Cohesion: {coh}")
 
 
-@cli.command(name="isolate", rich_help_panel="Agent Safety")
+@core_app.command(name="isolate", rich_help_panel="Agent Safety")
 def isolate_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     task: Annotated[str, typer.Option("--task", "-t", help="Task description")] = "",
@@ -1117,7 +1183,7 @@ def isolate_cmd(
     typer.echo(prompt)
 
 
-@cli.command(name="fold", rich_help_panel="Agent Safety")
+@core_app.command(name="fold", rich_help_panel="Agent Safety")
 def fold_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     file: Annotated[str, typer.Option("--file", help="File to fold")] = "",
@@ -1146,7 +1212,7 @@ def fold_cmd(
     typer.echo(format_folded_file(data))
 
 
-@cli.command(name="drift-check", rich_help_panel="CI")
+@core_app.command(name="drift-check", rich_help_panel="CI")
 def drift_check_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     file: Annotated[str, typer.Option("--file", help="File to snapshot or check")] = "",
@@ -1189,7 +1255,7 @@ def drift_check_cmd(
         typer.echo(f"Drift stable. Velocity: {vel:.3f}")
 
 
-@cli.command(name="latent-deps", rich_help_panel="Code Analysis")
+@core_app.command(name="latent-deps", rich_help_panel="Code Analysis")
 def mycorrhiza_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="File(s) to map hidden deps for")] = [],
@@ -1239,7 +1305,7 @@ def mycorrhiza_cmd(
                 typer.echo(f"    {_color('TOLERANCE VIOLATION:', 'red')} {v}")
 
 
-@cli.command(name="solve", rich_help_panel="Maintenance")
+@core_app.command(name="solve", rich_help_panel="Maintenance")
 def solve_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     top_n: Annotated[int, typer.Option("--top", help="Number of cipher keys to extract")] = 20,
@@ -1268,7 +1334,7 @@ def solve_cmd(
         typer.echo(f"  {i+1}. {p['phrase']} (freq={p['frequency']}) — {', '.join(p['top_files'][:2])}")
 
 
-@cli.command(name="deflate", rich_help_panel="Maintenance")
+@core_app.command(name="deflate", rich_help_panel="Maintenance")
 def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact") -> None:
     """Cap net-new identifiers per edit."""
 
@@ -1297,7 +1363,7 @@ def deflate_cmd(path=".", file="", diff="", budget: int = 5, format="compact") -
         typer.echo(f'  Gold Standard OK — {used}/{bud} net-new identifiers used.')
 
 
-@cli.command(name="forecast", rich_help_panel="CI")
+@core_app.command(name="forecast", rich_help_panel="CI")
 def forecast_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s) to forecast risk for")] = [],
@@ -1353,7 +1419,7 @@ def forecast_cmd(
         typer.echo(_color("  Seismic mode: P-wave files excluded. Only S-wave risks shown.", "yellow"))
 
 
-@cli.command(name="triangulate", rich_help_panel="Agent Safety")
+@core_app.command(name="triangulate", rich_help_panel="Agent Safety")
 def triangulate_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     task: Annotated[str, typer.Option("--task", "-t", help="Task description")] = "",
@@ -1393,7 +1459,7 @@ def triangulate_cmd(
 
 
 
-@cli.command(name="concept-flow", rich_help_panel="Maintenance")
+@core_app.command(name="concept-flow", rich_help_panel="Maintenance")
 def epidemiology_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", help="History lookback")] = 12,
@@ -1431,7 +1497,7 @@ def epidemiology_cmd(
         typer.echo(f"All stable. {data['total_tracked']} phrases tracked.")
 
 
-@cli.command(name="orient", rich_help_panel="Utilities")
+@core_app.command(name="orient", rich_help_panel="Utilities")
 def orient_cmd(path=".", task="", format="compact") -> None:
     """One-call orientation: solve + triangulate + isolate."""
 
@@ -1457,7 +1523,7 @@ def orient_cmd(path=".", task="", format="compact") -> None:
     typer.echo(f'  {data.get("total_files_in_scope",0)} files in scope')
 
 
-@cli.command(name="health", rich_help_panel="CI")
+@core_app.command(name="health", rich_help_panel="CI")
 def health_cmd(
     path=".",
                balance: Annotated[bool, typer.Option("--balance", help="Phototropism: check root-to-shoot vocabulary ratio")] = False,
@@ -1486,7 +1552,7 @@ def health_cmd(
         typer.echo(f"  {data.get('phototropism_note', '')}")
 
 
-@cli.command(name="heisenberg", rich_help_panel="Maintenance")
+@core_app.command(name="heisenberg", rich_help_panel="Maintenance")
 def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
     """Mixed refactor/feature edits that must be split."""
 
@@ -1514,7 +1580,7 @@ def heisenberg_cmd(path=".", file="", diff="", format="compact") -> None:
         typer.echo('  Heisenberg principle respected.')
 
 
-@cli.command(name="traffic-control", rich_help_panel="Maintenance")
+@core_app.command(name="traffic-control", rich_help_panel="Maintenance")
 def traffic_control_cmd(path=".", file="", intended_import="", format="compact") -> None:
     """Zone files by graph centrality percentile."""
 
@@ -1543,7 +1609,7 @@ def traffic_control_cmd(path=".", file="", intended_import="", format="compact")
         typer.echo(f'  Import route clear. ({src} -> {dst})')
 
 
-@cli.command(name="capillary", rich_help_panel="Code Analysis")
+@core_app.command(name="capillary", rich_help_panel="Code Analysis")
 def capillary_cmd(path=".", format="compact") -> None:
     """Files with the most inter-file vocabulary edges."""
 
@@ -1562,7 +1628,7 @@ def capillary_cmd(path=".", format="compact") -> None:
     for c in data.get("capillaries", [])[:3]:
         typer.echo(f'  {c["file"]} ({c["edges"]} edges)')
 
-@cli.command(name="spectral-gap", rich_help_panel="Code Analysis")
+@core_app.command(name="spectral-gap", rich_help_panel="Code Analysis")
 def spectral_gap_cmd(path=".", format="compact") -> None:
     """Modularity score: largest cluster / second largest."""
 
@@ -1582,7 +1648,7 @@ def spectral_gap_cmd(path=".", format="compact") -> None:
     m = data.get("modularity", "?")
     typer.echo(f'Gap: {g} ({m})')
 
-@cli.command(name="phantom", rich_help_panel="Code Analysis")
+@core_app.command(name="phantom", rich_help_panel="Code Analysis")
 def phantom_cmd(path=".", format="compact") -> None:
     """Detect framework/library from import/export vocabulary."""
 
@@ -1605,7 +1671,7 @@ def phantom_cmd(path=".", format="compact") -> None:
         typer.echo('  none detected')
 
 
-@cli.command(name="parity-bit", rich_help_panel="CI")
+@core_app.command(name="parity-bit", rich_help_panel="CI")
 def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact") -> None:
     """SHA-1 of module phrase set. [GATE: CHANGED vs UNCHANGED]"""
     from quale.reports import parity_bit_report
@@ -1627,7 +1693,7 @@ def parity_bit_cmd(path=".", ref_a="", ref_b="", format="compact") -> None:
     typer.echo(f'Mirror {"UNCHANGED" if u else "CHANGED"}')
 
 
-@cli.command(name="guide", rich_help_panel="Agent Safety")
+@core_app.command(name="guide", rich_help_panel="Agent Safety")
 def guide_cmd(path=".", file="", format="compact") -> None:
     """One-token file locator for a file. """
     from quale.reports import guide_report
@@ -1650,7 +1716,7 @@ def guide_cmd(path=".", file="", format="compact") -> None:
     typer.echo(f"{g} [{c}]")
 
 
-@cli.command(name="decay", rich_help_panel="Maintenance")
+@core_app.command(name="decay", rich_help_panel="Maintenance")
 def decay_cmd(path=".", file="", weeks=12, half_life=30,
               metabolism: Annotated[bool, typer.Option("--metabolism", help="Active Metabolism: verify pattern declining repo-wide")] = False,
               format="compact"):
@@ -1681,7 +1747,7 @@ def decay_cmd(path=".", file="", weeks=12, half_life=30,
         typer.echo(f'{data.get("file","")}: clean — no decaying patterns')
 
 
-@cli.command(name="entropy", rich_help_panel="Maintenance")
+@core_app.command(name="entropy", rich_help_panel="Maintenance")
 def entropy_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", help="History lookback")] = 12,
@@ -1716,7 +1782,7 @@ def entropy_cmd(
         typer.echo(f"  [{label}] {d['directory']:30s} entropy={d['entropy']:.2f} baseline={d['baseline']:.2f}")
 
 
-@cli.command(name="zk-proof", rich_help_panel="Agent Safety")
+@core_app.command(name="zk-proof", rich_help_panel="Agent Safety")
 def zk_proof_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     file: Annotated[str, typer.Option("--file", help="Schema file (source of truth)")] = "",
@@ -1757,7 +1823,7 @@ def zk_proof_cmd(
             typer.echo(f"  '{v['identifier']}' not in schema. Did you mean: {alts}?")
 
 
-@cli.command(name="safe-islands", rich_help_panel="Maintenance")
+@core_app.command(name="safe-islands", rich_help_panel="Maintenance")
 def lagrange_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     file: Annotated[str, typer.Option("--file", help="File to analyze")] = "",
@@ -1797,7 +1863,7 @@ def lagrange_cmd(
         typer.echo(f"No Lagrange Points: {note}")
 
 
-@cli.command(name="migration-pairs", rich_help_panel="Maintenance")
+@core_app.command(name="migration-pairs", rich_help_panel="Maintenance")
 def phase_shift_cmd(
     repo_a: Annotated[str, typer.Option("--repo-a", help="Pre-migration repo path")] = "",
     repo_b: Annotated[str, typer.Option("--repo-b", help="Post-migration repo path")] = "",
@@ -1829,7 +1895,7 @@ def phase_shift_cmd(
 
 
 
-@cli.command(name="verify-packet",  rich_help_panel="Agent Safety")
+@core_app.command(name="verify-packet",  rich_help_panel="Agent Safety")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
@@ -1898,7 +1964,7 @@ def cartridge(
         typer.echo(_why_verify_packet(data))
 
 
-@cli.command(name="check-diff", rich_help_panel="CI")
+@core_app.command(name="check-diff", rich_help_panel="CI")
 def check_diff(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     diff_ref: Annotated[str, typer.Option("--diff", help="Git ref to diff against (default HEAD~1)")] = "HEAD~1",
@@ -1935,7 +2001,7 @@ def check_diff(
             raise typer.Exit(1)
 
 
-@cli.command(rich_help_panel="Agent Safety")
+@core_app.command(rich_help_panel="Agent Safety")
 def route(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     task: Annotated[str | None, typer.Option("--task", "-t", help="Task description")] = None,
@@ -1982,7 +2048,7 @@ def route(
     typer.echo("")
 
 
-@cli.command(rich_help_panel="Utilities")
+@core_app.command(rich_help_panel="Utilities")
 def clone(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     threshold: Annotated[float, typer.Option("--threshold", "-t", help="Similarity threshold (0-1)")] = 0.85,
@@ -2009,7 +2075,7 @@ def clone(
             typer.echo(f"    {f}")
 
 
-@cli.command(rich_help_panel="Utilities")
+@core_app.command(rich_help_panel="Utilities")
 def landmarks(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     limit: Annotated[int, typer.Option("--limit", "-l", help="Max results")] = 10,
@@ -2031,7 +2097,7 @@ def landmarks(
         typer.echo(f"  {lm['uniqueness']:.2f}  {lm['language']:<12}  {lm['path']}  ({lm['unique_phrases']} unique phrases)")
 
 
-@cli.command(rich_help_panel="History")
+@core_app.command(rich_help_panel="History")
 def timeline(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 12,
@@ -2078,7 +2144,7 @@ def timeline(
         typer.echo(f"  {wk['week']:<10} {wk['commits']:<8} {c(str(new), 'green'):>8} {c(str(retired), 'red'):>8} {wk['stable_concepts']:<8} {wk['total_concepts']:<8} {trend}")
 
 
-@cli.command(rich_help_panel="History")
+@core_app.command(rich_help_panel="History")
 def stable(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history")] = 12,
@@ -2521,7 +2587,7 @@ def _print_preflight_checklist(data: dict) -> None:
     typer.echo(c("  Report-only. Stop and inspect manually if risk is high or the changed file is unexpected.", "subheader"))
 
 
-@cli.command(name="agent-bootstrap",  rich_help_panel="Utilities")
+@core_app.command(name="agent-bootstrap",  rich_help_panel="Utilities")
 def agent_bootstrap(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description to find related files")] = None,
@@ -2706,7 +2772,7 @@ def agent_bootstrap(
         typer.echo("")
 
 
-@cli.command(rich_help_panel="Utilities")
+@core_app.command(rich_help_panel="Utilities")
 def skeleton(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -2744,7 +2810,7 @@ def skeleton(
         typer.echo(c(f"  Skip: tests follow {data['test_convention']} convention — already covered.", "gray"))
 
 
-@cli.command(rich_help_panel="History")
+@core_app.command(rich_help_panel="History")
 def delta(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -2797,7 +2863,7 @@ def delta(
             typer.echo(f"    {c(a['type'], severity_color)}: {c(str(a.get('delta', '')), 'gray')}")
 
 
-@cli.command(name="ci-report",  rich_help_panel="CI")
+@core_app.command(name="ci-report",  rich_help_panel="CI")
 def ci_report_cmd(
     ref_a: Annotated[str, typer.Argument(help="Base git ref (e.g. origin/main)")],
     ref_b: Annotated[str, typer.Argument(help="Target git ref (e.g. HEAD)")],
@@ -2806,6 +2872,9 @@ def ci_report_cmd(
     fail_mirror_gap: Annotated[float | None, typer.Option("--fail-on-mirror-gap", help="Fail if mirror_gap_ratio < threshold")] = None,
     fail_blast_tier: Annotated[str | None, typer.Option("--fail-on-blast-tier", help="Fail if max_blast_tier >= tier (local/moderate/high/critical)")] = None,
     fail_stable_touched: Annotated[bool, typer.Option("--fail-on-stable-touched", help="Fail if any stable anchors touched")] = False,
+    fail_hub_risk: Annotated[bool, typer.Option("--fail-on-hub-risk", help="Fail if changed file is in top 10% hub-risk")] = False,
+    fail_clone: Annotated[bool, typer.Option("--fail-on-clone", help="Fail if changed file is a structural clone")] = False,
+    fail_new_identifiers: Annotated[int | None, typer.Option("--fail-on-new-identifiers", help="Fail if more than N new identifiers introduced")] = None,
     summary: Annotated[bool, typer.Option("--summary", help="Only show pass/fail, reason, and core metrics")] = False,
     why: Annotated[bool, typer.Option("--why", help="Show why each result")] = False,
 ):
@@ -2836,7 +2905,9 @@ def ci_report_cmd(
 
     try:
         gate_failures, gate_checks = _gate_evaluation(
-            data, fail_mirror_gap, fail_blast_tier, fail_stable_touched
+            data, fail_mirror_gap, fail_blast_tier, fail_stable_touched,
+            fail_hub_risk=fail_hub_risk, fail_clone=fail_clone,
+            fail_new_identifiers=fail_new_identifiers,
         )
     except ValueError as e:
         typer.echo(str(e), err=True)
@@ -3083,7 +3154,7 @@ def inspect(
         typer.echo(_why_inspect(data))
 
 
-@cli.command(rich_help_panel="Getting Started")
+@core_app.command(rich_help_panel="Getting Started")
 def modules(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
@@ -3100,7 +3171,7 @@ def modules(
         typer.echo(format_modules(data))
 
 
-@cli.command(name="help-agent",  rich_help_panel="Getting Started")
+@core_app.command(name="help-agent",  rich_help_panel="Getting Started")
 def help_agent(
     task: Annotated[str, typer.Argument(help="Engineering task description")],
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool, json")] = "tool",
@@ -3195,7 +3266,7 @@ def help_agent(
         }, indent=2))
 
 
-@cli.command(rich_help_panel="Cross-Repo")
+@core_app.command(rich_help_panel="Cross-Repo")
 def compare(
     repo_a: Annotated[str, typer.Argument(help="First repo path")],
     repo_b: Annotated[str, typer.Argument(help="Second repo path")],
@@ -3243,7 +3314,7 @@ def compare(
             typer.echo(c(f"  drift {drift:.2f} < {fail_on_drift} PASS", "green"))
 
 
-@cli.command(rich_help_panel="History")
+@core_app.command(rich_help_panel="History")
 def provenance(
     phrase: Annotated[str, typer.Argument(help="Phrase to trace")],
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
@@ -3263,7 +3334,7 @@ def provenance(
         typer.echo(f"{item['week']} {status} {item.get('file_count', 0)} files")
 
 
-@cli.command(name="fingerprint",  rich_help_panel="Utilities")
+@core_app.command(name="fingerprint",  rich_help_panel="Utilities")
 def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo path")]) -> None:
     """Structural fingerprint of a file or entire repo."""
     target = os.path.abspath(target)
@@ -3283,7 +3354,7 @@ def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo pat
     typer.echo(f"Phrases: {quale.size} unique / {len(seg_result.phrases)} total")
 
 
-@cli.command(rich_help_panel="Utilities")
+@core_app.command(rich_help_panel="Utilities")
 def orphans(
     path: Annotated[str, typer.Argument(help="Path to codebase")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
@@ -3300,11 +3371,23 @@ def orphans(
         typer.echo(f"? {item['phrase']} {item['file']}")
 
 
-@cli.command(name="pr-report",  rich_help_panel="CI")
+def _detect_pr_number() -> int | None:
+    """Detect PR number from GitHub Actions environment."""
+    ref = os.environ.get("GITHUB_REF", "")
+    if ref.startswith("refs/pull/"):
+        parts = ref.split("/")
+        if len(parts) >= 3 and parts[2].isdigit():
+            return int(parts[2])
+    return None
+
+
+@core_app.command(name="pr-report",  rich_help_panel="CI")
 def pr_report(
     ref_a: Annotated[str, typer.Argument(help="Base git ref")],
     ref_b: Annotated[str, typer.Argument(help="Target git ref")],
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    post_comment: Annotated[bool, typer.Option("--post-comment", help="Post report as PR comment via gh CLI")] = False,
+    pr_number: Annotated[int | None, typer.Option("--pr", help="PR number (auto-detected if in CI)")] = None,
 ):
     """PR structural report in markdown. [INFO: always exits 0]"""
     if not vgit.is_repo(path):
@@ -3323,10 +3406,27 @@ def pr_report(
     blast_results = pr_blast_radius(pr_files, analysis.file_vocabs)
     from quale.reports import refactoring_patterns
     pattern_data = refactoring_patterns(path, base_ref=ref_a, head_ref=ref_b)
-    typer.echo(format_pr_report_markdown(pr_files, blast_results, [], ref_a, ref_b, pattern_data=pattern_data))
+    report_text = format_pr_report_markdown(pr_files, blast_results, [], ref_a, ref_b, pattern_data=pattern_data)
+    if post_comment:
+        try:
+            pr = pr_number or _detect_pr_number()
+            if pr:
+                subprocess.run(
+                    ["gh", "pr", "comment", str(pr), "--body", report_text],
+                    check=True, capture_output=True, text=True,
+                )
+                typer.echo(f"Posted PR #{pr} comment.")
+            else:
+                typer.echo("Could not detect PR number. Set --pr or run in GitHub Actions.", err=True)
+        except FileNotFoundError:
+            typer.echo("gh CLI not found. Install GitHub CLI or skip --post-comment.", err=True)
+        except subprocess.CalledProcessError as e:
+            typer.echo(f"Failed to post comment: {e.stderr}", err=True)
+        return
+    typer.echo(report_text)
 
 
-@cli.command(rich_help_panel="Utilities")
+@core_app.command(rich_help_panel="Utilities")
 def init(
     path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
     seed: Annotated[bool, typer.Option("--seed", "--no-seed", help="Seed fragment router from git history")] = True,
@@ -3459,7 +3559,7 @@ def _entry_main():
     cli()
 
 
-@cli.command(name="anomalies",  rich_help_panel="Maintenance")
+@core_app.command(name="anomalies",  rich_help_panel="Maintenance")
 def lattice(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     base_ref: Annotated[str | None, typer.Option("--base", help="Base git ref (default: HEAD~1)")] = None,
@@ -3531,7 +3631,7 @@ def lattice(
         typer.echo("")
 
 
-@cli.command(rich_help_panel="Maintenance")
+@core_app.command(rich_help_panel="Maintenance")
 def patterns(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     base_ref: Annotated[str | None, typer.Option("--base", help="Base git ref (default: HEAD~1)")] = None,
@@ -3604,7 +3704,7 @@ def patterns(
         typer.echo("")
 
 
-@cli.command(rich_help_panel="Utilities")
+@core_app.command(rich_help_panel="Utilities")
 def stop(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     read: Annotated[list[str] | None, typer.Option("--read", help="Files already read; repeat")] = None,
@@ -3662,7 +3762,7 @@ def stop(
     typer.echo("")
 
 
-@cli.command(name="vocabulary-trend",  rich_help_panel="Maintenance")
+@core_app.command(name="vocabulary-trend",  rich_help_panel="Maintenance")
 def entropy(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks to analyze")] = 12,
@@ -3710,7 +3810,7 @@ def entropy(
         typer.echo("")
 
 
-@cli.command(name="origins",  rich_help_panel="Maintenance")
+@core_app.command(name="origins",  rich_help_panel="Maintenance")
 def genesis(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     top: Annotated[int, typer.Option("--top", "-n", help="Max results per category")] = 20,
@@ -3776,7 +3876,7 @@ def genesis(
         typer.echo("")
 
 
-@cli.command(name="coupling",  rich_help_panel="Cross-Repo")
+@core_app.command(name="coupling",  rich_help_panel="Cross-Repo")
 def bond(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     top: Annotated[int, typer.Option("--top", "-n", help="Max results per bond type")] = 30,
@@ -3844,7 +3944,7 @@ def bond(
         typer.echo("")
 
 
-@cli.command(name="diff-structural",  rich_help_panel="Maintenance")
+@core_app.command(name="diff-structural",  rich_help_panel="Maintenance")
 def diff_structural(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
     ref_a: Annotated[str | None, typer.Option("--before", help="Base ref (default: HEAD~1)")] = None,
@@ -3899,7 +3999,7 @@ def diff_structural(
     typer.echo("")
 
 
-@cli.command(rich_help_panel="Utilities")
+@core_app.command(rich_help_panel="Utilities")
 def ask(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     question: Annotated[str, typer.Argument(help="Question about the repo")] = "",
@@ -3962,7 +4062,7 @@ def ask(
     typer.echo(c(f"  {cap}", "gray"))
 
 
-@cli.command(name="verify-scope",  rich_help_panel="Agent Safety")
+@core_app.command(name="verify-scope",  rich_help_panel="Agent Safety")
 def verify_scope(
     path: Annotated[str, typer.Argument(help="Repository path")] = ".",
     files: Annotated[list[str] | None, typer.Option("--files", help="Expected/contract files; repeat or comma-separate")] = None,
@@ -4050,7 +4150,7 @@ def verify_scope(
     typer.echo(c("  Mode: report-only receipt\n    identifies scope changes, not correctness.", "gray"))
 
 
-@cli.command(rich_help_panel="Utilities")
+@core_app.command(rich_help_panel="Utilities")
 def calibration(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
@@ -4139,7 +4239,7 @@ def _desert_text(ver_confidence: dict, changed_files: list[str]) -> str:
     return f"Verification confidence is {level}; structurally conservative."
 
 
-@cli.command(name="escape-velocity", rich_help_panel="Maintenance")
+@core_app.command(name="escape-velocity", rich_help_panel="Maintenance")
 def escape_velocity_cmd(path=".", format="compact") -> None:
     """Phrase removal difficulty: ESCAPED / BOUND / DEEP."""
 
@@ -4157,7 +4257,7 @@ def escape_velocity_cmd(path=".", format="compact") -> None:
         return
     for t in data.get("tagged", [])[:5]:
         typer.echo(f'  {t["phrase"]}: {t["label"]}')
-@cli.command(name="trap", rich_help_panel="Code Analysis")
+@core_app.command(name="trap", rich_help_panel="Code Analysis")
 def trap_cmd(path=".", file_a="", file_b="", format="compact") -> None:
     """Identifier overlap between two concurrently-edited files."""
 
@@ -4178,7 +4278,7 @@ def trap_cmd(path=".", file_a="", file_b="", format="compact") -> None:
         return
     typer.echo(f'Overlap: {data["overlap"]:.1%} — {data["label"]}')
 
-@cli.command(name="hub-risk", rich_help_panel="Code Analysis")
+@core_app.command(name="hub-risk", rich_help_panel="Code Analysis")
 def thanatosis_cmd(path=".", format="compact") -> None:
     """High-centrality files with zero edits."""
 
@@ -4198,7 +4298,7 @@ def thanatosis_cmd(path=".", format="compact") -> None:
         typer.echo(f'  {f["file"]}: cent={f["centrality"]} edits={f["edits"]} risk={f["risk_ratio"]}')
     typer.echo('  \033[90mNext: quale guard --file <file> | quale edit-context --files <file>\033[0m')
 
-@cli.command(name="complexity-ratio", rich_help_panel="Code Analysis")
+@core_app.command(name="complexity-ratio", rich_help_panel="Code Analysis")
 def trompe_cmd(path=".", file="", format="compact") -> None:
     """Apparent lines vs unique identifiers."""
 
@@ -4219,7 +4319,7 @@ def trompe_cmd(path=".", file="", format="compact") -> None:
         return
     typer.echo(f'Trompe: {data.get("trompe_ratio",0)} — {data.get("label","")}')
 
-@cli.command(name="porosity", rich_help_panel="Code Analysis")
+@core_app.command(name="porosity", rich_help_panel="Code Analysis")
 def porosity_cmd(path=".", format="compact") -> None:
     """Sparse coupling estimate without computing co-occurrence."""
 
@@ -4237,7 +4337,7 @@ def porosity_cmd(path=".", format="compact") -> None:
         return
     typer.echo(f'Porosity: {data.get("porosity",0):.6f}')
 
-@cli.command(name="extinct-exports", rich_help_panel="Maintenance")
+@core_app.command(name="extinct-exports", rich_help_panel="Maintenance")
 def thylacine_cmd(path=".", format="compact") -> None:
     """Multi-file exports never imported externally."""
 
@@ -4260,7 +4360,7 @@ def thylacine_cmd(path=".", format="compact") -> None:
     if thy:
         typer.echo('  \033[90mNext: quale cleanup-list | quale escape-velocity\033[0m')
 
-@cli.command(name="coupling-chain", rich_help_panel="Code Analysis")
+@core_app.command(name="coupling-chain", rich_help_panel="Code Analysis")
 def tensegrity_cmd(path=".", format="compact") -> None:
     """Indirect coupling with no direct edge."""
 
@@ -4279,7 +4379,7 @@ def tensegrity_cmd(path=".", format="compact") -> None:
     for tp in data.get("tensegrity_pairs", [])[:3]:
         typer.echo(f'  {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} im)')
 
-@cli.command(name="criticality", rich_help_panel="Code Analysis")
+@core_app.command(name="criticality", rich_help_panel="Code Analysis")
 def criticality_cmd(path=".", file="", format="compact") -> None:
     """2-hop amplification ratio: changes amplify or dampen."""
 
@@ -4299,7 +4399,7 @@ def criticality_cmd(path=".", file="", format="compact") -> None:
         typer.echo(f'  {s["file"]}: k={s["k"]} ({s["class"]})')
 
 
-@cli.command(name="guard", rich_help_panel="Agent Safety")
+@core_app.command(name="guard", rich_help_panel="Agent Safety")
 def guard_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
     file: Annotated[str | None, typer.Option("--file", help="File to guard against")] = None,
@@ -4338,7 +4438,7 @@ def guard_cmd(
         if k not in ("file", "task") and v:
             typer.echo(f'  {k}: {v}')
 
-@cli.command(name="check-pr", rich_help_panel="CI")
+@core_app.command(name="check-pr", rich_help_panel="CI")
 def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact") -> None:
     """CI PR summary: parity-bit + trap + diff. [INFO: always exits 0]"""
     from quale.reports import check_pr_report
@@ -4357,7 +4457,7 @@ def check_pr_cmd(path=".", base="HEAD~1", head="HEAD", format="compact") -> None
     for tp in data.get("trap", [])[:2]:
         typer.echo(f'  {tp.get("file_a","")} <-> {tp.get("file_b","")}: {tp.get("label","")}')
 
-@cli.command(name="cleanup-list", rich_help_panel="Maintenance")
+@core_app.command(name="cleanup-list", rich_help_panel="Maintenance")
 def cleanup_list_cmd(path=".", format="compact") -> None:
     """Prioritized cleanup: extinct-exports x escape-velocity."""
 
@@ -4377,7 +4477,7 @@ def cleanup_list_cmd(path=".", format="compact") -> None:
     for i in data.get("items", [])[:5]:
         typer.echo(f'  {i["identifier"]}: {i["effort"]} ({i["files"]} files)')
 
-@cli.command(name="vulnerability-map", rich_help_panel="Maintenance")
+@core_app.command(name="vulnerability-map", rich_help_panel="Maintenance")
 def vulnerability_map_cmd(path=".", format="compact") -> None:
     """Overlap of hub-risk and capillary."""
 
@@ -4395,7 +4495,7 @@ def vulnerability_map_cmd(path=".", format="compact") -> None:
         return
     typer.echo(f'Don-touch: {len(data.get("don_touch",[]))}  Churn: {len(data.get("churn_hubs",[]))}  Critical: {len(data.get("critical",[]))}')
 
-@cli.command(name="health-score", rich_help_panel="CI")
+@core_app.command(name="health-score", rich_help_panel="CI")
 def health_score_cmd(path=".", format="compact") -> None:
     """2-axis health: coupling density x modularity. """
     from quale.reports import repo_health as health_score
@@ -4414,6 +4514,369 @@ def health_score_cmd(path=".", format="compact") -> None:
     mod = "gapped" if data.get("spectral_gap", 0) >= 2 else ("moderate" if data.get("spectral_gap", 0) >= 1 else "flat")
     typer.echo(f'{coupling} + {mod}')
 
+
+@cli.command(name="review", rich_help_panel="Code Analysis")
+def review_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    base_ref: Annotated[str, typer.Option("--base", "-b", help="Base git ref")] = "HEAD~1",
+    head_ref: Annotated[str, typer.Option("--head", "-H", help="Target git ref")] = "HEAD",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Single-review summary: blast radius, test gaps, hub risk, clones.
+
+    Combines ci-report, mirror signals, and hub-risk into one human-readable
+    review card. Run before opening a PR.
+
+    Examples:
+      quale review
+      quale review --base origin/main --format json
+    """
+    from quale.reports import review_summary
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = review_summary(path=p, base_ref=base_ref, head_ref=head_ref)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    typer.echo("")
+    typer.echo(_color("═══ Review Summary ═══", "header"))
+    typer.echo(f"  Base: {base_ref}  Head: {head_ref}")
+    typer.echo(f"  Files changed: {len(data.get('changed_files', []))}")
+    typer.echo(f"  Blast radius:  {data.get('blast_radius_count', 0)} files")
+    typer.echo(f"  Mirror gap:    {data.get('mirror_gap_ratio', 1.0):.0%}")
+    typer.echo(f"  Stable anchor: {data.get('stable_touched_count', 0)} touched")
+    if data.get('hub_warning'):
+        typer.echo(f"  \033[33mHub risk:\033[0m     {len(data.get('hub_risk_flagged', []))} file(s) in top 10% coupling")
+    if data.get('clone_warning'):
+        typer.echo(f"  \033[33mClone risk:\033[0m   {len(data.get('clone_flagged', []))} file(s) are structural clones")
+    if data.get('read_first'):
+        typer.echo(f"  \033[36mRead first:\033[0m   {', '.join(data['read_first'][:5])}")
+    if data.get('verify_with'):
+        typer.echo(f"  \033[36mVerify with:\033[0m {', '.join(data['verify_with'][:5])}")
+    verdict = data.get("review", "FAIL")
+    if verdict == "PASS":
+        typer.echo(f"  \033[32mReview: {verdict}\033[0m")
+    else:
+        for w in data.get("warnings", []):
+            typer.echo(f"  \033[33mWarning:\033[0m {w}")
+        typer.echo(f"  \033[31mReview: {verdict}\033[0m")
+
+
+@cli.command(name="onboard", rich_help_panel="Code Analysis")
+def onboard_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Onboarding plan: landmark files, module map, safe directories.
+
+    Produces a 3-step plan for a new developer joining the codebase.
+    Shows what to read first, which modules exist, and what's safe to edit.
+
+    Examples:
+      quale onboard
+      quale onboard --format json
+    """
+    from quale.reports import onboard_plan
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = onboard_plan(path=p)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    typer.echo("")
+    typer.echo(_color("═══ Onboarding Plan ═══", "header"))
+    for step in data.get("steps", []):
+        n = step.get("step", 0)
+        title = step.get("title", "")
+        items = step.get("items", [])
+        typer.echo(f"")
+        typer.echo(f"  \033[36mStep {n}\033[0m \033[1m{title}\033[0m")
+        for item in items[:5]:
+            if "file" in item:
+                typer.echo(f"    {item['file']}  \033[90m({item.get('why', '')})\033[0m")
+            elif "module" in item:
+                typer.echo(f"    {item['module']}  \033[90m({item.get('file_count', 0)} files: {', '.join(item.get('sample_files', []))})\033[0m")
+            elif "directory" in item:
+                typer.echo(f"    {item['directory']}  \033[90m({item.get('why', '')})\033[0m")
+
+
+@cli.command(name="refactor-cost", rich_help_panel="Code Analysis")
+def refactor_cost_cmd(
+    file_path: Annotated[str, typer.Argument(help="File to estimate refactoring effort")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """Estimate refactoring effort for a file: blast + escape + clones + hub.
+
+    Combines direct impact count, transitive coupling, escape velocity,
+    structural clones, and hub-risk percentile into a single effort tier.
+
+    Examples:
+      quale refactor-cost src/spool.ts
+      quale refactor-cost src/spool.ts --format json
+    """
+    from quale.reports import refactor_effort
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = refactor_effort(path=p, file_path=file_path)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    effort = data.get("effort", "UNKNOWN")
+    teal = "\033[36m"
+    green = "\033[32m"
+    yellow = "\033[33m"
+    red = "\033[31m"
+    reset = "\033[0m"
+    if effort == "LOW":
+        color = green
+    elif effort == "MEDIUM":
+        color = yellow
+    else:
+        color = red
+    typer.echo("")
+    typer.echo(f"  {teal}═══ Refactor Cost: {file_path} ═══{reset}")
+    typer.echo(f"  Direct impact:  {data.get('direct_impact', 0)} files share identifiers")
+    typer.echo(f"  Transitive:     ~{data.get('transitive_estimate', 0)} files via 1-hop coupling")
+    typer.echo(f"  Escape vel:     {data.get('escape_velocity', 'UNKNOWN')}")
+    clones = data.get("clone_files", [])
+    if clones:
+        typer.echo(f"  Clone risk:     {len(clones)} structural clone(s): {', '.join(clones[:3])}")
+    typer.echo(f"  Hub perc:       {data.get('hub_percentile', 0)}%")
+    typer.echo(f"  {color}Effort: {effort}{reset}")
+    pre = data.get("pre_clean", [])
+    if pre:
+        typer.echo(f"  \033[33mPre-clean:\033[0m  Refactor clones first: {', '.join(pre[:3])}")
+    if data.get("risk_note"):
+        typer.echo(f"  \033[33mRisk:\033[0m      {data['risk_note']}")
+
+
+@core_app.command(name="ci-trend", rich_help_panel="CI")
+def ci_trend_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    weeks: Annotated[int, typer.Option("--weeks", "-w", help="Window in weeks")] = 12,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
+):
+    """CI metric trends: blast radius, mirror gap, health over time.
+
+    Reads .quale/ci-history.jsonl (appended on each ci-report run) and
+    reports trend slopes.
+
+    Examples:
+      quale ci-trend
+      quale ci-trend --weeks 24 --format json
+    """
+    from quale.reports import ci_trend
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = ci_trend(path=p, weeks=weeks)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    typer.echo("")
+    typer.echo(_color(f"═══ CI Trend (last {weeks} weeks) ═══", "header"))
+    for metric, info in data.get("trends", {}).items():
+        vals = info.get("values", [])
+        trend = info.get("trend", "unknown")
+        typer.echo(f"  {metric:<20} {', '.join(str(v) for v in vals)} ({trend})")
+
+# ── Agent Namespace ────────────────────────────────────────────────────────
+
+@agent_app.command(name="edit")
+def agent_edit(
+    file: Annotated[str, typer.Argument(help="File being edited")],
+    task: Annotated[str, typer.Option("--task", help="The goal of the edit")] = "",
+):
+    """File-scoped edit context and risk card for LLM Agents."""
+    import json
+    from quale.reports import preflight_report
+    from quale.scanner import scan_codebase
+    import os
+    path = os.path.abspath(".")
+    try:
+        analysis = scan_codebase(path, quiet=True)
+    except Exception as e:
+        typer.echo(json.dumps({"error": str(e)}))
+        raise typer.Exit(1)
+    
+    report = preflight_report(path, [file], task, diff_ref=None, format="tool", analysis=analysis)
+    
+    # Enrich structure
+    if analysis:
+        from quale.reports import _fused_priority_ranking, _blast_radius_analysis, _hub_risk_report
+        blast, _ = _blast_radius_analysis(path, [file], analysis)
+        hub = _hub_risk_report(path, [file], analysis)
+        report["structural_context"] = {
+            "blast_radius": blast,
+            "hub_risk": hub,
+        }
+    typer.echo(json.dumps(report, indent=2))
+
+@agent_app.command(name="orient")
+def agent_orient(
+    path: Annotated[str, typer.Argument(help="Path to repo")] = ".",
+):
+    """Returns token-optimized repo map for LLM Agents."""
+    import json
+    from quale.reports import repo_fingerprint
+    import os
+    p = os.path.abspath(path)
+    try:
+        fp = repo_fingerprint(p)
+        typer.echo(json.dumps(fp, indent=2))
+    except Exception as e:
+        typer.echo(json.dumps({"error": str(e)}))
+        raise typer.Exit(1)
+
+@agent_app.command(name="guard")
+def agent_guard(
+    file: Annotated[str, typer.Argument(help="File to guard")],
+    task: Annotated[str, typer.Option("--task", help="The goal of the edit")] = "",
+):
+    """Returns combined safety packet for LLM Agents."""
+    import json
+    from quale.reports import preflight_report
+    from quale.scanner import scan_codebase
+    import os
+    path = os.path.abspath(".")
+    try:
+        analysis = scan_codebase(path, quiet=True)
+    except Exception as e:
+        typer.echo(json.dumps({"error": str(e)}))
+        raise typer.Exit(1)
+    
+    # We call preflight_report with tool format
+    report = preflight_report(path, [file], task, format="tool", analysis=analysis)
+    typer.echo(json.dumps(report, indent=2))
+
+
+# ── CI Namespace ──────────────────────────────────────────────────────────
+
+@ci_app.command(name="init")
+def ci_init():
+    """Generates GH Actions YAML."""
+    import os
+    import yaml
+    workflow_dir = ".github/workflows"
+    os.makedirs(workflow_dir, exist_ok=True)
+    workflow_path = os.path.join(workflow_dir, "quale.yml")
+    
+    content = """name: quale structural review
+on: [pull_request]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install quale
+        run: pip install quale
+      - name: CI check
+        run: quale ci check origin/${{ github.base_ref }} HEAD
+      - name: CI comment
+        run: quale ci comment origin/${{ github.base_ref }} HEAD
+"""
+    with open(workflow_path, "w") as f:
+        f.write(content)
+    typer.echo(f"Created {workflow_path}")
+
+
+@ci_app.command(name="check")
+def ci_check(
+    base_ref: Annotated[str, typer.Argument(help="Base git ref")],
+    head_ref: Annotated[str, typer.Argument(help="Target git ref")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+):
+    """Runs all gates (exits 0-7)."""
+    import yaml
+    from quale.cli import ci_report_cmd
+    import os
+    p = os.path.abspath(path)
+    
+    # Defaults
+    blast_tier = "high"
+    mirror_gap = 0.50
+    stable_touched = True
+    hub_risk = True
+    clone_fail = True
+    new_identifiers = 30
+    
+    config_path = os.path.join(p, ".quale.yml")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+            ci_config = config.get("ci", {})
+            blast_tier = ci_config.get("fail-on-blast-tier", blast_tier)
+            mirror_gap = ci_config.get("fail-on-mirror-gap", mirror_gap)
+            stable_touched = ci_config.get("fail-on-stable-touched", stable_touched)
+            hub_risk = ci_config.get("fail-on-hub-risk", hub_risk)
+            clone_fail = ci_config.get("fail-on-clone", clone_fail)
+            new_identifiers = ci_config.get("fail-on-new-identifiers", new_identifiers)
+        except Exception:
+            pass
+            
+    ci_report_cmd(
+        base_ref=base_ref,
+        head_ref=head_ref,
+        path=path,
+        format="terminal",
+        summary=True,
+        fail_on_blast_tier=blast_tier,
+        fail_on_mirror_gap=mirror_gap,
+        fail_on_stable_touched=stable_touched,
+        fail_on_hub_risk=hub_risk,
+        fail_on_clone=clone_fail,
+        fail_on_new_identifiers=new_identifiers
+    )
+
+
+@ci_app.command(name="comment")
+def ci_comment(
+    base_ref: Annotated[str, typer.Argument(help="Base git ref")],
+    head_ref: Annotated[str, typer.Argument(help="Target git ref")],
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    pr_number: Annotated[int, typer.Option("--pr", help="PR number")] = None,
+):
+    """Posts the PR report."""
+    from quale.cli import pr_report
+    pr_report(base_ref=base_ref, head_ref=head_ref, path=path, post_comment=True, pr_number=pr_number)
+
+
+@ci_app.command(name="trend")
+def ci_trend_wrapper(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    weeks: Annotated[int, typer.Option("--weeks", "-w", help="Weeks of history to analyze")] = 12,
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: terminal, json")] = "terminal",
+):
+    """CI metric trends over time."""
+    from quale.cli import ci_trend_cmd
+    ci_trend_cmd(path=path, weeks=weeks, format=format)
+
 if __name__ == "__main__":
     _entry_main()
+
+
 
