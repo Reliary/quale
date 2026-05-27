@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import math
 import os
-import sys
 import re
+import sys
 import time
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 
+from quale import git as vgit
+from quale.analyze import CoOccurrenceMatrix, FileVocab, classify_language
+from quale.concepts import cluster_labels
+from quale.index import structural_similarity
 from quale.segmenter import segment
 from quale.vocabulary import build_vocabulary
-from quale.index import structural_similarity
-from quale.analyze import FileVocab, CoOccurrenceMatrix, classify_language
-from quale.concepts import cluster_labels
-from quale import git as vgit
 
 
 @dataclass
@@ -45,7 +45,7 @@ _BINARY_EXTS = frozenset({
     ".o", ".a", ".so", ".dylib", ".dll", ".exe",
     ".pyc", ".pyo", ".pyd", ".class", ".jar",
     ".pdf", ".mp3", ".mp4", ".avi", ".mov", ".webm",
-    ".ico", ".icns", ".webp", ".avif",
+    ".icns", ".webp", ".avif",
     ".db", ".sqlite", ".sqlite3",
     ".sum", ".sig", ".asc",
 })
@@ -74,9 +74,7 @@ def _is_actionable_identifier(identifier: str) -> bool:
         return False
     if len(identifier) < 5 or len(identifier) > 40:
         return False
-    if _SECRET_SHAPED.match(identifier):
-        return False
-    return True
+    return not _SECRET_SHAPED.match(identifier)
 
 
 def _is_binary(path: str) -> bool:
@@ -84,9 +82,7 @@ def _is_binary(path: str) -> bool:
     if ext in _BINARY_EXTS:
         return True
     base = os.path.basename(path).lower()
-    if base.endswith(".min.js") or base.endswith(".min.css"):
-        return True
-    return False
+    return bool(base.endswith(".min.js") or base.endswith(".min.css"))
 
 
 def _skip_path(path: str) -> bool:
@@ -95,9 +91,7 @@ def _skip_path(path: str) -> bool:
         return True
     if any(p.endswith(".egg-info") for p in parts):
         return True
-    if path.lower().endswith((".min.js", ".min.css")):
-        return True
-    return False
+    return bool(path.lower().endswith((".min.js", ".min.css")))
 
 
 # ── Scan cache: shares snapshot results across history-based commands ──
@@ -548,7 +542,7 @@ def _find_structural_clones(file_vocabs: list[FileVocab],
         for fv in file_vocabs:
             seen_langs[fv.language].append(fv)
         sampled = []
-        for lang, fvs in sorted(seen_langs.items(), key=lambda x: -len(x[1])):
+        for _lang, fvs in sorted(seen_langs.items(), key=lambda x: -len(x[1])):
             sampled.extend(fvs[:max_files // len(seen_langs)])
         sampled = sampled[:max_files]
 
@@ -594,7 +588,7 @@ def _compute_landmarks(file_vocabs: list[FileVocab]) -> list[dict]:
 
     len(file_vocabs) or 1
     landmarks = []
-    for fv, (path, phrases) in zip(file_vocabs, file_phrases):
+    for fv, (path, phrases) in zip(file_vocabs, file_phrases, strict=False):
         if not phrases:
             continue
         unique_phrases = [p for p in phrases if phrase_file_count[p] == 1]

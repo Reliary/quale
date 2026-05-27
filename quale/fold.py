@@ -107,7 +107,7 @@ def _score_block(block_text: str, task_keywords: set[str]) -> float:
 def fold_file(path: str = ".", file_path: str = "", task: str = "",
               threshold: float = 0.02) -> dict[str, Any]:
     """Read file, score blocks, fold low-scoring ones.
-    
+
     Returns folded output with metadata. Never folds structural lines.
     """
     abs_path = os.path.abspath(os.path.join(path, file_path)) if not os.path.isabs(file_path) else file_path

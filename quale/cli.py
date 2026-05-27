@@ -3,33 +3,51 @@
 from __future__ import annotations
 
 import json
-import sys
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 try:
+    from typing import Annotated
+
     import typer
-    from typing_extensions import Annotated
 except ImportError:
     print("quale needs `typer` and `typing-extensions`. Install: pip install typer typing-extensions")
     sys.exit(1)
 
-from quale.scanner import (scan_codebase, search_cross_repo_ranked)
-from quale.bootstrap import (bootstrap_repo, explore_repo, compute_modules)
-from quale.reports import (ci_report, inspect_repo, repo_fingerprint,
-                           compute_stability, compute_lifecycles, concept_timeline,
-                           preflight_report, build_contract, validate_plan)
-from quale.compare import (compare_repos, phrase_provenance, pr_blast_radius)
-from quale.formats.terminal import (format_terminal, format_json, format_html, format_quick,
-                                     format_lifecycles, format_blast_radius,
-                                     format_lifecycles_json, format_blast_json,
-                                     format_orphans_json, format_pr_report_markdown,
-                                     format_modules, format_modules_json)
-from quale.index import index_sequence_hash
-from quale.vocabulary import build_vocabulary
-from quale.segmenter import segment
 from quale import git as vgit
-
+from quale.bootstrap import bootstrap_repo, compute_modules, explore_repo
+from quale.compare import compare_repos, phrase_provenance, pr_blast_radius
+from quale.formats.terminal import (
+    format_blast_json,
+    format_blast_radius,
+    format_html,
+    format_json,
+    format_lifecycles,
+    format_lifecycles_json,
+    format_modules,
+    format_modules_json,
+    format_orphans_json,
+    format_pr_report_markdown,
+    format_quick,
+    format_terminal,
+)
+from quale.index import index_sequence_hash
+from quale.reports import (
+    build_contract,
+    ci_report,
+    compute_lifecycles,
+    compute_stability,
+    concept_timeline,
+    inspect_repo,
+    preflight_report,
+    repo_fingerprint,
+    validate_plan,
+)
+from quale.scanner import scan_codebase, search_cross_repo_ranked
+from quale.segmenter import segment
+from quale.vocabulary import build_vocabulary
 
 cli = typer.Typer(
     help="""
@@ -83,10 +101,10 @@ def _help_all(ctx: typer.Context) -> None:
                 continue
             full_name = f"{prefix}{name}"
             doc = (c.callback.__doc__ or "").strip().split("\n")[0] if c.callback else ""
-            
+
             # Simple heuristic: Look for rich_help_panel="Panel" near the definition
-            m = re.search(rf'@[a-z_]+\.command\([^)]*rich_help_panel="([^"]+)"[^)]*\)', src)
-            
+            re.search(r'@[a-z_]+\.command\([^)]*rich_help_panel="([^"]+)"[^)]*\)', src)
+
             # A more robust regex: match the command name inside the file
             # Since doing full AST parsing is hard, we just regex for it.
             # Find the command decorator that defines this function
@@ -96,10 +114,12 @@ def _help_all(ctx: typer.Context) -> None:
                 m2 = re.search(rf'@(?:[a-z_]+)\.command\([^)]*name="{name}"[^)]*rich_help_panel="([^"]+)"', src)
             if not m2:
                 m2 = re.search(rf'@(?:[a-z_]+)\.command\([^)]*rich_help_panel="([^"]+)"[^)]*name="{name}"', src)
-                
+
             panel = m2.group(1) if m2 else "Other"
-            if prefix == "ci ": panel = "CI"
-            if prefix == "agent ": panel = "Agent Safety"
+            if prefix == "ci ":
+                panel = "CI"
+            if prefix == "agent ":
+                panel = "Agent Safety"
             panels.setdefault(panel, []).append((full_name, doc))
 
     register_cmds(cli)
@@ -315,7 +335,7 @@ def diff(
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
 
-    from quale.scanner import scan_codebase, _is_lock_file, _is_generated
+    from quale.scanner import _is_generated, _is_lock_file, scan_codebase
 
     try:
         analysis_a = scan_codebase(path, git_ref=ref_a, quiet=True)
@@ -332,10 +352,7 @@ def diff(
             return True
         if any(kw in p for kw in ["v0.", "v1.", "v2.", "v3.", "v4.", "v5.", "go.sum"]):
             return True
-        for ext in [".sum", ".mod", "-lock.json", "yarn.lock", "Cargo.lock", "Gemfile.lock"]:
-            if ext in p:
-                return True
-        return False
+        return any(ext in p for ext in [".sum", ".mod", "-lock.json", "yarn.lock", "Cargo.lock", "Gemfile.lock"])
 
     phrases_a: set[str] = set()
     for fv in analysis_a.file_vocabs:
@@ -803,7 +820,7 @@ def crystallography(
 @core_app.command(rich_help_panel="Verification")
 def verify(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description for scoring")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: mcq, json")] = "mcq",
 ):
@@ -814,6 +831,8 @@ def verify(
     """
     from quale.reports import preflight_report
 
+    if files is None:
+        files = []
     path = os.path.abspath(path)
     if not vgit.is_repo(path):
         typer.echo("Not a git repository.", err=True)
@@ -861,7 +880,7 @@ def verify(
 @core_app.command(name="reverse-verify",  rich_help_panel="Verification")
 def reverse_verify(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    files: Annotated[list[str], typer.Option("--files", help="Changed test file(s); repeat or comma-separate")] = [],
+    files: Annotated[list[str], typer.Option("--files", help="Changed test file(s); repeat or comma-separate")] = None,
     diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against working tree")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
@@ -871,6 +890,8 @@ def reverse_verify(
     """
     from quale.reports import reverse_verify_report
 
+    if files is None:
+        files = []
     data = reverse_verify_report(path=path, files=files or None, diff_ref=diff)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -894,12 +915,14 @@ def reverse_verify(
 @core_app.command(name="verify-classify",  rich_help_panel="Verification")
 def verify_classify(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
     diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against working tree")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
     """Classify each changed file's verifiability type and structural gaps."""
     from quale.reports import verify_classify_report
+    if files is None:
+        files = []
     data = verify_classify_report(path=path, files=files or None, diff_ref=diff)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -918,11 +941,13 @@ def verify_classify(
 @core_app.command(name="verify-bonds",  rich_help_panel="Verification")
 def verify_bonds(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
     """Detect when a change requires running multiple test files together."""
     from quale.reports import covalent_verify_bonds
+    if files is None:
+        files = []
     data = covalent_verify_bonds(path=path, files=files or None)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -1039,7 +1064,7 @@ def entangle(
 @core_app.command(name="cascade-verify", rich_help_panel="Agent Safety")
 def cascade_verify_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
     why: Annotated[bool, typer.Option("--why", help="Show cascade trace")] = False,
 ):
@@ -1053,6 +1078,8 @@ def cascade_verify_cmd(
     On steady state, ~77% of calls hit Tiers 1-3 (0 tokens).
     """
     from quale.reports import cascade_verify
+    if files is None:
+        files = []
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1089,7 +1116,7 @@ def cascade_verify_cmd(
 @core_app.command(name="veto-cascade", rich_help_panel="Agent Safety")
 def veto_cascade_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    files: Annotated[list[str], typer.Option("--files", help="Changed file(s)")] = [],
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s)")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: compact, json")] = "compact",
 ):
     """Veto cascade pipeline — ~33 avg tokens per verification call.
@@ -1099,6 +1126,8 @@ def veto_cascade_cmd(
     Tier 3: Progressive resolution (~42 tokens)
     """
     from quale.reports import veto_cascade
+    if files is None:
+        files = []
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1141,7 +1170,7 @@ def isolate_cmd(
     Scores module clusters by task-keyword overlap. Each turn presents
     one module for YES/NO confirmation. ~100 tokens per turn.
     """
-    from quale.reports import isolate_modules, _active_gene_pool
+    from quale.reports import _active_gene_pool, isolate_modules
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1277,7 +1306,7 @@ def drift_check_cmd(
 @core_app.command(name="latent-deps", rich_help_panel="Code Analysis")
 def mycorrhiza_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    files: Annotated[list[str], typer.Option("--files", help="File(s) to map hidden deps for")] = [],
+    files: Annotated[list[str], typer.Option("--files", help="File(s) to map hidden deps for")] = None,
     active_days: Annotated[int, typer.Option("--active-days", help="Only analyze files modified in N days (active gene pool)")] = 0,
     tolerance: Annotated[bool, typer.Option("--tolerance", help="Tolerance Gaging: check if edit introduces vocabulary outside historical cluster radius")] = False,
     format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
@@ -1290,7 +1319,9 @@ def mycorrhiza_cmd(
     Use --tolerance to detect when an edit introduces vocabulary
     from clusters the target file has never historically touched.
     """
-    from quale.reports import mycorrhiza_map, mycorrhiza_with_tolerance, _active_gene_pool
+    from quale.reports import _active_gene_pool, mycorrhiza_map, mycorrhiza_with_tolerance
+    if files is None:
+        files = []
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1393,7 +1424,7 @@ def deflate_cmd(
 @core_app.command(name="forecast", rich_help_panel="CI")
 def forecast_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    files: Annotated[list[str], typer.Option("--files", help="Changed file(s) to forecast risk for")] = [],
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s) to forecast risk for")] = None,
     commits: Annotated[int, typer.Option("--commits", help="Git history lookback")] = 500,
     active_days: Annotated[int, typer.Option("--active-days", help="Only analyze files modified in N days (active gene pool)")] = 0,
     seismic: Annotated[bool, typer.Option("--seismic", help="S-Wave mode: exclude P-wave files, isolate latent regression risks")] = False,
@@ -1408,7 +1439,9 @@ def forecast_cmd(
     Example:
       quale forecast --files src/billing.ts
     """
-    from quale.reports import forecast_report, _active_gene_pool
+    from quale.reports import _active_gene_pool, forecast_report
+    if files is None:
+        files = []
     path_abs = os.path.abspath(path)
     if not vgit.is_repo(path_abs):
         typer.echo("Not a git repository.", err=True)
@@ -1703,7 +1736,7 @@ def spectral_gap_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
     g = data.get("spectral_gap", 0)
-    m = data.get("modularity", "?")
+    data.get("modularity", "?")
     if g >= 3.0:
         typer.echo(f"Module separation: high \u2014 largest cluster is {g}x the second largest")
         typer.echo("  \u2192 Check for a monolith. One module dominates vocabulary.")
@@ -1733,7 +1766,7 @@ def phantom_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
     d = data.get("frameworks_detected", {})
-    typer.echo(f"Frameworks detected from import vocabulary:")
+    typer.echo("Frameworks detected from import vocabulary:")
     if d:
         for k, v in sorted(d.items(), key=lambda x: -x[1])[:5]:
             typer.echo(f'  {ICON_PRIMARY} {k} \u2014 {v} files')
@@ -1855,7 +1888,7 @@ def entropy_cmd(
     if format == "json":
         typer.echo(json.dumps(data, indent=2, default=str))
         return
-    typer.echo(f"Directory vocabulary spread vs. rolling baseline:")
+    typer.echo("Directory vocabulary spread vs. rolling baseline:")
     if data.get("any_limit_exceeded"):
         typer.echo(f"  {ICON_WARN} Some directories have unusually high vocabulary fragmentation.")
     for d in data.get("directories", [])[:10]:
@@ -1985,20 +2018,22 @@ def phase_shift_cmd(
 @core_app.command(name="verify-packet",  rich_help_panel="Agent Safety")
 def cartridge(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = [],
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
     diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against working tree")] = None,
     task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
     format: Annotated[str, typer.Option("--format", "-f", help="Output format: tool(default), json, compact")] = "tool",
     why: Annotated[bool, typer.Option("--why", help="Show why each candidate exists")] = False,
 ):
     """Verification packet — compressed scope for LLM verification.
-    
+
     Examples:
       quale verify-packet --files src/spool.ts
       quale verify-packet --files src/spool.ts --why
       quale verify-packet --files src/spool.ts --format json
     """
     from quale.reports import cartridge_report
+    if files is None:
+        files = []
     data = cartridge_report(path=path, files=files or None, diff_ref=diff, task=task)
     if "error" in data:
         typer.echo(data["error"], err=True)
@@ -2059,7 +2094,7 @@ def check_diff(
     fail_on_defect: Annotated[str | None, typer.Option("--fail-on-defect", help="Fail on given severity (low/moderate/high)")] = None,
 ):
     """Post-proposal defect scan: detect structural violations.
-    
+
     Checks for stable anchor edits, generated file edits, mirror weakening,
     and large change sets. Report-only by default — use --fail-on-defect
     to enforce a minimum severity threshold in CI.
@@ -3423,7 +3458,7 @@ def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo pat
     if not os.path.isfile(target):
         typer.echo("Not a file or directory.", err=True)
         raise typer.Exit(1)
-    with open(target, "r", encoding="utf-8", errors="replace") as f:
+    with open(target, encoding="utf-8", errors="replace") as f:
         content = f.read()
     seg_result = segment(content)
     quale = build_vocabulary(seg_result.phrases, seg_result.strategy, seg_result.delimiter)
@@ -3539,7 +3574,7 @@ search:
             f.write(content)
         typer.echo(f"Created {target}")
 
-    from quale.reports import crystallography, _save_cached
+    from quale.reports import _save_cached, crystallography
     path_abs = os.path.abspath(path)
     if vgit.is_repo(path_abs):
         data = crystallography(path_abs)
@@ -4103,9 +4138,7 @@ def ask(
                         typer.echo(f"    {'  '.join(f'{k}:{v}' for k, v in item.items()[:3])}")
                     else:
                         typer.echo(f"    {item}")
-            elif isinstance(val, str):
-                typer.echo(f"  {c(key.replace('_', ' ').title(), 'subheader')}: {val}")
-            elif val is not None:
+            elif isinstance(val, str) or val is not None:
                 typer.echo(f"  {c(key.replace('_', ' ').title(), 'subheader')}: {val}")
         typer.echo("")
     sources = data.get("sources", [])
@@ -4308,7 +4341,7 @@ def escape_velocity_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
     tagged = data.get("tagged", [])
-    typer.echo(f"Identifier reach across the repo:")
+    typer.echo("Identifier reach across the repo:")
     for t in tagged[:8]:
         note = ""
         if t["label"] == "ESCAPED":
@@ -4343,7 +4376,7 @@ def trap_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
     overlap = data.get("overlap", 0)
-    label = data.get("label", "")
+    data.get("label", "")
     if overlap >= 0.8:
         typer.echo(f'  \033[31m{ICON_WARN} High merge risk\033[0m \u2014 {overlap:.0%} identifier overlap')
         typer.echo('  \033[90mThese files share many identifiers. Concurrent edits risk naming conflicts.\033[0m')
@@ -4452,7 +4485,7 @@ def thylacine_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
     thy = data.get("thylacines", [])
-    typer.echo(f'Exports declared in multiple files but never imported externally:')
+    typer.echo('Exports declared in multiple files but never imported externally:')
     typer.echo(f'  Count: {len(thy)}')
     for t in thy[:5]:
         typer.echo(f'  {ICON_PRIMARY} {t["identifier"]} (defined in {t["files"]} files)')
@@ -4479,7 +4512,7 @@ def tensegrity_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
     pairs = data.get("tensegrity_pairs", [])
-    typer.echo(f"Indirectly coupled file pairs (no direct edge):")
+    typer.echo("Indirectly coupled file pairs (no direct edge):")
     for tp in pairs[:5]:
         typer.echo(f'  {ICON_PRIMARY} {tp["file_a"]} <-> {tp["file_b"]} ({tp["count"]} indirect links)')
     if not pairs:
@@ -4506,7 +4539,7 @@ def criticality_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
     scores = data.get("scores", [])
-    typer.echo(f"Change amplification risk (k > 1 = changes cascade):")
+    typer.echo("Change amplification risk (k > 1 = changes cascade):")
     for s in scores[:5]:
         marker = ICON_WARN if s["k"] > 1 else ICON_SECONDARY
         typer.echo(f'  {marker} {s["file"]}: amp={s["k"]:.2f} ({s["class"]})')
@@ -4755,7 +4788,7 @@ def review_cmd(
     if data.get("clone_flagged"):
         action_items.append("Review structural clones \u2014 similar files may need refactoring")
     if data.get("blast_radius_count", 0) > 0:
-        action_items.append(f"Run `quale core diff-structural` for full structural diff")
+        action_items.append("Run `quale core diff-structural` for full structural diff")
     typer.echo("")
     typer.echo("  Action items:")
     for i, ai in enumerate(action_items[:5], 1):
@@ -4810,7 +4843,7 @@ def onboard_cmd(
         n = step.get("step", 0)
         title = step.get("title", "")
         items = step.get("items", [])
-        typer.echo(f"")
+        typer.echo("")
         typer.echo(f"  \033[36mStep {n}\033[0m \033[1m{title}\033[0m")
         for item in items[:5]:
             if "file" in item:
@@ -4889,7 +4922,7 @@ def refactor_cost_cmd(
     if transitive > direct:
         typer.echo(f"   • Indirectly, ~{transitive} files import those {direct} files — the ripple effect is wider than the direct count.")
     if escaped:
-        typer.echo(f"   • Its vocabulary has \"escaped\" beyond the original module — other files now depend on concepts defined here.")
+        typer.echo("   • Its vocabulary has \"escaped\" beyond the original module — other files now depend on concepts defined here.")
     if hub_pct > 0:
         typer.echo(f"   • It's more coupled than {100 - hub_pct}% of files in this repo.")
     if clones:
@@ -4981,8 +5014,9 @@ def agent_edit(
 ):
     """File-scoped edit context and risk card (proven tool format)."""
     import json
-    from quale.reports import preflight_report
     import os
+
+    from quale.reports import preflight_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True)
@@ -5011,8 +5045,9 @@ def agent_orient(
     modules, and a recommended workflow.
     """
     import json
-    from quale.reports import orient_report
     import os
+
+    from quale.reports import orient_report
     p = os.path.abspath(path)
     try:
         data = orient_report(p)
@@ -5032,8 +5067,9 @@ def agent_guard(
 ):
     """Combined safety packet (tool format)."""
     import json
-    from quale.reports import guard_report
     import os
+
+    from quale.reports import guard_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True)
@@ -5065,7 +5101,7 @@ def ci_init(
 ):
     """Generates GH Actions YAML."""
     import os
-    import yaml
+
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True)
@@ -5073,7 +5109,7 @@ def ci_init(
     workflow_dir = os.path.join(p, ".github/workflows")
     os.makedirs(workflow_dir, exist_ok=True)
     workflow_path = os.path.join(workflow_dir, "quale.yml")
-    
+
     content = """name: quale guardrails
 on: [pull_request]
 
@@ -5109,11 +5145,13 @@ def ci_check(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
 ):
     """Runs all gates (exits 0-7)."""
-    import yaml
-    from quale.cli import ci_report_cmd
     import os
+
+    import yaml
+
+    from quale.cli import ci_report_cmd
     p = os.path.abspath(path)
-    
+
     # Defaults
     blast_tier = "high"
     mirror_gap = 0.50
@@ -5121,7 +5159,7 @@ def ci_check(
     hub_risk = True
     clone_fail = True
     new_identifiers = 30
-    
+
     config_path = os.path.join(p, ".quale.yml")
     if os.path.exists(config_path):
         try:
@@ -5136,7 +5174,7 @@ def ci_check(
             new_identifiers = ci_config.get("fail-on-new-identifiers", new_identifiers)
         except Exception:
             pass
-            
+
     ci_report_cmd(
         ref_a=base_ref,
         ref_b=head_ref,

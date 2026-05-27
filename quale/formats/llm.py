@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 CAPABILITY_FOOTER = (
     "Quale sees structure, not semantics. "
     "Cannot verify correctness, detect logic errors, or guarantee test quality. "

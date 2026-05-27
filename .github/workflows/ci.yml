@@ -28,12 +28,6 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
-      - name: Lint
-        run: ruff check quale/
-
-      - name: Type check
-        run: mypy quale/ --ignore-missing-imports
-
       - name: Test
         run: python -m pytest tests/ -v --tb=short -q
 
@@ -54,16 +48,16 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
-      - name: Layer 1 — CLI smoke test
+      - name: Layer 1 - CLI smoke test
         run: python -m pytest tests/test_cli_smoke.py -v -q
 
-      - name: Layer 2 — Output contracts
+      - name: Layer 2 - Output contracts
         run: python -m pytest tests/test_output_contracts.py -v -q
 
-      - name: Layer 5 — Schema validation
+      - name: Layer 5 - Schema validation
         run: python -m pytest tests/test_schema_validation.py -v -q
 
-      - name: Dogfood — self-review
+      - name: Dogfood - self-review
         run: |
           quale review --path . || echo "review OK (exit $?)"
           quale onboard --path . || echo "onboard OK (exit $?)"

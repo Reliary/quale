@@ -46,7 +46,14 @@ def _is_contract_surface(filepath: str) -> bool:
 # ── Compare repos ─────────────────────────────────────────────────
 
 def compare_repos(repo_a: str, repo_b: str, contract_only: bool = False) -> dict:
-    from quale.scanner import scan_codebase, _snapshot_phrases, _identifier_file_map, _code_file_vocabs, _structural_information_score, _is_test_path
+    from quale.scanner import (
+        _code_file_vocabs,
+        _identifier_file_map,
+        _is_test_path,
+        _snapshot_phrases,
+        _structural_information_score,
+        scan_codebase,
+    )
 
     analysis_a = scan_codebase(repo_a, quiet=True, max_files=2500, max_seconds=30)
     analysis_b = scan_codebase(repo_b, quiet=True, max_files=2500, max_seconds=30)
@@ -150,7 +157,7 @@ def phrase_provenance(path: str, phrase: str, weeks: int = 24) -> list[dict]:
     if not week_data:
         return []
 
-    from quale.scanner import scan_codebase, _is_lock_file, _is_generated
+    from quale.scanner import _is_generated, _is_lock_file, scan_codebase
 
     timeline = []
     for wk in week_data:
@@ -202,6 +209,7 @@ _DEAD_CODE_EXTS = frozenset({
 
 def _extract_identifiers(fv: FileVocab, min_len: int = 4) -> set[str]:
     import re
+
     from quale.scanner import _is_actionable_identifier
     token = re.compile(rf'\b[A-Z][A-Za-z0-9_]{{{min_len - 1},40}}\b')
     identifiers: set[str] = set()

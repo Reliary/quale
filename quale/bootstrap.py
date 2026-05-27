@@ -25,8 +25,8 @@ def explore_repo(path: str, themes: bool = False, analysis: CodebaseAnalysis | N
     if not analysis.file_vocabs:
         return {"files": [], "themes": []}
 
-    from quale.scanner import _DEAD_CODE_EXTS, _is_lock_file, _is_generated
     from quale.bootstrap import _task_file_role
+    from quale.scanner import _DEAD_CODE_EXTS, _is_generated, _is_lock_file
 
     identifier_file_count: Counter[str] = Counter()
     file_identifiers: list[tuple[str, str, set[str]]] = []
@@ -167,7 +167,7 @@ def _compute_themes(file_identifiers: list[tuple[str, str, set[str]]]) -> list[d
             continue
 
         theme_file_set: set[int] = set()
-        for idx, (_, _, idents) in enumerate(file_identifiers):
+        for _idx, (_, _, idents) in enumerate(file_identifiers):
             if len(idents & component) >= 2:
                 theme_file_set.add(idx)
         if len(theme_file_set) < 3:
@@ -199,7 +199,7 @@ def compute_modules(path: str, analysis: CodebaseAnalysis | None = None) -> dict
         from quale.scanner import scan_codebase
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
 
-    from quale.scanner import _DEAD_CODE_EXTS, _is_lock_file, _is_generated
+    from quale.scanner import _DEAD_CODE_EXTS, _is_generated, _is_lock_file
 
     token = re.compile(r'\b[A-Z][A-Za-z0-9_]{4,40}\b')
 
@@ -240,7 +240,7 @@ def compute_modules(path: str, analysis: CodebaseAnalysis | None = None) -> dict
             rare_file_sets.setdefault(ident, set()).add(idx)
 
     shared_count: dict[tuple[int, int], int] = Counter()
-    for ident, idxs in rare_file_sets.items():
+    for _ident, idxs in rare_file_sets.items():
         idx_list = list(idxs)
         for i in range(len(idx_list)):
             for j in range(i + 1, len(idx_list)):
@@ -383,7 +383,7 @@ def _compute_agent_notes(path: str, explore_data: dict, modules_data: dict,
 
 
 def bootstrap_repo(path: str, task: str | None = None) -> dict:
-    from quale.scanner import scan_codebase, _is_generated, _code_file_vocabs
+    from quale.scanner import _code_file_vocabs, _is_generated, scan_codebase
 
     analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     explore_data = explore_repo(path, themes=True, analysis=analysis)
@@ -463,7 +463,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
         for item in related:
             filepath = item["file"]
             try:
-                with open(os.path.join(path, filepath), "r", encoding="utf-8", errors="replace") as f:
+                with open(os.path.join(path, filepath), encoding="utf-8", errors="replace") as f:
                     content = f.read().lower()
             except Exception:
                 unverified_files.append(filepath)
@@ -529,7 +529,7 @@ def bootstrap_repo(path: str, task: str | None = None) -> dict:
 
 
 def _rank_related_files(path: str, keywords: list[str], analysis: CodebaseAnalysis | None = None) -> list[dict]:
-    from quale.scanner import scan_codebase, _code_file_vocabs, _is_generated
+    from quale.scanner import _code_file_vocabs, _is_generated, scan_codebase
 
     if analysis is None:
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)

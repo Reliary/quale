@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import subprocess
 import os
+import subprocess
 from dataclasses import dataclass
 
 
@@ -120,7 +120,7 @@ def read_file_at_ref(path: str, filepath: str, ref: str | None = None, check_mod
                 return None
             if not os.path.isfile(full):
                 return None
-            with open(full, "r", encoding="utf-8", errors="replace") as f:
+            with open(full, encoding="utf-8", errors="replace") as f:
                 return f.read()
         except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
             return None

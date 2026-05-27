@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 
-
 DEFAULT_CONFIG: dict = {
     "agent": {"task": "", "max_files": 2500, "max_seconds": 30},
 }

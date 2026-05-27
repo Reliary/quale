@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import subprocess
 import time
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
 from typing import TYPE_CHECKING, Any
 
 from quale import git as vgit
@@ -31,7 +32,7 @@ def _append_ci_metrics(path: str, metrics: dict) -> None:
 
 
 def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
-    from quale.scanner import scan_codebase, _mirror_signals
+    from quale.scanner import _mirror_signals, scan_codebase
 
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -185,10 +186,8 @@ def review_summary(path: str = ".", base_ref: str = "HEAD~1", head_ref: str = "H
     if "error" in ci:
         return ci
     from quale.scanner import scan_codebase
-    try:
-        analysis = scan_codebase(path, git_ref=head_ref, quiet=False, max_files=2500, max_seconds=30)
-    except Exception:
-        analysis = None
+    with contextlib.suppress(Exception):
+        scan_codebase(path, git_ref=head_ref, quiet=False, max_files=2500, max_seconds=30)
     stable_map = {}
     for s in ci.get("stable_files_touched", []):
         stable_map[s["file"]] = s
@@ -235,7 +234,7 @@ def review_summary(path: str = ".", base_ref: str = "HEAD~1", head_ref: str = "H
         if source_stem != stem:
             continue
         # Check for test files in same dir or adjacent test dir
-        p = os.path.abspath(path)
+        os.path.abspath(path)
         test_candidates = []
         test_patterns = [
             os.path.join(dir_path, f"{source_stem}_test.{os.path.splitext(cf)[1].lstrip('.')}"),
@@ -275,8 +274,8 @@ def onboard_plan(path: str = ".") -> dict:
     """Produce a 3-step onboarding plan: landmarks, modules, and watch-outs."""
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
-    from quale.scanner import scan_codebase, _compute_landmarks, _DEAD_CODE_EXTS, _is_lock_file, _is_generated
     from quale.bootstrap import compute_modules
+    from quale.scanner import _DEAD_CODE_EXTS, _compute_landmarks, _is_generated, _is_lock_file, scan_codebase
     path_abs = os.path.abspath(path)
     try:
         analysis = scan_codebase(path_abs, quiet=False, deep=True, max_files=2500, max_seconds=30)
@@ -314,12 +313,11 @@ def onboard_plan(path: str = ".") -> dict:
         if len(code_files) < 4:
             continue
         label = m.get("label", "") or ""
-        if not label or label == "unknown":
-            if files:
-                dirs = [os.path.dirname(f) for f in files if os.path.dirname(f)]
-                if dirs:
-                    label = os.path.commonpath(dirs) if len(dirs) > 1 else dirs[0]
-                    label = label.replace(os.path.sep, " / ") or label
+        if (not label or label == "unknown") and files:
+            dirs = [os.path.dirname(f) for f in files if os.path.dirname(f)]
+            if dirs:
+                label = os.path.commonpath(dirs) if len(dirs) > 1 else dirs[0]
+                label = label.replace(os.path.sep, " / ") or label
         if not label:
             label = "unnamed module"
         step2.append({"module": label, "file_count": len(code_files), "sample_files": code_files[:3]})
@@ -398,7 +396,7 @@ def refactor_effort(path: str = ".", file_path: str = "") -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path_abs = os.path.abspath(path)
-    from quale.scanner import scan_codebase, _mirror_signals, _find_structural_clones
+    from quale.scanner import _find_structural_clones, scan_codebase
     try:
         analysis = scan_codebase(path_abs, quiet=False, deep=True, max_files=2500, max_seconds=30)
     except Exception as e:
@@ -424,7 +422,7 @@ def refactor_effort(path: str = ".", file_path: str = "") -> dict:
             others = [f for f in group["files"] if f != file_path]
             clone_for_file = others[:3]
             break
-    dirs = set(os.path.dirname(v.path) or "." for v in analysis.file_vocabs)
+    set(os.path.dirname(v.path) or "." for v in analysis.file_vocabs)
     hub_pct = sum(1 for v in analysis.file_vocabs if len(v.vocabulary) >= len(fv.vocabulary))
     hub_pct = round(hub_pct / max(len(analysis.file_vocabs), 1) * 100)
     signals = []
@@ -509,22 +507,7 @@ def ci_trend(path: str = ".", weeks: int = 12) -> dict:
         "window": len(window),
         "trends": trends,
     }
-    """Find changed files in top 10% hub-risk percentile."""
-    if not analysis or not changed:
-        return []
-    import os
-    code_exts = frozenset({".go", ".ts", ".js", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".scala"})
-    hubs: list[tuple[str, int]] = []
-    for fv in analysis.file_vocabs:
-        ext = os.path.splitext(fv.path)[1].lower()
-        if ext not in code_exts:
-            continue
-        degree = len(fv.vocabulary)
-        hubs.append((fv.path, degree))
-    hubs.sort(key=lambda x: -x[1])
-    threshold = max(len(hubs) // 10, 1)
-    top_hubs = set(h for h, _ in hubs[:threshold])
-    return [{"file": f, "hub_rank": i + 1} for i, f in enumerate(changed) if f in top_hubs]
+
 
 def _check_hub_risk(path: str, changed: list[str], analysis) -> list[dict]:
     """Find changed files in top 10% hub-risk percentile."""
@@ -566,8 +549,7 @@ def _check_clone_flag(path: str, changed: list[str], analysis, head_ref: str) ->
 
 def _count_new_identifiers(path: str, base_ref: str, head_ref: str) -> int:
     """Count identifiers in head that don't exist in base."""
-    import re
-    from quale.scanner import scan_codebase, _extract_identifiers
+    from quale.scanner import _extract_identifiers, scan_codebase
     try:
         base = scan_codebase(path, git_ref=base_ref, quiet=True, max_files=2500, max_seconds=15)
         head = scan_codebase(path, git_ref=head_ref, quiet=True, max_files=2500, max_seconds=15)
@@ -935,7 +917,7 @@ def _boundary_entropy(file: str, analysis) -> dict | None:
     norm = round(entropy / max_entropy, 2) if max_entropy > 0 else 0.0
 
     # Top clusters for instruction
-    ranked = sorted(zip(cluster_labels_list, probs), key=lambda x: -x[1])[:3]
+    ranked = sorted(zip(cluster_labels_list, probs, strict=False), key=lambda x: -x[1])[:3]
 
     if norm < 0.3:
         return None
@@ -1083,8 +1065,8 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     """File-scoped edit/review preflight built from grammar-free signals.
     When enrich=True, also computes spectrum/deficit/cascade transforms
     (co-occurrence matrix built automatically in single scan)."""
-    from quale.scanner import scan_codebase, _mirror_signals
     from quale.compare import pr_blast_radius
+    from quale.scanner import _mirror_signals, scan_codebase
 
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -1430,7 +1412,7 @@ def _marginal_candidate_score(rank: int, verify_with: list[str], entangled: list
 def cartridge_report(path: str = ".", files: list[str] | None = None,
                      diff_ref: str | None = None, task: str | None = None) -> dict:
     """Compressed context packet — smallest useful scope for LLM verification."""
-    from quale.scanner import scan_codebase, _mirror_signals
+    from quale.scanner import _mirror_signals, scan_codebase
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -1835,6 +1817,7 @@ def isolate_modules(path: str = ".", task: str = "") -> dict:
     The LLM confirms or rejects each module with ~100 tokens.
     """
     import re
+
     from quale.bootstrap import compute_modules
     from quale.scanner import scan_codebase
     if not vgit.is_repo(path):
@@ -1927,6 +1910,7 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
                              snapshot: bool = False,
                              decoherence_window: int = 0) -> dict:
     import json
+
     from quale.scanner import scan_codebase
     path = os.path.abspath(path)
     drift_dir = os.path.join(path, ".reliary", "quale", "drift")
@@ -2027,10 +2011,8 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
             # Clear decoherence tracking when window is 0
             dc_file = os.path.join(drift_dir, "decoherence", f"{safe_name}.json")
             if os.path.exists(dc_file):
-                try:
+                with contextlib.suppress(Exception):
                     os.remove(dc_file)
-                except Exception:
-                    pass
 
         results.append({
             "file": f, "velocity": velocity, "anchors_preserved": anchor_survival,
@@ -2135,8 +2117,8 @@ def isothermal_entropy(path: str = ".", lookback_weeks: int = 12) -> dict:
     Low entropy (1-2 clusters) = cohesive. High entropy (5+ clusters) = fragmented.
     When entropy exceeds a 30-commit rolling baseline, the Isothermal Limit is hit.
     """
-    from quale.scanner import scan_codebase
     from quale.bootstrap import compute_modules
+    from quale.scanner import scan_codebase
 
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -2294,8 +2276,8 @@ def zk_proof_report(path: str = ".", schema_file: str = "", generated_code: str 
     schema_specific = allowed - _BUILTIN_WORDS
     for ident in sorted(filtered):
         if ident not in allowed:
-            candidates = sorted(schema_specific, key=lambda a: sum(1 for x, y in zip(a, ident) if x != y) + abs(len(a) - len(ident)))
-            best = candidates[:3] if candidates else sorted(allowed, key=lambda a: sum(1 for x, y in zip(a, ident) if x != y) + abs(len(a) - len(ident)))[:3]
+            candidates = sorted(schema_specific, key=lambda a: sum(1 for x, y in zip(a, ident, strict=False) if x != y) + abs(len(a) - len(ident)))
+            best = candidates[:3] if candidates else sorted(allowed, key=lambda a: sum(1 for x, y in zip(a, ident, strict=False) if x != y) + abs(len(a) - len(ident)))[:3]
             violations.append({
                 "identifier": ident,
                 "allowed_alternatives": best,
@@ -2449,10 +2431,8 @@ def forecast_report(path: str = ".", files: list[str] | None = None,
     # For seismic: get the most recent commit's modified files (P-wave)
     p_wave_files: set[str] = set()
     if seismic and log:
-        try:
+        with contextlib.suppress(Exception):
             p_wave_files = set(vgit.diff_refs(path, f"{log[0].sha}^", log[0].sha))
-        except Exception:
-            pass
 
     pair_counts: dict[tuple[str, str], int] = {}
     file_bugfix_count: dict[str, int] = {}
@@ -2847,8 +2827,8 @@ def mycorrhiza_with_tolerance(path: str = ".", files: list[str] | None = None) -
     If an edit introduces vocabulary from outside that radius,
     emits tolerance_violation: true.
     """
-    from quale.scanner import scan_codebase
     from quale.bootstrap import compute_modules
+    from quale.scanner import scan_codebase
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -2905,10 +2885,9 @@ def mycorrhiza_with_tolerance(path: str = ".", files: list[str] | None = None) -
             for cl, fs in cluster_files.items():
                 for f in fs:
                     for fv in analysis.file_vocabs:
-                        if fv.path == f:
-                            if any(t in fv.vocabulary for t in dep_tokens):
-                                dep_clusters.add(cl)
-                                break
+                        if fv.path == f and any(t in fv.vocabulary for t in dep_tokens):
+                            dep_clusters.add(cl)
+                            break
                     if cl in dep_clusters:
                         break
             new_clusters = dep_clusters - touched_clusters
@@ -3209,11 +3188,11 @@ def anneal_report(path: str = ".", file_path: str = "", task: str = "",
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
     if not file_path or not os.path.exists(os.path.join(path, file_path)):
-        return {"error": "provide existing --file" or "no file"}
+        return {"error": "provide existing --file"}
     full = os.path.join(path, file_path)
     from quale.bootstrap import compute_modules
-    from quale.scanner import scan_codebase
     from quale.fold import _indent_blocks
+    from quale.scanner import scan_codebase
     try:
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     except Exception:
@@ -4277,8 +4256,8 @@ def spectral_gap_report(path: str = ".") -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
-    from quale.scanner import scan_codebase
     from quale.bootstrap import compute_modules
+    from quale.scanner import scan_codebase
     try:
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     except Exception as e:
@@ -4360,8 +4339,9 @@ def parity_bit_report(path: str = ".", ref_a: str = "", ref_b: str = "") -> dict
     path = os.path.abspath(path)
     if not ref_a or not ref_b:
         return {"error": "provide --ref-a and --ref-b"}
-    from quale.scanner import scan_codebase
     import hashlib
+
+    from quale.scanner import scan_codebase
     try:
         analysis_a = scan_codebase(path, git_ref=ref_a, quiet=True, max_files=2500, max_seconds=30)
         analysis_b = scan_codebase(path, git_ref=ref_b, quiet=True, max_files=2500, max_seconds=30)
@@ -4416,8 +4396,9 @@ def thanatosis_report(path: str = ".") -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
-    from quale.scanner import scan_codebase
     from collections import Counter
+
+    from quale.scanner import scan_codebase
     try:
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     except Exception as e:
@@ -4490,8 +4471,8 @@ def escape_velocity_report(path: str = ".", min_freq: int = 3) -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
-    from quale.scanner import scan_codebase
     from quale.compare import pr_blast_radius
+    from quale.scanner import scan_codebase
     try:
         analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     except Exception as e:
@@ -4558,9 +4539,10 @@ def porosity_report(path: str = ".") -> dict:
 
 
 def thylacine_report(path: str = ".") -> dict:
-    from quale.scanner import scan_codebase
-    import re
     import collections
+    import re
+
+    from quale.scanner import scan_codebase
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -4577,8 +4559,7 @@ def thylacine_report(path: str = ".") -> dict:
                 tokens.add(m.group())
         for t in tokens:
             ident_files[t].add(fv.path)
-    builtins = frozenset({"True", "False", "None", "Error", "Exception", "TypeError", "Error",
-                          "Object", "Array", "String", "Number", "Boolean", "Map", "Set", "Promise",
+    builtins = frozenset({"True", "False", "None", "Error", "Exception", "TypeError", "Object", "Array", "String", "Number", "Boolean", "Map", "Set", "Promise",
                           "Record", "Partial", "Pick", "Omit", "Required", "Readonly"})
     results: list[dict] = []
     for ident, files in ident_files.items():
@@ -4914,7 +4895,7 @@ def _structural_cohesion_score(file_path: str, file_vocabs: list) -> float:
     this_vocab: set[str] = set()
     for fv in file_vocabs:
         if fv.path == file_path:
-            for phrase, count in fv.vocabulary.items():
+            for phrase, _count in fv.vocabulary.items():
                 if _has_code_phrase(phrase):
                     this_vocab.add(phrase)
             break
@@ -5056,7 +5037,7 @@ def verify_classify_report(path: str = ".", files: list[str] | None = None,
 def reverse_verify_report(path: str = ".", files: list[str] | None = None,
                            diff_ref: str | None = None) -> dict:
     """Given changed test files, find source files that likely need verification."""
-    from quale.scanner import scan_codebase, _is_generated
+    from quale.scanner import _is_generated, scan_codebase
 
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -5383,7 +5364,7 @@ def _same_package_prefix(test_dir: str, src_dir: str) -> bool:
         return False
     if t_parts[0] != s_parts[0]:
         return False
-    return sum(1 for a, b in zip(t_parts, s_parts) if a == b) >= 2
+    return sum(1 for a, b in zip(t_parts, s_parts, strict=False) if a == b) >= 2
 
 
 _CO_LOCATED_CONVENTIONS = [
@@ -5591,7 +5572,7 @@ def _self_assess_hit(path: str, changed: list[str], chosen_verify: str) -> bool:
 
 def check_diff_report(path: str = ".", diff_ref: str = "HEAD~1") -> dict:
     """Post-proposal defect scan: detect edits that break repo structure."""
-    from quale.scanner import scan_codebase, _mirror_signals, _is_generated
+    from quale.scanner import _is_generated, _mirror_signals, scan_codebase
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -5989,8 +5970,8 @@ def verification_deserts(path: str, max_results: int = 20) -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository.", "schema_version": 1}
 
-    from quale.scanner import scan_codebase, _is_generated, _is_lock_file, _DEAD_CODE_EXTS
     from quale.bootstrap import _task_file_role
+    from quale.scanner import _DEAD_CODE_EXTS, _is_generated, _is_lock_file, scan_codebase
 
     analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     if not analysis.file_vocabs:
@@ -6426,9 +6407,7 @@ def _task_is_vague(task: str) -> bool:
     vague = {"fix", "improve", "update", "change", "refactor", "clean", "reliability", "performance", "bug", "stuff", "thing"}
     if len(words) <= 3:
         return True
-    if sum(1 for word in words if word in vague) / max(len(words), 1) >= 0.5:
-        return True
-    return False
+    return sum(1 for word in words if word in vague) / max(len(words), 1) >= 0.5
 
 
 def _is_weird_language(path: str) -> bool:
@@ -6625,7 +6604,7 @@ def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
     if not week_data:
         return []
 
-    from quale.scanner import scan_codebase, _is_lock_file, _is_generated
+    from quale.scanner import _is_generated, _is_lock_file, scan_codebase
 
     concept_weeks: dict[str, set[int]] = defaultdict(set)
     _EXPORT_TOKEN = re.compile(r'\b[A-Z][A-Za-z0-9_]{3,40}\b')
@@ -6925,7 +6904,7 @@ def _load_cached(path: str) -> dict | None:
     if not os.path.isfile(cp):
         return None
     try:
-        with open(cp, "r", encoding="utf-8") as f:
+        with open(cp, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None
@@ -6972,7 +6951,7 @@ def compute_calibration(path: str, last_n: int = 100) -> dict:
     repo = _repo_hash(path)
     records: list[dict] = []
     try:
-        with open(cp, "r", encoding="utf-8") as f:
+        with open(cp, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -7090,8 +7069,8 @@ def invasive_concepts(path: str, top_n: int = 5) -> list[dict]:
             continue
         # Prefer concepts imported via external paths
         imported_paths = [f for f in files if "/vendor/" in f or "/node_modules/" in f or "external" in f.lower()]
-        external_ratio = len(imported_paths) / max(len(files), 1)
-        if external_ratio > 0.1 or True:  # structural coupling, not just import detection
+        len(imported_paths) / max(len(files), 1)
+        if True:  # structural coupling, not just import detection
             external_signal.append((concept, count, widespread_ratio))
 
     external_signal.sort(key=lambda x: -x[1])
@@ -7215,8 +7194,8 @@ def inspect_repo(path: str) -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository.", "schema_version": 1}
 
-    from quale.scanner import scan_codebase, _binding_concepts
-    from quale.bootstrap import explore_repo, compute_modules
+    from quale.bootstrap import compute_modules, explore_repo
+    from quale.scanner import _binding_concepts, scan_codebase
 
     analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     explore_data = explore_repo(path, themes=True, analysis=analysis)
@@ -7298,8 +7277,8 @@ def crystallography(path: str = ".") -> dict:
     stable core, test conventions, and generated file patterns.
     Meant to be cached and reused across agent tasks.
     """
-    from quale.scanner import scan_codebase, _binding_concepts, _is_generated
-    from quale.bootstrap import explore_repo, compute_modules
+    from quale.bootstrap import compute_modules, explore_repo
+    from quale.scanner import _binding_concepts, _is_generated, scan_codebase
 
     if not vgit.is_repo(path):
         return {"error": "Not a git repository.", "schema_version": 1}
@@ -8141,8 +8120,8 @@ def verify_scope(path: str, contract_files: list[str] | None = None,
 
 def _structural_orphans(analysis) -> list[dict]:
     """Find files sharing zero identifiers with any other file."""
-    from quale.scanner import _is_generated, _is_lock_file, _code_file_vocabs
     from quale.compare import _extract_identifiers
+    from quale.scanner import _code_file_vocabs, _is_generated, _is_lock_file
 
     identifiers_by_file: dict[str, set[str]] = {}
     global_df: dict[str, int] = {}
@@ -8254,8 +8233,8 @@ def repo_fingerprint(path: str, git_ref: str | None = None) -> dict:
 
 def orient_report(path: str) -> dict:
     """LLM-oriented repo map: what to read, avoid, and do next."""
-    from quale.scanner import scan_codebase, _compute_landmarks
     from quale.bootstrap import compute_modules
+    from quale.scanner import _compute_landmarks, scan_codebase
 
     p = os.path.abspath(path)
     analysis = scan_codebase(p, quiet=True, max_files=2500, max_seconds=30)
@@ -8324,8 +8303,9 @@ def entropy_velocity(path: str, weeks: int = 12, interval_weeks: int = 4) -> dic
     if not vgit.is_repo(path):
         return {"error": "Not a git repository.", "schema_version": 1}
 
-    from quale.scanner import scan_codebase
     from math import log2
+
+    from quale.scanner import scan_codebase
 
     week_data = vgit.weekly_commits(path, weeks=weeks)
     total_intervals = max(weeks // interval_weeks, 1) + 1
@@ -8560,7 +8540,7 @@ def concept_bonds(path: str, top_n: int = 30) -> dict:
     # COVALENT: concept pairs that always co-occur (Jaccard >= 0.9)
     covalent: list[dict] = []
     seen_pairs: set[tuple[str, str]] = set()
-    for fp, concepts in file_concepts.items():
+    for _fp, concepts in file_concepts.items():
         if len(concepts) > 200:
             concepts = set(list(concepts)[:200])
         sorted_concepts = sorted(concepts)
@@ -8609,10 +8589,11 @@ def concept_bonds(path: str, top_n: int = 30) -> dict:
     }
 
 def rogue_wave_report(path: str = ".", threshold: float = 2.5) -> dict:
-    from quale.scanner import scan_codebase
-    from quale.bootstrap import compute_modules
     import re
     import statistics
+
+    from quale.bootstrap import compute_modules
+    from quale.scanner import scan_codebase
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -8645,9 +8626,10 @@ def rogue_wave_report(path: str = ".", threshold: float = 2.5) -> dict:
     return {"rogue_waves": flares[:8]}
 
 def tensegrity_report(path: str = ".", min_intermediaries: int = 3) -> dict:
-    from quale.scanner import scan_codebase
-    from quale.bootstrap import compute_modules
     import re
+
+    from quale.bootstrap import compute_modules
+    from quale.scanner import scan_codebase
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -8681,9 +8663,10 @@ def tensegrity_report(path: str = ".", min_intermediaries: int = 3) -> dict:
     return {"tensegrity_pairs": tps[:5]}
 
 def implicature_report(path: str = ".", file_path: str = "") -> dict:
-    from quale.scanner import scan_codebase
-    import re
     import random
+    import re
+
+    from quale.scanner import scan_codebase
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
@@ -8717,9 +8700,10 @@ def implicature_report(path: str = ".", file_path: str = "") -> dict:
     return {"violations": vios}
 
 def criticality_report(path: str = ".", file_path: str = "") -> dict:
-    from quale.scanner import scan_codebase
-    import re
     import os
+    import re
+
+    from quale.scanner import scan_codebase
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)

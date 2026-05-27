@@ -79,7 +79,7 @@ def format_terminal(analysis: CodebaseAnalysis) -> str:
     # ── Co-occurrence Clusters ──
     if analysis.clusters:
         lines.append(sh("PATTERNS:"))
-        for i, (label, cluster) in enumerate(zip(analysis.cluster_labels, analysis.clusters)):
+        for i, (label, cluster) in enumerate(zip(analysis.cluster_labels, analysis.clusters, strict=False)):
             if i >= 10:
                 lines.append(gy(f"  … +{len(analysis.clusters) - 10} more patterns"))
                 break
@@ -134,10 +134,7 @@ def format_quick(analysis: CodebaseAnalysis) -> str:
     if analysis.landmarks:
         lm = analysis.landmarks[0]
         up = lm.get("unique_phrases", [])
-        if up:
-            unique_explanation = f"({up[0][:30]})"
-        else:
-            unique_explanation = lm['path'].replace("\\", "/").split("/")[-1]
+        unique_explanation = f"({up[0][:30]})" if up else lm['path'].replace("\\", "/").split("/")[-1]
 
     lines.append(_color(f"{'━' * 50}", "cyan"))
     lines.append(f"  {analysis.path}")
@@ -166,7 +163,7 @@ def format_json(analysis: CodebaseAnalysis) -> str:
         "phrases_by_language": analysis.phrases_by_language,
         "shared_across_languages": analysis.shared_across_languages,
         "top_phrases": [{"phrase": p, "frequency": f} for p, f in analysis.top_phrases[:50]],
-        "patterns": [{"label": label, "size": len(cluster)} for label, cluster in zip(analysis.cluster_labels, analysis.clusters)],
+        "patterns": [{"label": label, "size": len(cluster)} for label, cluster in zip(analysis.cluster_labels, analysis.clusters, strict=False)],
         "landmarks": [{"path": lm["path"], "uniqueness": lm["uniqueness"]} for lm in analysis.landmarks[:20]],
         "dead_exports": [{"phrase": de["phrase"], "file": de["file"]} for de in analysis.dead_exports[:30]],
     }
@@ -186,7 +183,7 @@ def format_html(analysis: CodebaseAnalysis) -> str:
     phrase_rows = "".join(f"<tr><td>{p}</td><td>{f}</td></tr>" for p, f in analysis.top_phrases[:30])
 
     cluster_rows = "".join(f"<tr><td>{i+1}</td><td>{label}</td><td>{len(cluster)}</td></tr>"
-                           for i, (label, cluster) in enumerate(zip(analysis.cluster_labels, analysis.clusters)))
+                           for i, (label, cluster) in enumerate(zip(analysis.cluster_labels, analysis.clusters, strict=False)))
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -588,7 +585,7 @@ def _why_diff(data: dict, ref_a: str, ref_b: str) -> str:
         for item in impact[:3]:
             lines.append(f"    {y('↗')} {item.get('file', '')}  ({item.get('shared_concepts', 0)} shared identifiers)")
 
-    mirror = data.get("mirror_ratio", None)
+    mirror = data.get("mirror_ratio")
     if mirror is not None:
         pct = mirror * 100
         if pct < 30:
@@ -671,7 +668,7 @@ def _why_ci_report(data: dict, ref_a: str, ref_b: str) -> str:
     lines.append(h(f"{'━' * 60}"))
     lines.append("")
 
-    mirror = data.get("mirror_ratio", None)
+    mirror = data.get("mirror_ratio")
     stable = data.get("stable_touched_count", 0)
     blast = data.get("blast_tier", "none")
 
