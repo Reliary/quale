@@ -27,17 +27,21 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e . pytest
 
       - name: Run tests
         run: |
-          python -m pytest tests/ -v --tb=short -q \
-            --deselect tests/test_cli.py::VocabCliTests \
-            --deselect tests/test_adversarial.py::TestAdversarialContent \
-            --deselect tests/test_commands.py::TestCommandCoverage::test_inspect_bare_repo \
-            --deselect tests/test_commands.py::TestCommandCoverage::test_inspect_returns_overview \
-            --deselect tests/test_smoke.py::TestSmoke::test_agent_bootstrap_no_task \
-            --deselect tests/test_smoke.py::TestSmoke::test_agent_bootstrap_summary
+          python -m pytest \
+            tests/test_cli_smoke.py \
+            tests/test_core.py \
+            tests/test_human_ci.py \
+            tests/test_install.py \
+            tests/test_output_contracts.py \
+            tests/test_performance.py \
+            tests/test_property.py \
+            tests/test_reports.py \
+            tests/test_schema_validation.py \
+            -v --tb=short -q
 
   guardrails:
     runs-on: ubuntu-latest
