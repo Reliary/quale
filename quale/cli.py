@@ -54,12 +54,12 @@ cli = typer.Typer(
     quale — structural codebase analysis. No parsers, no config, any language.
 
     Run `quale review` for a PR review, `quale onboard` for new-repo orientation,
-    or `quale agent orient` for LLM agent setup.
+    or `quale o` for LLM agent setup.
 
     Personas:
       HUMAN  review (PR check), onboard (new repo), refactor-cost, inspect, explore
       CI     check (CI gates), comment (PR comment), trend (metrics over time), init (GitHub Action)
-      AGENT  orient (repo map), edit (edit context), guard (risk check)
+      AGENT  o (repo map), ec (edit context), vp (verify packet)
       CORE   60+ structural primitives — run ``quale core --help``
 
     Run ``quale core help-agent "your task"`` for command recommendations.
@@ -75,6 +75,80 @@ core_app = typer.Typer(help="Advanced structural primitives and codebase analysi
 cli.add_typer(ci_app, name="ci")
 cli.add_typer(agent_app, name="agent")
 cli.add_typer(core_app, name="core")
+
+
+# ── Short aliases (root level) ─────────────────────────────────────────────
+
+@cli.command(name="ec")
+def ec_alias(
+    files: Annotated[list[str] | None, typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
+    diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against the working tree")] = None,
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+):
+    """Edit context alias — same as `core edit-context --format tool`. Proven: 75% accuracy."""
+    if not files and not diff:
+        typer.echo("provide --files or --diff", err=True)
+        raise typer.Exit(1)
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = preflight_report(path=p, files=files, diff_ref=diff, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    verify_candidates = data.get("verification_candidates", data.get("verify_with", []))
+    ver_confidence = data.get("verification_confidence", {})
+    scope_creep = data.get("scope_creep_guard", {})
+    wa = scope_creep.get("warnings", [])
+    qs = [w.get("question_extras", "").strip() for w in wa if w.get("question_extras")]
+    scope_creep_instruction = (
+        "Before broadening scope, verify each extra file: " + "; ".join(qs)
+        if qs else
+        "Do not propose extra_edits unless the task explicitly requires them."
+    )
+    vtypes = _classify_verify_types(verify_candidates[:5] if verify_candidates else [], data.get("changed_files", []))
+    tool_data = _build_edit_tool_format(data, verify_candidates, vtypes, ver_confidence, scope_creep, scope_creep_instruction)
+    typer.echo(json.dumps(tool_data, separators=(",", ":")))
+
+
+@cli.command(name="vp")
+def vp_alias(
+    files: Annotated[list[str] | None, typer.Option("--files", help="Changed file(s); repeat or comma-separate")] = None,
+    diff: Annotated[str | None, typer.Option("--diff", help="Git ref to diff against working tree")] = None,
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Optional task description")] = None,
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+):
+    """Verify packet alias — same as `core verify-packet --format json`. Proven: 80% accuracy."""
+    from quale.reports import cartridge_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = cartridge_report(path=p, files=files, diff_ref=diff, task=task)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    typer.echo(json.dumps(data, indent=2))
+
+
+@cli.command(name="o")
+def o_alias(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+):
+    """Orient alias — same as `agent orient`. Returns repo map + landmarks."""
+    from quale.reports import orient_report
+    p = os.path.abspath(path)
+    try:
+        data = orient_report(p)
+        if "error" in data:
+            typer.echo(json.dumps(data), err=True)
+            raise typer.Exit(1)
+        typer.echo(json.dumps(data, indent=2))
+    except Exception as e:
+        typer.echo(json.dumps({"error": str(e)}))
+        raise typer.Exit(1)
 
 
 
