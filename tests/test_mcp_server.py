@@ -202,6 +202,36 @@ class TestMCPServer(unittest.TestCase):
         self.assertIn("error", resp)
         self.assertIn("code", resp["error"])
 
+    def test_initialize_handshake(self):
+        """MCP clients send initialize before anything else."""
+        resp = self._call({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1.0"},
+            },
+        })
+        self.assertEqual(resp["id"], 1)
+        self.assertIn("protocolVersion", resp["result"])
+        self.assertIn("capabilities", resp["result"])
+        self.assertIn("serverInfo", resp["result"])
+        self.assertEqual(resp["result"]["serverInfo"]["name"], "quale")
+
+    def test_initialized_notification_no_response(self):
+        """notifications/initialized has no 'id' — server must NOT respond."""
+        proc = subprocess.run(
+            [sys.executable, MCP_SERVER],
+            input=json.dumps({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+            }),
+            capture_output=True, text=True, timeout=15,
+        )
+        # No response expected (notification has no id)
+        self.assertEqual(proc.stdout.strip(), "")
+
 
 if __name__ == "__main__":
     unittest.main()

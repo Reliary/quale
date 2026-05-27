@@ -63,7 +63,13 @@ class MCPServer:
                 continue
             method = req.get("method", "")
             req_id = req.get("id")
-            if method == "tools/list":
+            if method == "initialize":
+                self._respond(req_id, result={
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "quale", "version": "0.9.4"},
+                })
+            elif method == "tools/list":
                 self._respond(req_id, result={
                     "tools": [
                         {
@@ -87,6 +93,10 @@ class MCPServer:
                     self._respond(req_id, result={"content": [{"type": "text", "text": json.dumps(result)}]})
                 except Exception as e:
                     self._respond(req_id, error=str(e))
+            elif method == "notifications/initialized":
+                pass
+            elif method == "notifications/cancelled":
+                pass
             elif method == "initialized":
                 pass
             else:
