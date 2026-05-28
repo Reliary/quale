@@ -1661,43 +1661,6 @@ def orient_cmd(
     typer.echo(f'  {data.get("total_files_in_scope",0)} files in scope')
 
 
-@core_app.command(name="health", rich_help_panel="CI")
-def health_cmd(
-    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    balance: Annotated[bool, typer.Option("--balance", help="Root-to-shoot ratio check")] = False,
-    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
-):
-    """0-1 health from stability, mirror, churn, concept age. """
-    from quale.reports import structural_health_score
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True)
-        raise typer.Exit(1)
-    data = structural_health_score(path=p, balance=balance)
-    if "error" in data:
-        typer.echo(data["error"], err=True)
-        raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2))
-        return
-    h = data.get("health", "?")
-    c = "green" if h == "good" else ("yellow" if h == "moderate" else "red")
-    if h == "good":
-        summary = "Good structural health \u2014 low coupling, good modularity."
-    elif h == "moderate":
-        summary = "Moderate \u2014 some coupling debt, refactoring may help."
-    else:
-        summary = "Poor \u2014 high coupling or weak modularity. Consider refactoring."
-    typer.echo(f"Health: {_color(h.upper(), c)} (debt: {data.get('debt_acceleration',0):.3f})")
-    typer.echo(f"  {summary}")
-    if balance and data.get("root_shoot_ratio"):
-        ratio = data["root_shoot_ratio"]
-        clr = "red" if ratio > 3 else ("green" if ratio < 0.5 else "yellow")
-        typer.echo(f"  Root/Shoot ratio: {ratio}:1 [{_color('Features outgrowing core' if ratio > 3 else 'Core dominates' if ratio < 0.5 else 'Balanced', clr)}]")
-    elif balance:
-        typer.echo(f"  {data.get('phototropism_note', '')}")
-
-
 @core_app.command(name="heisenberg", rich_help_panel="Maintenance")
 def heisenberg_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
@@ -5293,6 +5256,178 @@ def ci_trend_wrapper(
     """CI metric trends over time."""
     from quale.cli import ci_trend_cmd
     ci_trend_cmd(path=path, weeks=weeks, format=format)
+
+# ── Unified risk command ──────────────────────────────────────────────────────
+
+@core_app.command(name="risk", rich_help_panel="Code Analysis")
+def risk_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    mode: Annotated[str, typer.Option("--mode", "-m", help="Mode: full, hub, capillary")] = "full",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: human, json")] = "human",
+    ci: Annotated[bool, typer.Option("--ci", help="CI gate mode")] = False,
+) -> None:
+    """Surface risky files — hub, capillary, and their intersection."""
+    from quale.reports import capillary_report, thanatosis_report, vulnerability_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if mode == "hub":
+        data = thanatosis_report(path=p)
+        dt = [f["file"] for f in data.get("files", [])]
+        ch, cr = [], []
+    elif mode == "capillary":
+        data = capillary_report(path=p)
+        dt, cr = [], []
+        ch = [c["file"] for c in data.get("capillaries", [])]
+    else:
+        data = vulnerability_report(path=p)
+        dt = data.get("don_touch", [])
+        ch = data.get("churn_hubs", [])
+        cr = data.get("critical", [])
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    result = {"critical_files": cr, "hub_files": dt, "capillary_files": ch}
+    if format == "json":
+        typer.echo(json.dumps(result, indent=2))
+        return
+    if cr:
+        typer.echo(f"{ICON_WARN} Critical (Hub + Capillary):")
+        for f in cr:
+            typer.echo(f"  {f}")
+    if dt:
+        typer.echo(f"{ICON_PRIMARY} Hub Risk:")
+        for f in dt[:8]:
+            typer.echo(f"  {f}")
+    if ch:
+        typer.echo(f"{ICON_PRIMARY} Capillary Risk:")
+        for f in ch[:8]:
+            typer.echo(f"  {f}")
+    if ci and cr:
+        raise typer.Exit(1)
+
+# ── Unified verify command ────────────────────────────────────────────────────
+
+@core_app.command(name="verify", rich_help_panel="Agent Safety")
+def verify_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    files: Annotated[list[str], typer.Option("--files", help="Changed file(s)")] = None,
+    diff: Annotated[str | None, typer.Option("--diff", help="Git ref")] = None,
+    task: Annotated[str | None, typer.Option("--task", "-t", help="Task description")] = None,
+    mode: Annotated[str, typer.Option("--mode", "-m", help="Mode: mc, scope, packet, full")] = "full",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: human, json")] = "human",
+) -> None:
+    """Verification pipeline — mc (pre-edit), packet (post-edit), scope (post-edit scope check)."""
+    from quale.reports import cartridge_report, guard_report, preflight_report, verify_scope
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if files is None:
+        files = []
+    if mode == "mc":
+        data = preflight_report(path=p, files=files or None, diff_ref=diff, task=task)
+    elif mode == "scope":
+        data = verify_scope(path=p, contract_files=files or None, diff_ref=diff)
+    elif mode == "packet":
+        data = cartridge_report(path=p, files=files or None, diff_ref=diff, task=task)
+    else:
+        data = guard_report(path=p, file_path=files[0] if files else "", task=task or "")
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    risk = data.get("risk", "?")
+    typer.echo(f"Risk: {risk}")
+    vc = data.get("verification_candidates", [])
+    if vc:
+        typer.echo("Verification Candidates:")
+        for c in vc:
+            typer.echo(f"  {ICON_PRIMARY} {c}")
+
+
+# ── Unified health command ────────────────────────────────────────────────────
+
+@core_app.command(name="health", rich_help_panel="CI")
+def health_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    mode: Annotated[str, typer.Option("--mode", "-m", help="Mode: dashboard, score")] = "dashboard",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: human, json")] = "human",
+) -> None:
+    """Structural health dashboard — porosity, spectral gap, and debt score."""
+    from quale.reports import porosity_report, repo_health, spectral_gap_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if mode == "score":
+        data = repo_health(path=p)
+    else:
+        pr = porosity_report(path=p)
+        sg = spectral_gap_report(path=p)
+        data = {"porosity": pr, "gap": sg}
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    g = data.get("spectral_gap", data.get("gap", {}).get("spectral_gap", 0))
+    typer.echo(f"Health: Spectral gap={g}")
+
+# ── Unified audit command ─────────────────────────────────────────────────────
+
+@core_app.command(name="audit", rich_help_panel="CI")
+def audit_cmd(
+    base_ref: Annotated[str, typer.Argument(help="Base git ref")] = "HEAD~1",
+    head_ref: Annotated[str, typer.Argument(help="Target git ref")] = "HEAD",
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: human, json")] = "human",
+) -> None:
+    """Review a diff — structural, CI, and PR reports in one command."""
+    from quale.reports import check_diff_report, check_pr_report, ci_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    data = {
+        "ci": ci_report(base_ref=base_ref, head_ref=head_ref, path=p),
+        "pr": check_pr_report(path=p, base_ref=base_ref, head_ref=head_ref),
+        "diff": check_diff_report(path=p, diff_ref=head_ref),
+    }
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    typer.echo(f"Audit: {base_ref}..{head_ref}")
+
+# ── Unified temporal command ──────────────────────────────────────────────────
+
+@core_app.command(name="temporal", rich_help_panel="Maintenance")
+def temporal_cmd(
+    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
+    file: Annotated[str, typer.Option("--file", help="File to analyze")] = "",
+    format: Annotated[str, typer.Option("--format", "-f", help="Output: human, json")] = "human",
+) -> None:
+    """Temporal analysis — decay, vocabulary trends, and phrase lifecycles."""
+    from quale.reports import decay_report
+    p = os.path.abspath(path)
+    if not vgit.is_repo(p):
+        typer.echo("Not a git repository.", err=True)
+        raise typer.Exit(1)
+    if not file:
+        typer.echo("provide --file <path>", err=True)
+        raise typer.Exit(1)
+    data = decay_report(path=p, file_path=file)
+    if "error" in data:
+        typer.echo(data["error"], err=True)
+        raise typer.Exit(1)
+    if format == "json":
+        typer.echo(json.dumps(data, indent=2))
+        return
+    typer.echo(f"Temporal: {file}")
 
 if __name__ == "__main__":
     _entry_main()
