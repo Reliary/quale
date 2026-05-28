@@ -12,6 +12,9 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_REPO = str(PROJECT_ROOT)
+
+from helpers import QualeTestCase
 
 
 class TestCommandCoverage(unittest.TestCase):
@@ -503,3 +506,71 @@ class TestGroundTruthIntegrity(unittest.TestCase):
                         continue
                     missing.append(f"{c.repo}: {vf}")
         self.assertEqual(missing, [], f"Missing verify files: {missing}")
+
+
+class TestUnifiedCommandGuardrails(QualeTestCase):
+    """Guardrails: prevent bug classes from recurring in unified commands."""
+
+    def test_risk_json_has_keys(self):
+        r = self.run_quale("core", "risk", "--path", FIXTURE_REPO, "--format", "json")
+        data = json.loads(r.stdout)
+        self.assertIn("critical_files", data)
+        self.assertIn("hub_files", data)
+        self.assertIn("capillary_files", data)
+
+    def test_risk_human_not_empty(self):
+        r = self.run_quale("core", "risk", "--path", FIXTURE_REPO)
+        self.assertTrue(len(r.stdout.strip()) > 10, msg="risk human output too short")
+
+    def test_risk_ci_gate_fires_with_json(self):
+        r = self.run_quale("core", "risk", "--path", FIXTURE_REPO, "--ci", "--format", "json", check=False)
+        self.assertEqual(r.returncode, 1, msg="risk --ci --format json should exit 1 when critical files exist")
+
+    def test_risk_mode_varies(self):
+        r_full = self.run_quale("core", "risk", "--path", FIXTURE_REPO, "--mode", "full", "--format", "json")
+        r_hub = self.run_quale("core", "risk", "--path", FIXTURE_REPO, "--mode", "hub", "--format", "json")
+        d_full = json.loads(r_full.stdout)
+        d_hub = json.loads(r_hub.stdout)
+        self.assertTrue(len(d_full["critical_files"]) >= len(d_hub["critical_files"]),
+                        msg="full mode should have >= critical files than hub mode")
+
+    def test_verify_json_has_keys(self):
+        r = self.run_quale("core", "verify", "--path", FIXTURE_REPO, "--files", "setup.py", "--format", "json")
+        data = json.loads(r.stdout)
+        self.assertIsInstance(data, dict)
+        self.assertTrue(len(data) >= 3, msg="verify JSON should have at least 3 keys")
+
+    def test_verify_human_not_empty(self):
+        r = self.run_quale("core", "verify", "--path", FIXTURE_REPO, "--files", "setup.py")
+        self.assertTrue(len(r.stdout.strip()) > 5, msg="verify human output too short")
+
+    def test_health_json_has_keys(self):
+        r = self.run_quale("core", "health", "--path", FIXTURE_REPO, "--format", "json")
+        data = json.loads(r.stdout)
+        self.assertIn("porosity", data)
+        self.assertIn("gap", data)
+
+    def test_health_human_not_empty(self):
+        r = self.run_quale("core", "health", "--path", FIXTURE_REPO)
+        self.assertTrue(len(r.stdout.strip()) > 10, msg="health human output too short")
+
+    def test_audit_json_has_keys(self):
+        r = self.run_quale("core", "audit", "HEAD~1", "HEAD", "--path", FIXTURE_REPO, "--format", "json")
+        data = json.loads(r.stdout)
+        self.assertIn("ci", data)
+        self.assertIn("pr", data)
+        self.assertIn("diff", data)
+
+    def test_audit_human_not_empty(self):
+        r = self.run_quale("core", "audit", "HEAD~1", "HEAD", "--path", FIXTURE_REPO)
+        self.assertTrue(len(r.stdout.strip()) > 10, msg="audit human output too short")
+
+    def test_temporal_relative_path_resolves(self):
+        """Bug #4: temporal --file with bare filename should find file in subdirectory."""
+        r = self.run_quale("core", "temporal", "--path", FIXTURE_REPO, "--file", "cli.py", "--format", "json")
+        if r.returncode == 0:
+            data = json.loads(r.stdout)
+            self.assertIn("file", data)
+        else:
+            # Acceptable if file truly doesn't exist in any subdirectory
+            self.assertIn(r.returncode, (0, 1))

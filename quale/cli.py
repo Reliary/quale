@@ -5291,6 +5291,11 @@ def risk_cmd(
     result = {"critical_files": cr, "hub_files": dt, "capillary_files": ch}
     if format == "json":
         typer.echo(json.dumps(result, indent=2))
+    if ci and cr:
+        raise typer.Exit(1)
+    if ci and not cr:
+        typer.echo(f"{ICON_CHECK} No critical files — CI gate passed")
+    if format == "json":
         return
     if cr:
         typer.echo(f"{ICON_WARN} Critical (Hub + Capillary):")
@@ -5306,6 +5311,8 @@ def risk_cmd(
             typer.echo(f"  {f}")
     if ci and cr:
         raise typer.Exit(1)
+    if ci and not cr:
+        typer.echo(f"{ICON_CHECK} No critical files — CI gate passed")
 
 # ── Unified verify command ────────────────────────────────────────────────────
 
@@ -5340,13 +5347,23 @@ def verify_cmd(
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    risk = data.get("risk", "?")
+    risk = data.get("risk") or data.get("post_edit_risk", "?")
+    file = data.get("file", "")
+    guide = data.get("guide", "")
+    typer.echo(f"File: {file}")
     typer.echo(f"Risk: {risk}")
+    if guide:
+        typer.echo(f"Guide: {guide}")
     vc = data.get("verification_candidates", [])
+    tier = data.get("tier", "")
+    if tier:
+        typer.echo(f"Tier: {tier}")
     if vc:
         typer.echo("Verification Candidates:")
         for c in vc:
             typer.echo(f"  {ICON_PRIMARY} {c}")
+    elif not risk and not file and not guide:
+        typer.echo("(no output for this mode; use --format json for full data)")
 
 
 # ── Unified health command ────────────────────────────────────────────────────
@@ -5375,8 +5392,18 @@ def health_cmd(
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    g = data.get("spectral_gap", data.get("gap", {}).get("spectral_gap", 0))
-    typer.echo(f"Health: Spectral gap={g}")
+    porosity = data.get("porosity", {})
+    gap = data.get("gap", {})
+    sg = gap.get("spectral_gap", porosity.get("spectral_gap", "?"))
+    excess = porosity.get("excess_porosity", "?")
+    typer.echo(f"Health: spectral gap={sg} excess porosity={excess}")
+    if isinstance(excess, (int, float)):
+        if excess > 0.5:
+            typer.echo("  High coupling density — consider splitting modules")
+        elif excess < -0.5:
+            typer.echo("  Low coupling — well-separated modules")
+        else:
+            typer.echo("  Moderate coupling")
 
 # ── Unified audit command ─────────────────────────────────────────────────────
 
@@ -5393,15 +5420,20 @@ def audit_cmd(
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
-    data = {
-        "ci": ci_report(base_ref=base_ref, head_ref=head_ref, path=p),
-        "pr": check_pr_report(path=p, base_ref=base_ref, head_ref=head_ref),
-        "diff": check_diff_report(path=p, diff_ref=head_ref),
-    }
+    ci_data = ci_report(base_ref=base_ref, head_ref=head_ref, path=p)
+    pr_data = check_pr_report(path=p, base_ref=base_ref, head_ref=head_ref)
+    diff_data = check_diff_report(path=p, diff_ref=head_ref)
+    data = {"ci": ci_data, "pr": pr_data, "diff": diff_data}
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
     typer.echo(f"Audit: {base_ref}..{head_ref}")
+    if ci_data:
+        typer.echo(f"  Blast radius: {ci_data.get('max_blast_tier', '?')}")
+        typer.echo(f"  Mirror gap: {ci_data.get('mirror_gap_ratio', '?')}")
+        typer.echo(f"  Test coverage: {ci_data.get('mirror_cov', '?')}")
+    if pr_data:
+        typer.echo(f"  PR parity: {pr_data.get('parity_bit', '?')}")
 
 # ── Unified temporal command ──────────────────────────────────────────────────
 
@@ -5418,16 +5450,30 @@ def temporal_cmd(
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file:
-        typer.echo("provide --file <path>", err=True)
+        typer.echo("provide --file <path> (e.g. --file src/main.py)", err=True)
         raise typer.Exit(1)
     data = decay_report(path=p, file_path=file)
+    if "error" in data and "/" not in file and "\\" not in file:
+        for candidate in [os.path.join(d, file) for d in os.listdir(p) if os.path.isdir(os.path.join(p, d))]:
+            if os.path.isfile(candidate):
+                data = decay_report(path=p, file_path=candidate)
+                break
     if "error" in data:
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
         typer.echo(json.dumps(data, indent=2))
         return
-    typer.echo(f"Temporal: {file}")
+    typer.echo(f"File: {file}")
+    decaying = data.get("decaying_patterns", [])
+    tracked = data.get("phrases_tracked", 0)
+    typer.echo(f"Phrases tracked: {tracked}")
+    if decaying:
+        typer.echo(f"Decaying patterns ({len(decaying)}):")
+        for d in decaying[:5]:
+            typer.echo(f"  {ICON_WARN} {d.get('phrase', '?')} ({d.get('legacy_pattern', '?')} → {d.get('replacement', '?')})")
+    else:
+        typer.echo("  No decaying patterns detected")
 
 if __name__ == "__main__":
     _entry_main()
