@@ -18,15 +18,19 @@ from quale.reports.analysis import (
     _change_acceleration,
     _cross_cutting_concerns,
     _deficit_analysis,
-    _file_in_commit,
     _file_temperature,
     _fused_priority_ranking,
     _module_exposure_analysis,
     _peer_relative_risk,
     _risk_vector,
     _safety_envelope,
-    _safe_islands_data,
     _spectrum_analysis,
+)
+from quale.reports.analysis import (
+    _file_in_commit as _file_in_commit,
+)
+from quale.reports.analysis import (
+    _safe_islands_data as _safe_islands_data,
 )
 
 if TYPE_CHECKING:
@@ -380,27 +384,6 @@ def onboard_plan(path: str = ".") -> dict:
         "total_files": analysis.total_files,
     }
 
-def _safe_islands_data(analysis) -> list[str]:
-    """Find structurally isolated blocks safe to edit."""
-    safe: list[str] = []
-    dir_counts: dict[str, int] = {}
-    for fv in analysis.file_vocabs:
-        d = os.path.dirname(fv.path) or "."
-        dir_counts.setdefault(d, 0)
-        dir_counts[d] += len(fv.vocabulary)
-    dir_files: dict[str, int] = {}
-    for fv in analysis.file_vocabs:
-        d = os.path.dirname(fv.path) or "."
-        dir_files[d] = dir_files.get(d, 0) + 1
-    avg_phrases = sum(dir_counts.values()) / max(len(dir_counts), 1)
-    for d, count in sorted(dir_counts.items(), key=lambda x: -x[1]):
-        parts = d.split(os.path.sep)
-        if any(p.startswith(".") for p in parts if p):
-            continue
-        if count < avg_phrases * 0.3 and dir_files.get(d, 0) <= 3:
-            safe.append(d)
-    return sorted(safe)[:10]
-
 def refactor_effort(path: str = ".", file_path: str = "") -> dict:
     """Estimate refactoring effort for a file: blast + escape + clones + hub."""
     if not vgit.is_repo(path):
@@ -569,8 +552,6 @@ def _count_new_identifiers(path: str, base_ref: str, head_ref: str) -> int:
         head_ids.update(_extract_identifiers(fv, min_len=4))
     new_ids = head_ids - base_ids
     return len(new_ids)
-
-    return concerns[:5]
 
 def preflight_report(path: str = ".", files: list[str] | None = None,
                      diff_ref: str | None = None, task: str | None = None,

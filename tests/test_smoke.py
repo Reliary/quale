@@ -19,7 +19,7 @@ class TestSmoke(unittest.TestCase):
     def setUp(self):
         self.env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
 
-    def run_vocab(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    def run_quale(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         result = subprocess.run(
             [sys.executable, "-m", "quale.cli", *args],
             cwd=str(PROJECT_ROOT),
@@ -60,47 +60,47 @@ class TestSmoke(unittest.TestCase):
 
     def test_blast_returns_results(self):
         tmp, repo = self._make_repo(weeks=2)
-        result = self.run_vocab("core", "blast", "HEAD~1", "HEAD", "--path", str(repo), "--format", "json")
+        result = self.run_quale("core", "blast", "HEAD~1", "HEAD", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("impacts", data)
 
     def test_explore_returns_results(self):
         tmp, repo = self._make_repo(weeks=2)
-        result = self.run_vocab("explore", "--path", str(repo), "--format", "json")
+        result = self.run_quale("explore", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("files", data)
 
     def test_lifecycle_returns_results(self):
         tmp, repo = self._make_repo(weeks=12)
-        result = self.run_vocab("core", "lifecycle", "--path", str(repo), "--format", "json")
+        result = self.run_quale("core", "lifecycle", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIsInstance(data, list)
 
     def test_landmarks_returns_results(self):
         tmp, repo = self._make_repo(weeks=2)
-        result = self.run_vocab("core", "landmarks", str(repo), check=False)
+        result = self.run_quale("core", "landmarks", str(repo), check=False)
         self.assertIn(result.returncode, (0, 1))
 
     def test_lifecycle_returns_results(self):
         tmp, repo = self._make_repo(weeks=12)
-        result = self.run_vocab("core", "lifecycle", "--path", str(repo), "--format", "json")
+        result = self.run_quale("core", "lifecycle", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("signals", data)
 
     def test_timeline_returns_results(self):
         tmp, repo = self._make_repo(weeks=12)
-        result = self.run_vocab("core", "timeline", "--path", str(repo), "--format", "json")
+        result = self.run_quale("core", "timeline", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("timeline", data)
 
     def test_agent_bootstrap_summary(self):
         tmp, repo = self._make_repo(weeks=2)
-        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--summary")
+        result = self.run_quale("core", "agent-bootstrap", "--path", str(repo), "--summary")
         self.assertIn("AGENT BOOTSTRAP", result.stdout)
 
     def test_agent_bootstrap_no_task(self):
         tmp, repo = self._make_repo(weeks=2)
-        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
+        result = self.run_quale("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data["task_relevance_score"], 0)
         self.assertEqual(data["related_files_for_task"], [])

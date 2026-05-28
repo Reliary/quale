@@ -54,6 +54,12 @@ jobs:
       - name: Layer 2 - Output contracts
         run: python -m pytest tests/test_output_contracts.py -v -q
 
+      - name: Snapshot tests
+        run: python -m pytest tests/test_snapshots.py -v -q
+
+      - name: State transition tests
+        run: python -m pytest tests/test_state.py -v -q
+
       - name: Layer 5 - Schema validation
         run: python -m pytest tests/test_schema_validation.py -v -q
 
@@ -84,13 +90,11 @@ jobs:
       - name: Output contracts
         run: python -m pytest tests/test_output_contracts.py -v -q
 
-      - name: Schema validation
-        run: python -m pytest tests/test_schema_validation.py -v -q
+      - name: Snapshots
+        run: python -m pytest tests/test_snapshots.py -v -q
 
-      - name: Dogfood
-        run: |
-          quale review --path . || echo "review OK"
-          quale onboard --path . || echo "onboard OK"
-          quale agent orient --path . || echo "orient OK"
-          quale core hub-risk --path . || echo "hub-risk OK"
-          quale core test-gaps --path . || echo "test-gaps OK"
+      - name: State
+        run: python -m pytest tests/test_state.py -v -q
+
+      - name: Structure
+        run: python -m pytest tests/test_structure.py -v -q

@@ -1,0 +1,48 @@
+{
+  "landmarks": [
+    {
+      "file": ".editorconfig",
+      "why": "key file \u2014 distinctive vocabulary"
+    },
+    {
+      "file": ".github/FUNDING.yml",
+      "why": "key file \u2014 distinctive vocabulary"
+    },
+    {
+      "file": ".github/ISSUE_TEMPLATE/config.yml",
+      "why": "key file \u2014 distinctive vocabulary"
+    }
+  ],
+  "languages": [
+    [
+      "Python",
+      41
+    ],
+    [
+      "Markdown",
+      15
+    ],
+    [
+      "Unknown",
+      11
+    ],
+    [
+      "YAML",
+      8
+    ],
+    [
+      "Shell",
+      4
+    ],
+    [
+      "JSON",
+      3
+    ],
+    [
+      "TOML",
+      1
+    ]
+  ],
+  "modules": 0,
+  "total_files": 83
+}

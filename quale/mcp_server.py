@@ -93,11 +93,7 @@ class MCPServer:
                     self._respond(req_id, result={"content": [{"type": "text", "text": json.dumps(result)}]})
                 except Exception as e:
                     self._respond(req_id, error=str(e))
-            elif method == "notifications/initialized":
-                pass
-            elif method == "notifications/cancelled":
-                pass
-            elif method == "initialized":
+            elif method == "notifications/initialized" or method == "notifications/cancelled" or method == "initialized":
                 pass
             else:
                 self._respond(req_id, error=f"Unknown method: {method}")
@@ -131,8 +127,7 @@ class MCPServer:
             if c in data.get("changed_files", []):
                 vtypes[c] = "source"
         for c in verify_candidates[:5] if verify_candidates else []:
-            base = os.path.splitext(c)[0]
-            if any(not d.get(c) == "source" for d in [vtypes]):
+            if any(d.get(c) != "source" for d in [vtypes]):
                 vtypes[c] = "unit" if "_test" in c or ".test." in c else "integration"
         return {
             "schema_version": 1,
