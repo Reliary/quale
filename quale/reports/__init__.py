@@ -8179,10 +8179,10 @@ def anomaly_report(path: str = ".", top_n: int = 10) -> dict:
     # Prose tokens that match the code-identifier regex but appear in docs/comments
     _PROSE_TOKENS = frozenset({
         "Getting", "Started", "Actions", "Onboarding", "Usage", "Example",
-        "Installation", "Configuration", "Overview", "Contributing", "License",
+        "Installation", "Configuration", "Overview", "Contributing",
         "Features", "Quickstart", "Reference", "Guide", "Tutorial",
-        "Description", "Details", "Information", "Notes", "Warning", "Warning",
-        "Changelog", "Readme", "Readme", "License", "Contributor",
+        "Description", "Details", "Information", "Notes", "Warning",
+        "Changelog", "Readme", "License", "Contributor",
         "Documentation", "Setup", "Requirements", "Support", "Security",
     })
     code_ids: set[str] = set()
@@ -8260,7 +8260,6 @@ def incomplete_change_report(
     co-change scores. Files with fused_score >= threshold that aren't in
     the diff are flagged as potentially missing.
     """
-    from quale.scanner import scan_codebase
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
