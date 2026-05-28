@@ -92,3 +92,6 @@ These replace multiple old commands with single, mode-switched interfaces.
 | `agent-bootstrap` | Utilities | One-shot agent bootstrap: explore + modules + stability + related files. |
 | `fingerprint` | Utilities | Structural fingerprint of a file or entire repo. |
 | `orient` | Utilities | One-call orientation: solve + triangulate + isolate. |
+| `lifecycle` | History | Classify phrases as growing, stable, decaying, dead, seasonal. |
+| `timeline` | History | Track phrases through git history. |
+| `provenance` | History | Trace a phrase's presence through git history. |
