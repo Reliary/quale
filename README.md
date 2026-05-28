@@ -150,7 +150,7 @@ design target (measured 75% accuracy, 0.0 extra edits):
 | LLM agent | `quale` | `o` (orient), `ec` (edit-context, 75% accuracy), `vp` (verify-packet, 80% accuracy) |
 | Human developer | `quale` | `review`, `onboard`, `refactor-cost`, `inspect`, `explore` |
 | CI pipeline | `quale ci` | `check`, `comment`, `trend`, `init` (GitHub Actions generator) |
-| Structural primitives | `quale core` | 60+ commands including `hub-risk`, `spectral-gap`, `criticality` |
+| Structural primitives | `quale core` | 60+ commands including unified `risk`, `verify`, `health`, `audit`, `temporal` plus `spectral-gap`, `criticality` |
 
 ### LLM agent
 
@@ -218,8 +218,7 @@ See [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md) for full methodology.
 
 ### Advanced primitives
 
-See `quale core --help` for 60+ commands including `hub-risk`, `spectral-gap`,
-`criticality`, `coupling-chain`, `diff-structural`, `test-gaps`, and more.
+See `quale core --help` for 60+ commands including unified `risk`, `verify`, `health`, `audit`, `temporal` plus `spectral-gap`, `criticality`, `coupling-chain`, `diff-structural`, `test-gaps`, and more.
 
 ## How it works
 
@@ -271,7 +270,7 @@ flowchart LR
     A --> D[Test mirror ratio]
     A --> E[Criticality k]
     A --> F[Coupling chains]
-    B --> G["quale review / agent guard"]
+    B --> G[quale risk / verify]
     C --> G
     D --> G
     E --> G

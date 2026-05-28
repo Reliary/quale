@@ -41,9 +41,9 @@ quale o                               # Orient: landmarks, modules, languages
 ### Namespace commands (alternative)
 
 ```bash
-quale agent edit src/spool.ts         # Same as `quale ec`
-quale agent guard src/spool.ts        # Combined safety packet: guide + hub-risk + complexity + criticality
 quale agent orient                    # Same as `quale o`
+quale agent edit src/spool.ts         # Edit context with verification candidates
+quale agent guard src/spool.ts        # Combined safety packet
 ```
 
 ### MCP tools (when using MCP server)
@@ -69,6 +69,27 @@ quale ci comment origin/main HEAD     # Posts the PR report as a GitHub comment
 quale ci trend                        # CI metric trends over time
 ```
 
+## Unified Commands
+
+These replace multiple old commands with single, mode-switched interfaces.
+
+```bash
+quale risk                             # Hub + capillary + vulnerability intersection
+quale risk --mode hub                  # Hub risk only
+quale risk --mode capillary            # Capillary risk only
+
+quale verify --files src/auth.ts       # Combined verification: mc, scope, packet
+quale verify --mode mc                 # Pre-edit multi-choice verification (75% accuracy)
+quale verify --mode packet             # Post-edit co-change signal (80% accuracy)
+quale verify --mode scope              # Post-edit scope verification (83% accuracy)
+
+quale health                           # Structural health dashboard
+quale health --mode score              # Single health score
+
+quale audit HEAD~1 HEAD                # Review a diff: CI + PR + structural
+quale temporal --file src/auth.ts      # Temporal analysis: decay + vocabulary trends
+```
+
 ## 🔬 Core Primitives (`quale core`)
 
 Over 30 advanced architectural primitives and algorithms power the insights above. They are available via the `core` namespace.
@@ -82,7 +103,7 @@ quale core spectral-gap               # Modularity score: largest cluster / seco
 quale core phantom                    # Detect framework/library from import/export vocabulary
 quale core trap                       # Identifier overlap between two concurrently-edited files
 quale core hub-risk                   # High-centrality files with zero edits
-quale core escape-velocity            # Phrase removal difficulty: ESCAPED / BOUND / DEEP
+quale core escape-velocity            # Phrase removal difficulty: External / Contained / Internal
 quale core heisenberg                 # Mixed refactor/feature edits that must be split
 ```
 

@@ -9,7 +9,7 @@ description: Structural codebase analysis for code review, editing, and test ver
 When asked to edit, review, debug, refactor, or analyze code.
 
 ## Before every edit
-Run `quale ec <file>`
+Run `quale ec --files <file>`
 
 Returns: risk level, verification candidates, stable anchor warnings.
 Measured: 75% test accuracy, 0.0 extra edits across 1,100 trials.
@@ -17,7 +17,7 @@ Measured: 75% test accuracy, 0.0 extra edits across 1,100 trials.
 Use the `verification_mc.candidates` field to find the right test file before editing.
 
 ## After every edit
-Run `quale vp <file>`
+Run `quale vp --files <file>`
 
 Returns: verification candidates with co-change signal.
 Measured: 80% accuracy, best cost/benefit (2.87).
