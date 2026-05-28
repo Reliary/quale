@@ -55,8 +55,28 @@ python scripts/evaluate_vocab_effect.py --suite edit-context --trials 3
 python scripts/analyze_effect_failures.py /tmp/quale-effect-edit-context-3trial.json
 ```
 
-Conditions: `candidate_baseline`, `edit-context --format tool`, `diff_edit-context`,
-`route_policy`, `verify_scope`, `ask`, `negotiate_simple`.
+### Mapping harness conditions to CLI commands
+
+The harness tested several conditions. Here's how they map to current CLI commands:
+
+| Harness condition | CLI command | Status | Notes |
+|-------------------|-------------|--------|-------|
+| `edit-context --format tool` | `quale ec` or `quale core edit-context --format tool` | ✓ Active | Primary LLM surface, 75% accuracy |
+| `verify_scope` | `quale core verify-scope` | ✓ Active | Verification-only, 83% accuracy on weak models |
+| `verify_entangle` | `quale core verify-entangle` | ✓ Active | Includes git co-change signal, best all-round |
+| `progressive_verify` | `quale core verify-progressive` | ✓ Active | Multi-step verification |
+| `diff_edit-context` | `quale core diff-context` | ✓ Active | For PR/diff workflows, 100% accuracy |
+| `candidate_baseline` | N/A | Baseline only | No-quale control condition |
+| `route_policy` | N/A | Internal | Routing logic, not user-facing |
+| `ask` | N/A | ✗ Killed | 0% accuracy, worse than baseline |
+| `negotiate_simple` | N/A | Experimental | Not yet exposed as CLI command |
+| `contract` | N/A | Experimental | Needs more harness trials |
+
+**Recommended commands for users:**
+- **LLM agents**: Use `quale ec` (edit context) before every edit
+- **Weak models**: Use `quale core verify-scope` for highest accuracy (83%)
+- **PR reviews**: Use `quale core diff-context` for diff-aware context (100% accuracy)
+- **General use**: Use `quale core verify-entangle` for best all-round performance
 
 Decision rules:
 - keep `edit-context --format tool` as primary LLM surface: 75% accuracy, 0 extra edits

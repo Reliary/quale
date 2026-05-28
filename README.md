@@ -7,6 +7,50 @@
 
 Structural code analysis for LLMs, humans, and CI — no parsers, zero config.
 
+## Installation
+
+```bash
+pip install quale
+```
+
+**Requirements**: Python 3.9+, Git (for diff-based commands)
+
+**Optional**: Configure MCP server for agent integration (see [docs/MCP_SETUP.md](docs/MCP_SETUP.md))
+
+## Getting Started
+
+First time using Quale? Follow this path:
+
+1. **Orient yourself** in any repo:
+   ```bash
+   cd your-repo
+   quale o
+   ```
+   Returns: language breakdown, module map, landmark files, recommended workflow.
+
+2. **Review code quality** before making changes:
+   ```bash
+   quale review
+   ```
+   Returns: structural risks, test gaps, hub-risk files, action items.
+
+3. **Get edit context** before modifying a file:
+   ```bash
+   quale ec --files src/auth.ts
+   ```
+   Returns: risk level, verification candidates (test files), scope guard.
+   The `verification_mc.candidates` field tells you which tests to run.
+
+4. **Verify after editing**:
+   ```bash
+   quale vp --files src/auth.ts
+   ```
+   Returns: verification candidates with co-change signal.
+
+**For LLM agents**: Use the short aliases (`quale ec`, `quale vp`, `quale o`) or configure the MCP server for typed function calls. See the [LLM Agent](#llm-agent) section below.
+
+**For CI pipelines**: Use `quale ci check` to enforce structural gates. See [docs/CI_INTEGRATION.md](docs/CI_INTEGRATION.md).
+
 ## Quickstart
 
 ```bash
@@ -110,45 +154,48 @@ design target (measured 75% accuracy, 0.0 extra edits):
 
 ### LLM agent
 
-Add **two lines** to your agent's MCP config, or drop the skill file into
-OpenCode — no prompt engineering, no hand-holding:
+Quale provides structural context that helps agents make better decisions about which files to edit and which tests to run.
 
-```
-# MCP: add to opencode.json or claude_desktop_config.json
-# Skill: already installed at ~/.config/opencode/skills/quale/SKILL.md
-```
+**Quick setup** (choose one):
 
-Agent commands return structured JSON — no terminal output to parse. Short
-aliases keep shell commands concise:
-
-| Command | Alias | What it returns |
-|---------|-------|----------------|
-| `quale o` | 2 chars | Repo map: modules, landmarks, languages, recommended workflow |
-| `quale ec --files <file>` | 4 words | Edit context + `verification_mc` candidates (75% accuracy) |
-| `quale vp --files <file>` | 4 words | Verification packet with co-change signal (80% accuracy) |
-
-Two integration modes:
-
-1. **MCP server** (`quale --mcp`) — the 3 commands above as typed MCP tools.
-   Add to `~/.config/opencode/opencode.json`:
+1. **MCP Server** (recommended for agents with MCP support):
    ```json
-   {"quale": {"type": "local", "command": ["quale", "--mcp"]}}
+   // Add to your MCP config (claude_desktop_config.json, opencode.json, etc.)
+   {
+     "mcpServers": {
+       "quale": {
+         "command": "quale",
+         "args": ["--mcp"]
+       }
+     }
+   }
    ```
-   Works with any MCP agent: Claude Desktop, Claude Code, Cursor, VS Code.
-   See [docs/MCP_SETUP.md](docs/MCP_SETUP.md) for each config.
+   See [docs/MCP_SETUP.md](docs/MCP_SETUP.md) for detailed setup instructions.
 
-2. **Skill file** — auto-loaded by OpenCode. The agent calls `quale ec`
-   before every edit without manual prompting. Already installed at
-   `~/.config/opencode/skills/quale/SKILL.md`.
+2. **Skill file** (for OpenCode auto-invocation):
+   ```bash
+   cp SKILL.md ~/.config/opencode/skills/quale.md
+   ```
+   OpenCode will automatically invoke `quale ec` before edits.
 
-**Measured effect (1,100 trials, 12 repos, 6 model families):**
-baseline test-file accuracy 10-20%. With `quale ec`: 75% accuracy, zero
-extra edits.[^1]
+3. **Shell commands** (works everywhere):
+   ```bash
+   quale o                    # Orient: repo map + landmarks
+   quale ec --files <file>    # Edit context: risk + verification candidates
+   quale vp --files <file>    # Verify packet: co-change signal
+   ```
 
-[^1]: Full methodology at [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md).
-    Models tested: Qwen, Gemma, Nemotron, Mistral, Claude, local Gemma —
-    every model guessed the wrong test file without quale and found the
-    right one with it.
+**What agents get**:
+- `verification_mc.candidates`: Test files to run (75% accuracy, 0.0 extra edits)
+- `risk_level`: HIGH/MEDIUM/LOW based on hub-risk and blast radius
+- `stable_anchors`: Files that rarely change (touch with caution)
+- `scope_creep_guard`: Files outside the change scope
+
+**Measured results** (1,100 trials across 12 repos):
+- Baseline: 10-20% test accuracy, 0.40-0.65 extra edits
+- With Quale: 75% test accuracy, 0.0 extra edits
+
+See [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md) for full methodology.
 
 ### Human developer
 
