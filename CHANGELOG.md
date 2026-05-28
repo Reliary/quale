@@ -6,6 +6,10 @@
 - Refactored: extracted 14 analysis helpers from reports.py into
   reports/analysis.py (backward compatible)
 - Added 4 backward compatibility tests (359 total, 0 failing)
+- Added 5 unified commands: `risk`, `verify`, `health`, `audit`, `temporal`
+  (consolidate 15 old commands with mode flags)
+- Fixed escape-velocity jargon labels (ESCAPED/BOUND/DEEP → External/Contained/Internal)
+- Fixed `provide --file` bare error messages with example syntax
 - Dogfood findings logged to /tmp/quale-bug-log.md
 - Added .quale/ to .gitignore
 

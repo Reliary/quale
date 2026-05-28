@@ -62,7 +62,7 @@ The harness tested several conditions. Here's how they map to current CLI comman
 | Harness condition | CLI command | Status | Notes |
 |-------------------|-------------|--------|-------|
 | `edit-context --format tool` | `quale ec` or `quale core edit-context --format tool` | ✓ Active | Primary LLM surface, 75% accuracy |
-| `verify_scope` | `quale core verify-scope` | ✓ Active | Verification-only, 83% accuracy on weak models |
+| `verify_scope` | `quale core verify-scope` or `quale verify --mode scope` | ✓ Active | Verification-only, 83% accuracy on weak models |
 | `verify_entangle` | `quale vp` (verify-packet has `entangled_candidates`) | ✓ Via JSON field | Closest match includes co-change signal |
 | `progressive_verify` | `quale core veto-cascade` | ✓ Via veto-cascade | Closest match: multi-step deterministic → oscillatory → manual |
 | `diff_edit-context` | `quale ec --diff <ref>` | ✓ Via --diff flag | Same engine, use --diff instead of --files |

@@ -58,6 +58,6 @@ jobs:
 ## Notes
 
 - Structural scan takes ~1-3 seconds on first run; cached afterward.
-- Add `.quale-cache/` to your `.gitignore`.
+- Add `.quale/` to your `.gitignore`.
 - `ci-trend` reads `.quale/ci-history.jsonl` which accumulates across runs.
   This file is local-only and should not be committed.

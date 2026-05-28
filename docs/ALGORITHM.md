@@ -114,7 +114,7 @@ The matrix and derived metrics are rendered according to the persona:
 |---------|--------|---------|
 | Human developer | Colored terminal output | `quale review` shows per-file risks with icons and explanations |
 | CI pipeline | Exit codes + PR comment | `quale ci check` exits 0-7, `quale ci comment` posts markdown |
-| LLM agent | Structured JSON | `quale agent edit` returns 21-key contract with `verification_mc` |
+| LLM agent | Structured JSON | `quale ec` returns 21-key contract with `verification_mc` |
 
 All three output formats derive from the same matrix — there is no separate
 analysis path for different consumers.

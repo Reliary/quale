@@ -12,6 +12,20 @@ All commands are available in three forms:
 
 See [COMMANDS.md](COMMANDS.md) for detailed usage.
 
+## Unified commands (recommended)
+
+These replace multiple old commands with single, mode-switched interfaces.
+
+| Command | Replaces | Description |
+|---------|----------|-------------|
+| `quale risk` | `hub-risk`, `capillary`, `vulnerability-map`, `traffic-control` | Surface risky files: hub, capillary, and their intersection. Modes: `--mode full` (default), `hub`, `capillary` |
+| `quale verify` | `verify-packet`, `verify-scope`, `verify-classify`, `verify-bonds`, `verify-drift`, `guard` | Verification pipeline. Modes: `--mode full` (default), `mc`, `scope`, `packet` |
+| `quale health` | `health-score`, `drift-check`, `parity-bit` | Structural health dashboard. Modes: `--mode dashboard` (default), `score` |
+| `quale audit` | `ci-report`, `pr-report`, `check-diff`, `check-pr` | Review a diff: structural, CI, and PR reports in one command |
+| `quale temporal` | `decay`, `vocabulary-trend`, `origins` | Temporal analysis: decay, vocabulary trends, and phrase lifecycles |
+
+## All commands
+
 | Command | Panel | Description |
 |---------|-------|-------------|
 | `help-agent` | Getting Started | Recommend useful quale commands for an agent task. |
@@ -28,6 +42,11 @@ See [COMMANDS.md](COMMANDS.md) for detailed usage.
 | `verify-scope` | Agent Safety | Post-edit scope verification: compare actual diff against expected contract. |
 | `veto-cascade` | Agent Safety | Veto cascade pipeline — ~33 avg tokens per verification call. |
 | `zk-proof` | Agent Safety | Verify generated code identifiers against allowed set. |
+| `risk` | Code Analysis | Unified risk: hub + capillary + vulnerability intersection. |
+| `verify` | Verification | Unified verification: mc, scope, packet, full. |
+| `health` | CI | Unified health: dashboard + score. |
+| `audit` | CI | Unified diff review: CI + PR + structural. |
+| `temporal` | Maintenance | Unified temporal: decay + vocabulary trends. |
 | `co-change` | Verification | Show file co-change pairs from git history. |
 | `reverse-verify` | Verification | Given changed test files, find source files that need verification. |
 | `test-gaps` | Verification | Test gap map: source files with weak test mirrors. |
@@ -39,7 +58,6 @@ See [COMMANDS.md](COMMANDS.md) for detailed usage.
 | `ci-report` | CI | CI-ready structural report: blast radius + stable file check + flags. |
 | `drift-check` | CI | Structural anomaly velocity across directories. |
 | `forecast` | CI | Forecast regression risk from co-change shifts. |
-| `health` | CI | 0-1 health from stability, mirror, churn, concept age. |
 | `health-score` | CI | 2-axis health: coupling density x modularity. |
 | `parity-bit` | CI | SHA-1 of module phrase set. |
 | `pr-report` | CI | PR structural report in markdown. |
@@ -53,6 +71,7 @@ See [COMMANDS.md](COMMANDS.md) for detailed usage.
 | `porosity` | Code Analysis | Sparse coupling estimate without computing co-occurrence. |
 | `spectral-gap` | Code Analysis | Modularity score: largest cluster / second largest. |
 | `trap` | Code Analysis | Identifier overlap between two concurrently-edited files. |
+| `vulnerability-map` | Code Analysis | Overlap of hub-risk and capillary. |
 | `anomalies` | Maintenance | Detect structural anomalies and outliers in vocabulary. |
 | `cleanup-list` | Maintenance | Prioritized cleanup: extinct-exports x escape-velocity. |
 | `concept-flow` | Maintenance | Track phrase spread across weekly snapshots. |
@@ -60,7 +79,7 @@ See [COMMANDS.md](COMMANDS.md) for detailed usage.
 | `deflate` | Maintenance | Cap net-new identifiers per edit. |
 | `diff-structural` | Maintenance | Structural fingerprint diff between two git refs. |
 | `entropy` | Maintenance | Dir-level vocabulary fragmentation vs 30-commit baseline. |
-| `escape-velocity` | Maintenance | Phrase removal difficulty: ESCAPED / BOUND / DEEP. |
+| `escape-velocity` | Maintenance | Phrase removal difficulty: External / Contained / Internal. |
 | `extinct-exports` | Maintenance | Multi-file exports never imported externally. |
 | `heisenberg` | Maintenance | Mixed refactor/feature edits that must be split. |
 | `migration-pairs` | Maintenance | Deterministic phrase substitution from two-repo comparison. |
@@ -69,7 +88,6 @@ See [COMMANDS.md](COMMANDS.md) for detailed usage.
 | `solve` | Maintenance | Surface cipher keys: non-dictionary identifiers to learn a repo. |
 | `traffic-control` | Maintenance | Zone files by graph centrality percentile. |
 | `vocabulary-trend` | Maintenance | Entropy velocity: is vocabulary diversity accelerating or decelerating?. |
-| `vulnerability-map` | Maintenance | Overlap of hub-risk and capillary. |
 | `coupling` | Cross-Repo | Concept coupling classification: tightly bound, loosely bound, independent. |
 | `agent-bootstrap` | Utilities | One-shot agent bootstrap: explore + modules + stability + related files. |
 | `fingerprint` | Utilities | Structural fingerprint of a file or entire repo. |
