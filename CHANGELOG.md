@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.5 — 2026-05-28
+
+- Fixed MCP server initialization handshake error
+- Updated repository description to match README tagline
+- Documentation: removed em-dashes, fixed duplicate section headers
+
 ## 0.9.4 — 2026-05-28
 
 - MCP server: `quale --mcp` exposes `edit_context`, `verify_packet`, `orient`

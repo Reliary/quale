@@ -3,6 +3,17 @@
 Quale exposes its 3 harness-proven commands as MCP tools — typed functions
 any MCP-compatible agent can call directly, no shell overhead.
 
+## When to use MCP vs shell vs skill
+
+| Method | Best for | Tradeoffs |
+|--------|----------|-----------|
+| **MCP server** | Agents with MCP support | Typed function calls, no shell parsing, lower token overhead |
+| **Shell commands** | Agents without MCP, or when you want explicit control | Works everywhere, but requires parsing JSON output |
+| **Skill file** | OpenCode users who want automatic invocation | Auto-loaded, but requires agent to remember to call |
+
+All three methods call the same underlying engine. The 75% accuracy and 0.0 extra edits
+metrics apply to all three.
+
 ## How it works
 
 Run `quale --mcp` to start the MCP server. It reads JSON-RPC requests from

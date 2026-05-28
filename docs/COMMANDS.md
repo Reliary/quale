@@ -1,5 +1,16 @@
 # Command Reference
 
+## Command variants
+
+Quale commands are available in three forms:
+
+1. **Short aliases** (recommended for agents): `quale ec`, `quale vp`, `quale o`
+2. **Namespace commands**: `quale core edit-context`, `quale agent orient`
+3. **MCP tools**: `edit_context`, `verify_packet`, `orient` (when using MCP server)
+
+All three forms call the same underlying engine. Short aliases are optimized for
+agent workflows where token efficiency matters.
+
 ## 🧑‍💻 Human Developer (Top-Level)
 
 The top-level commands are optimized for low-friction, actionable insights for developers working in the terminal.
@@ -14,15 +25,38 @@ quale search SpoolManager             # Find files containing a phrase or concep
 quale diff HEAD~1 HEAD                # Compare vocabulary between two git refs
 ```
 
-## 🤖 LLM Agent (`quale agent`)
+## 🤖 LLM Agent
 
-Agent commands are tucked away in the `agent` namespace and implicitly return tightly packed JSON or IR DSL. Agents no longer need to remember `--format json` flags.
+Agent commands are available as short aliases (recommended) or full namespace commands.
+They return tightly packed JSON. Agents don't need to remember `--format json` flags.
+
+### Short aliases (recommended)
 
 ```bash
-quale agent edit src/spool.ts         # File-scoped edit context and risk card
-quale agent guard src/spool.ts        # Combined safety packet: guide + hub-risk + complexity + criticality
-quale agent orient                    # One-call orientation: solve + triangulate + isolate + repo-map
+quale ec src/spool.ts                 # Edit context: verification candidates, risk, scope guard
+quale vp src/spool.ts                 # Verify packet: compressed verification scope
+quale o                               # Orient: landmarks, modules, languages
 ```
+
+### Namespace commands (alternative)
+
+```bash
+quale agent edit src/spool.ts         # Same as `quale ec`
+quale agent guard src/spool.ts        # Combined safety packet: guide + hub-risk + complexity + criticality
+quale agent orient                    # Same as `quale o`
+```
+
+### MCP tools (when using MCP server)
+
+When the MCP server is configured, agents can call these as tools:
+
+```
+edit_context(file="src/spool.ts")     # Same as `quale ec`
+verify_packet(file="src/spool.ts")    # Same as `quale vp`
+orient()                              # Same as `quale o`
+```
+
+See [MCP_SETUP.md](MCP_SETUP.md) for configuration instructions.
 
 ## 🚦 CI Maintainer (`quale ci`)
 

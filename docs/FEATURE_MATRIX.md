@@ -1,6 +1,16 @@
 # quale — Feature-Persona Matrix
 
-Auto-generated. Add `(v)` for value, `(s)` for signal-only, `(g)` for gate.
+This matrix shows which commands are available in each persona and their primary use case.
+Add `(v)` for value, `(s)` for signal-only, `(g)` for gate.
+
+## Command variants
+
+All commands are available in three forms:
+- **Short aliases**: `quale ec`, `quale vp`, `quale o` (recommended for agents)
+- **Namespace commands**: `quale core edit-context`, `quale agent orient`
+- **MCP tools**: `edit_context`, `verify_packet`, `orient` (when using MCP server)
+
+See [COMMANDS.md](COMMANDS.md) for detailed usage.
 
 | Command | Panel | Description |
 |---------|-------|-------------|

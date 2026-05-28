@@ -19,7 +19,7 @@ jobs:
         run: quale review
       - name: CI gates
         run: |
-          quale ci-report origin/${{ github.base_ref }} HEAD \
+          quale ci check origin/${{ github.base_ref }} HEAD \
             --fail-on-blast-tier high \
             --fail-on-mirror-gap 0.50 \
             --fail-on-stable-touched \
@@ -28,8 +28,7 @@ jobs:
             --fail-on-new-identifiers 30
       - name: PR report
         run: |
-          quale pr-report origin/${{ github.base_ref }} HEAD \
-            --post-comment
+          quale ci comment origin/${{ github.base_ref }} HEAD
 ```
 
 ## Exit Codes
@@ -50,11 +49,11 @@ jobs:
 | What | Command |
 |------|---------|
 | Pre-PR check | `quale review` |
-| CI gate | `quale ci-report origin/main HEAD --fail-on-blast-tier high` |
-| Trend tracking | `quale ci-trend --path .` |
-| PR comment | `quale pr-report origin/main HEAD --post-comment` |
-| Onboarding | `quale onboard --path .` |
-| Refactor estimate | `quale refactor-cost src/file.ts` |
+| CI gate | `quale ci check origin/main HEAD --fail-on-blast-tier high` |
+| Trend tracking | `quale ci trend` |
+| PR comment | `quale ci comment origin/main HEAD` |
+| Onboarding | `quale onboard` |
+| Refactor estimate | `quale refactor-cost <file>` |
 
 ## Notes
 
