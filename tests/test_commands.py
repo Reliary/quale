@@ -92,9 +92,12 @@ class TestCommandCoverage(unittest.TestCase):
         tmp, repo = self._make_repo()
         result = self.run_quale("inspect", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
-        for key in ("schema_version", "explore", "modules", "binding_concepts", "timeline", "avg_concept_age_weeks"):
-            self.assertIn(key, data)
         self.assertEqual(data["schema_version"], 1)
+        self.assertIsInstance(data.get("explore"), dict)
+        self.assertIsInstance(data.get("timeline"), (list, dict))
+        self.assertIsNotNone(data.get("binding_concepts"))
+        self.assertIsInstance(data.get("avg_concept_age_weeks"), (int, float))
+        self.assertGreaterEqual(data["avg_concept_age_weeks"], 0)
 
     def test_inspect_bare_repo(self):
         tmp = tempfile.TemporaryDirectory()
@@ -123,8 +126,9 @@ class TestCommandCoverage(unittest.TestCase):
         self.assertEqual(data["guardrails"]["mode"], "report_only")
         self.assertTrue(data["guardrails"]["manual_review_required"])
         self.assertIn("May be wrong", data["guardrails"]["caveat"])
-        self.assertIn("verification_candidates", data)
-        self.assertIn("expansion_risk", data)
+        self.assertIsInstance(data.get("verification_candidates"), list)
+        self.assertIsInstance(data.get("expansion_risk"), list)
+        self.assertIsInstance(data.get("privacy_receipt"), dict)
         self.assertFalse(data["privacy_receipt"]["uploaded"])
         self.assertFalse(data["privacy_receipt"]["network"])
 
@@ -150,9 +154,12 @@ class TestCommandCoverage(unittest.TestCase):
         result = self.run_quale("core", "edit-context", "--path", str(repo), "--files", "src/core.ts")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
-        self.assertIn("verification_mc", data)
-        self.assertIn("guardrails", data)
-        self.assertIn("read_first", data)
+        mc = data.get("verification_mc", {})
+        self.assertIsInstance(mc.get("candidates"), list)
+        self.assertGreater(len(mc.get("question", "")), 5)
+        self.assertIsInstance(data.get("guardrails"), dict)
+        self.assertEqual(data["guardrails"]["mode"], "report_only")
+        self.assertIsInstance(data.get("expansion_risk"), list)
 
     def test_preflight_compact_shows_advisory_labels(self):
         tmp, repo = self._make_repo()
@@ -201,8 +208,8 @@ class TestCommandCoverage(unittest.TestCase):
         result = self.run_quale("core", "verify", "--path", str(repo), "--files", "src/core.ts", "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
-        self.assertIn("verification_candidates", data)
-        self.assertIn("guardrails", data)
+        self.assertIsInstance(data.get("verification_candidates"), list)
+        self.assertIsInstance(data.get("guardrails"), dict)
         self.assertEqual(data["guardrails"]["mode"], "report_only")
 
     def test_verify_no_candidates(self):
@@ -216,18 +223,23 @@ class TestCommandCoverage(unittest.TestCase):
         result = self.run_quale("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
-        self.assertIn("verification_mc", data)
-        self.assertIn("question", data["verification_mc"])
-        self.assertIn("candidates", data["verification_mc"])
-        self.assertIn("expansion_risk", data)
-        self.assertIn("read_first", data)
+        mc = data.get("verification_mc", {})
+        self.assertIsNotNone(mc.get("question"))
+        self.assertIsInstance(mc.get("candidates"), list)
+        self.assertEqual(mc.get("max_selections"), 1)
+        self.assertIsInstance(data.get("expansion_risk"), list)
+        self.assertIsInstance(data.get("verification_confidence"), dict)
+        self.assertIn(data["verification_confidence"]["level"], {"low", "mixed", "high"})
 
     def test_preflight_tool_guardrails(self):
         tmp, repo = self._make_repo()
         result = self.run_quale("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
         data = json.loads(result.stdout)
-        self.assertIn("guardrails", data)
-        self.assertEqual(data["guardrails"]["mode"], "report_only")
+        g = data.get("guardrails", {})
+        self.assertIsInstance(g, dict)
+        self.assertEqual(g.get("mode"), "report_only")
+        self.assertIsInstance(g.get("manual_review_required"), bool)
+        self.assertIsInstance(g.get("not_semantic_truth"), bool)
 
     def test_preflight_tool_includes_confidence_and_scope_creep_guard(self):
         tmp, repo = self._make_repo()
