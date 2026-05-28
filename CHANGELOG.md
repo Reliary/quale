@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.6 — 2026-05-28
+
+- Fixed 22 failing tests (positional path args → --path flag)
+- Refactored: extracted 14 analysis helpers from reports.py into
+  reports/analysis.py (backward compatible)
+- Added 4 backward compatibility tests (359 total, 0 failing)
+- Dogfood findings logged to /tmp/quale-bug-log.md
+- Added .quale/ to .gitignore
+
 ## 0.9.5 — 2026-05-28
 
 - Fixed MCP server initialization handshake error
