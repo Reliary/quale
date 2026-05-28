@@ -10,24 +10,73 @@ cd quale
 pip install -e ".[dev]"
 ```
 
+## Merge strategy
+
+Master is branch-protected. All changes go through feature branches + PRs.
+
+### Branch naming
+
+| Prefix | Purpose | Example |
+|--------|---------|---------|
+| `fix/` | Bug fixes | `fix/crash-on-empty-repo` |
+| `feature/` | New features | `feature/mcp-server` |
+| `docs/` | Documentation | `docs/readme-polish` |
+| `chore/` | CI, config, tooling | `chore/update-deps` |
+
+### Workflow
+
+1. Branch off `master`: `git checkout -b fix/my-bug`
+2. Make changes, commit with descriptive messages
+3. Push: `git push -u origin fix/my-bug`
+4. Open a PR against `master` via `gh pr create` or GitHub UI
+5. CI checks (`test`, `guardrails`, `lint`, `security`) must pass
+6. Merge via **squash** — one clean commit per PR
+
+### Updating snapshots
+
+If your change intentionally alters output, update golden files before merging:
+
+```bash
+UPDATE_SNAPSHOTS=1 python -m pytest tests/test_snapshots.py -v
+git add tests/snapshots/
+```
+
+### Stale branches
+
+After merging, clean up:
+
+```bash
+git branch -d fix/my-bug
+git push origin --delete fix/my-bug
+```
+
 ## Running tests
 
 ```bash
 # Full suite
 python -m pytest tests/ -v
 
-# Specific test files
-python -m pytest tests/test_cli_smoke.py -v
-python -m pytest tests/test_output_contracts.py -v
+# By layer
+python -m pytest tests/test_cli_smoke.py -v         # Smoke (all commands exit 0)
+python -m pytest tests/test_output_contracts.py -v    # Output quality contracts
+python -m pytest tests/test_commands.py -v            # CLI integration
+python -m pytest tests/test_reports.py -v             # Unit tests
+python -m pytest tests/test_snapshots.py -v            # Snapshot regression
+python -m pytest tests/test_state.py -v                # State transition
+python -m pytest tests/test_structure.py -v            # Structural guardrails
+
+# Update snapshots when output intentionally changes
+UPDATE_SNAPSHOTS=1 python -m pytest tests/test_snapshots.py -v
 ```
 
-Our CI runs these classes of tests:
+## CI gate matrix
 
-| Layer | File | What it checks |
-|-------|------|---------------|
-| 1 | `test_cli_smoke.py` | Every command exits 0 and produces non-empty output |
-| 2 | `test_output_contracts.py` | Output is useful, not just technical jargon |
-| 5 | `test_schema_validation.py` | Agent JSON output matches schema |
+| Job | Files | Required for merge | What it catches |
+|-----|-------|--------------------|-----------------|
+| `test` | Core + install + reports | ✓ | Regression bugs |
+| `guardrails` | Smoke, contracts, snapshots, state, structure, dogfood | ✓ | Crashes, UX regressions, drift |
+| `lint` | `ruff check quale/` | ✓ | Code style violations |
+| `security` | bandit, semgrep, pip-audit, mypy | ✓ | Vulnerabilities, type errors |
 
 ## Code style
 
@@ -35,15 +84,6 @@ Our CI runs these classes of tests:
 - Run `mypy quale/ --ignore-missing-imports` for type checking
 - Run `codespell` for typos
 - All tests must pass before merging
-
-## Pull request process
-
-1. Create a feature branch off `master`
-2. Make your changes
-3. Run tests: `python -m pytest tests/ -q`
-4. Run lint: `ruff check quale/`
-5. Update `CHANGELOG.md`
-6. Open a PR with a clear description
 
 ## Reporting issues
 

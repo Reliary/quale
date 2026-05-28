@@ -4,7 +4,7 @@
 set -euo pipefail
 
 STAGED_CLI=$(git diff --cached --name-only | grep -c "quale/cli\.py" || true)
-STAGED_REPORTS=$(git diff --cached --name-only | grep -c "quale/reports\.py" || true)
+STAGED_REPORTS=$(git diff --cached --name-only | grep -c "quale/reports/.*\.py" || true)
 STAGED_TESTS=$(git diff --cached --name-only | grep -c "tests/" || true)
 
 if [ "$STAGED_CLI" -eq 0 ] && [ "$STAGED_REPORTS" -eq 0 ] && [ "$STAGED_TESTS" -eq 0 ]; then
