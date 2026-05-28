@@ -265,9 +265,8 @@ class TestExtinctExportsContract(OutputContractTest):
 
     def test_extinct_exports_no_wrong_namespace_hint(self):
         r = self.run_cli("core", "extinct-exports", "--path", str(PROJECT_ROOT))
-        # Old bug: "Next: quale cleanup-list" (wrong — commands need "core" prefix)
-        # Check that hints include "core" namespace
-        self.assertIn("core ", r.stdout)
+        # Hints should reference sibling commands without redundant "quale core" prefix
+        self.assertIn("cleanup-list", r.stdout)
 
     def test_extinct_exports_has_explanation(self):
         r = self.run_cli("core", "extinct-exports", "--path", str(PROJECT_ROOT))

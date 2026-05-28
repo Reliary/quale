@@ -1356,7 +1356,7 @@ def drift_check_cmd(
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file:
-        typer.echo("provide --file", err=True)
+        typer.echo("provide --file <path> (e.g. --file src/billing.ts)", err=True)
         raise typer.Exit(1)
     data = drift_velocity_snapshot(path=path_abs, files=[file], snapshot=snapshot)
     if "error" in data:
@@ -1891,7 +1891,7 @@ def guide_cmd(
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file:
-        typer.echo("provide --file", err=True)
+        typer.echo("provide --file <path> (e.g. --file src/main.go)", err=True)
         raise typer.Exit(1)
     data = guide_report(path=p, file_path=file)
     if "error" in data:
@@ -1917,7 +1917,7 @@ def decay_cmd(path=".", file="", weeks=12, half_life=30,
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file:
-        typer.echo("provide --file", err=True)
+        typer.echo("provide --file <path> (e.g. --file src/main.go)", err=True)
         raise typer.Exit(1)
     data = decay_report(path=p, file_path=file, lookback_weeks=weeks, half_life_days=half_life, active_metabolism=metabolism)
     if "error" in data:
@@ -1993,7 +1993,7 @@ def zk_proof_cmd(
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file or not code:
-        typer.echo("provide --file and --code", err=True)
+        typer.echo("provide --file <path> and --code <string>", err=True)
         raise typer.Exit(1)
     data = zk_proof_report(path=path_abs, schema_file=file, generated_code=code)
     if "error" in data:
@@ -2033,7 +2033,7 @@ def lagrange_cmd(
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file:
-        typer.echo("provide --file", err=True)
+        typer.echo("provide --file <path> (e.g. --file src/main.go)", err=True)
         raise typer.Exit(1)
     data = lagrange_report(path=path_abs, file_path=file)
     if "error" in data:
@@ -4421,14 +4421,19 @@ def escape_velocity_cmd(
     tagged = data.get("tagged", [])
     typer.echo("Identifier reach across the repo:")
     for t in tagged[:8]:
-        note = ""
         if t["label"] == "ESCAPED":
+            label = "External"
             note = " \u2014 appears outside origin module, hard to rename/remove"
         elif t["label"] == "BOUND":
+            label = "Contained"
             note = " \u2014 mostly contained, moderate removal difficulty"
         elif t["label"] == "DEEP":
+            label = "Internal"
             note = " \u2014 internal only, safe to rename locally"
-        typer.echo(f'  {t["label"]:<8} {t["phrase"]}{note}')
+        else:
+            label = t["label"]
+            note = ""
+        typer.echo(f'  {label:<9} {t["phrase"]}{note}')
 @core_app.command(name="trap", rich_help_panel="Code Analysis")
 def trap_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
@@ -4444,7 +4449,7 @@ def trap_cmd(
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file_a or not file_b:
-        typer.echo("provide --file-a and --file-b", err=True)
+        typer.echo("provide --file-a <path> and --file-b <path>", err=True)
         raise typer.Exit(1)
     data = trap_report(path=p, file_a=file_a, file_b=file_b)
     if "error" in data:
@@ -4503,7 +4508,7 @@ def trompe_cmd(
         typer.echo("Not a git repository.", err=True)
         raise typer.Exit(1)
     if not file:
-        typer.echo("provide --file", err=True)
+        typer.echo("provide --file <path> (e.g. --file src/main.go)", err=True)
         raise typer.Exit(1)
     data = trompe_report(path=p, file_path=file)
     if "error" in data:
@@ -4568,7 +4573,7 @@ def thylacine_cmd(
     for t in thy[:5]:
         typer.echo(f'  {ICON_PRIMARY} {t["identifier"]} (defined in {t["files"]} files)')
     if thy:
-        typer.echo('  Next: quale core cleanup-list | quale core escape-velocity')
+        typer.echo('  Next: cleanup-list | escape-velocity')
 
 @core_app.command(name="coupling-chain", rich_help_panel="Code Analysis")
 def tensegrity_cmd(
@@ -4729,8 +4734,8 @@ def cleanup_list_cmd(
     typer.echo(f'{len(items)} candidates for cleanup:')
     for i in items[:5]:
         label = i.get("effort", "?")
-        note = " (appears outside origin module)" if label == "ESCAPED" else (" (mostly contained)" if label == "BOUND" else "")
-        typer.echo(f'  {ICON_PRIMARY} {i["identifier"]}: {label}{note} \u2014 {i["files"]} files')
+        note = "appears outside origin module" if label == "ESCAPED" else ("mostly contained" if label == "BOUND" else "")
+        typer.echo(f'  {ICON_PRIMARY} {i["identifier"]}: {note} \u2014 {i["files"]} files')
 
 @core_app.command(name="vulnerability-map", rich_help_panel="Maintenance")
 def vulnerability_map_cmd(
