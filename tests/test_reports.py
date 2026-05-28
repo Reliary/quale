@@ -20,7 +20,7 @@ from quale.reports import (
     _patterns_confidence,
 )
 from quale.bootstrap import _task_file_role, _task_role_rank
-from quale.scanner import FileVocab, _structural_information_score, _is_actionable_identifier
+from quale.scanner import FileVocab, _structural_information_score, _is_actionable_identifier, _SCAN_CACHE
 from quale.reports import (
     _check_hub_risk, _check_clone_flag,
 )
@@ -479,3 +479,114 @@ class TestBackwardCompatibility(unittest.TestCase):
         self.assertTrue(callable(_same_package_prefix))
         self.assertTrue(callable(_deterministic_verify))
         self.assertTrue(callable(_co_located_tests))
+
+
+class TestCoChangeReport(unittest.TestCase):
+    """Tests for PMI-enabled co-change and incomplete-change detection."""
+
+    def setUp(self):
+        _SCAN_CACHE.clear()
+
+    def test_co_change_report_returns_predictions(self):
+        from quale.reports import co_change_report
+        data = co_change_report(".")
+        self.assertNotIn("error", data, msg=data.get("error", ""))
+        self.assertIn("files_with_predictions", data)
+        self.assertIsInstance(data.get("files"), list)
+
+    def test_co_change_report_json_output(self):
+        from quale.reports import co_change_report
+        data = co_change_report(".", top_n=5)
+        self.assertIn("schema_version", data)
+        self.assertIn("files", data)
+        self.assertIn("total_files", data)
+
+    def test_co_change_report_invalid_path(self):
+        from quale.reports import co_change_report
+        data = co_change_report("/nonexistent/path")
+        self.assertIn("error", data)
+
+    def test_anomaly_report_returns_anomalies(self):
+        from quale.reports import anomaly_report
+        data = anomaly_report(".")
+        self.assertNotIn("error", data, msg=data.get("error", ""))
+        self.assertIn("anomalies", data)
+        self.assertIn("statistics", data)
+
+    def test_anomaly_report_statistics(self):
+        from quale.reports import anomaly_report
+        data = anomaly_report(".", top_n=5)
+        stats = data.get("statistics", {})
+        if stats:
+            self.assertIn("mean_pmi", stats)
+            self.assertIn("max_pmi", stats)
+            self.assertGreaterEqual(stats.get("max_pmi", 0), stats.get("min_pmi", 0))
+
+    def test_anomaly_report_invalid_path(self):
+        from quale.reports import anomaly_report
+        data = anomaly_report("/nonexistent/path")
+        self.assertIn("error", data)
+
+    def test_incomplete_change_report_detects_missing_files(self):
+        from quale.reports import incomplete_change_report, _normalize_preflight_files
+        # Run on propio repo — should produce at least a valid response
+        data = incomplete_change_report(".", changed_files=["quale/cli.py"])
+        self.assertNotIn("error", data, msg=data.get("error", ""))
+        self.assertIn("missing_files", data)
+        self.assertIn("total_missing", data)
+        self.assertIsInstance(data.get("missing_files"), list)
+
+    def test_incomplete_change_report_requires_args(self):
+        from quale.reports import incomplete_change_report
+        data = incomplete_change_report(".")
+        self.assertIn("error", data)
+
+    def test_incomplete_change_report_invalid_path(self):
+        from quale.reports import incomplete_change_report
+        data = incomplete_change_report("/nonexistent/path", changed_files=["a.ts"])
+        self.assertIn("error", data)
+
+    def test_incomplete_change_report_no_changes(self):
+        from quale.reports import incomplete_change_report
+        data = incomplete_change_report(".", changed_files=[])
+        self.assertIn("error", data)
+
+
+class TestPmiMatrix(unittest.TestCase):
+    """Tests for PMI methods on CoOccurrenceMatrix."""
+
+    def setUp(self):
+        from quale.analyze import CoOccurrenceMatrix
+        self.m = CoOccurrenceMatrix()
+        self.m.add_file({"Foo", "Bar", "Baz"})
+        self.m.add_file({"Foo", "Bar"})
+        self.m.add_file({"Bar", "Baz"})
+        self.m.add_file({"Quux", "Baz"})
+
+    def test_pmi_symmetric(self):
+        pmi_ab = self.m.pmi("Foo", "Bar")
+        pmi_ba = self.m.pmi("Bar", "Foo")
+        self.assertAlmostEqual(pmi_ab, pmi_ba)
+
+    def test_pmi_zero_for_no_cooccurrence(self):
+        pmi = self.m.pmi("Foo", "Quux")
+        self.assertEqual(pmi, 0.0)
+
+    def test_pmi_zero_for_identical(self):
+        pmi = self.m.pmi("Foo", "Foo")
+        self.assertEqual(pmi, 0.0)
+
+    def test_pmi_positive_for_cooccurring(self):
+        pmi = self.m.pmi("Foo", "Bar")
+        self.assertGreater(pmi, 0.0)
+
+    def test_top_pmi_for_returns_partners(self):
+        results = self.m.top_pmi_for("Foo", limit=3)
+        self.assertGreaterEqual(len(results), 1)
+        for phrase, score in results:
+            self.assertIsInstance(phrase, str)
+            self.assertIsInstance(score, float)
+
+    def test_top_pmi_for_empty_returns_empty(self):
+        results = self.m.top_pmi_for("NonexistentPhrase", limit=3)
+        self.assertEqual(results, [])

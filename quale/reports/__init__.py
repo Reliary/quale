@@ -8028,3 +8028,299 @@ def criticality_report(path: str = ".", file_path: str = "") -> dict:
         k = round(len(two) / oc, 2)
         scores.append({"file": t, "k": k, "one_hop": len(one), "two_hop": len(two), "class": "supercritical" if k > 1.5 else ("critical" if k > 0.5 else "subcritical")})
     return {"scores": scores}
+
+
+# ── Co-Change Prediction (PMI × git) ──────────────────────────────
+
+def co_change_report(
+    path: str = ".",
+    files: list[str] | None = None,
+    top_n: int = 10,
+    min_pmi: float = 0.5,
+) -> dict:
+    """Predict which files co-change based on PMI × historical co-change.
+
+    Two files are structurally coupled when they share identifiers that have
+    high PMI (co-occur more than expected by chance). This fuses structural
+    coupling (PMI) with historical git co-change frequency.
+    """
+    from quale.scanner import scan_codebase
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30, deep=True)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    co_matrix = analysis.co_occurrence
+    if not co_matrix or not co_matrix.pairs:
+        return {"error": "no co-occurrence data"}
+
+    matrix = entanglement_matrix(path, lookback_commits=200)
+
+    # Build index: identifier -> list of files containing it
+    id_to_files: dict[str, set[str]] = {}
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    for fv in analysis.file_vocabs:
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                token = m.group()
+                id_to_files.setdefault(token, set()).add(fv.path)
+
+    # Build co-change lookup
+    co_change_by_pair: dict[tuple[str, str], dict] = {}
+    for p in matrix.get("pairs", []):
+        a, b = p["file_a"], p["file_b"]
+        co_change_by_pair[(a, b)] = p
+
+    target_files = files or [fv.path for fv in analysis.file_vocabs]
+    target_files = target_files[:top_n * 2]
+    results = []
+
+    for target in target_files:
+        # Get all identifiers in this file
+        target_ids = set()
+        for fv in analysis.file_vocabs:
+            if fv.path == target:
+                for phrase in fv.vocabulary:
+                    for m in token_re.finditer(phrase):
+                        target_ids.add(m.group())
+                break
+
+        if not target_ids:
+            continue
+
+        # For each target identifier, find high-PMI partners and map to files
+        partner_scores: dict[str, dict] = {}
+        for tid in target_ids:
+            for partner, pmi_val in co_matrix.top_pmi_for(tid, limit=10, min_freq=2):
+                if pmi_val < min_pmi:
+                    continue
+                # Find files that contain this partner identifier
+                for fpath in id_to_files.get(partner, set()):
+                    if fpath == target:
+                        continue
+                    entry = partner_scores.setdefault(fpath, {"pmi": 0.0, "best_pmi_tokens": []})
+                    if pmi_val > entry["pmi"]:
+                        entry["pmi"] = round(pmi_val, 2)
+                        entry["best_pmi_tokens"] = [tid, partner]
+                    entry["shared_ids"] = entry.get("shared_ids", [])
+                    if partner not in entry["shared_ids"]:
+                        entry["shared_ids"].append(partner)
+
+        # Fuse with git co-change
+        for partner in list(partner_scores.keys()):
+            pair = (target, partner) if target < partner else (partner, target)
+            cc = co_change_by_pair.get(pair, {})
+            cc_count = cc.get("co_change_count", 0)
+            cc_prob = cc.get("co_change_probability", 0.0)
+            last_seen = cc.get("last_seen", "")
+            entry = partner_scores[partner]
+            entry["co_change_count"] = cc_count
+            entry["co_change_prob"] = cc_prob
+            entry["last_seen"] = last_seen
+            entry["fused_score"] = round(entry["pmi"] * 0.3 + cc_prob * 0.7, 2)
+
+        # Filter and sort
+        scored = [{"file": p, **v} for p, v in partner_scores.items()
+                  if v.get("co_change_count", 0) > 0 or v.get("pmi", 0) >= min_pmi * 2]
+        scored.sort(key=lambda x: -x["fused_score"])
+
+        if scored:
+            results.append({
+                "file": target,
+                "co_changes": scored[:top_n],
+            })
+
+    results.sort(key=lambda r: len(r["co_changes"]), reverse=True)
+    return {
+        "schema_version": 1,
+        "path": path,
+        "total_files": len(target_files),
+        "files_with_predictions": len(results),
+        "files": results,
+        "guardrails": {
+            "mode": "report_only",
+            "caveat": "Predictions are structural hints, not proof of dependency.",
+        },
+    }
+
+
+# ── PMI Anomaly Detection ─────────────────────────────────────────
+
+def anomaly_report(path: str = ".", top_n: int = 10) -> dict:
+    """Find identifier pairs with unexpectedly high PMI — unusual coupling.
+
+    PMI = log2(P(a,b) / P(a)P(b)). High PMI means two identifiers co-occur
+    far more than their individual frequencies predict. These are structural
+    anomalies: unusual coupling, implicit contracts, or hidden dependencies.
+
+    Only pairs from code files (Go, Python, TypeScript, Rust, etc.) are
+    reported to avoid noise from documentation or config boilerplate.
+    """
+    from quale.scanner import scan_codebase
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+    try:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30, deep=True)
+    except Exception as e:
+        return {"error": f"scan failed: {e}"}
+
+    co_matrix = analysis.co_occurrence
+    if not co_matrix or not co_matrix.pairs:
+        return {"error": "no co-occurrence data; repo may have too few files"}
+
+    # Determine code-only identifiers
+    code_exts = frozenset({".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs",
+                           ".rb", ".java", ".kt", ".swift", ".c", ".cpp", ".h", ".hpp",
+                           ".cs", ".scala", ".zig", ".hs", ".ex", ".exs", ".clj", ".cljs"})
+    # Prose tokens that match the code-identifier regex but appear in docs/comments
+    _PROSE_TOKENS = frozenset({
+        "Getting", "Started", "Actions", "Onboarding", "Usage", "Example",
+        "Installation", "Configuration", "Overview", "Contributing", "License",
+        "Features", "Quickstart", "Reference", "Guide", "Tutorial",
+        "Description", "Details", "Information", "Notes", "Warning", "Warning",
+        "Changelog", "Readme", "Readme", "License", "Contributor",
+        "Documentation", "Setup", "Requirements", "Support", "Security",
+    })
+    code_ids: set[str] = set()
+    token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
+    for fv in analysis.file_vocabs:
+        ext = os.path.splitext(fv.path)[1].lower()
+        if ext not in code_exts:
+            continue
+        for phrase in fv.vocabulary:
+            for m in token_re.finditer(phrase):
+                token = m.group()
+                if token not in _PROSE_TOKENS:
+                    code_ids.add(token)
+
+    scored: list[dict] = []
+    min_freq = max(2, co_matrix.total_docs // 20)
+    for (a, b), count in co_matrix.pairs.items():
+        if a not in code_ids or b not in code_ids:
+            continue
+        count_a = co_matrix.phrase_count.get(a, 0)
+        count_b = co_matrix.phrase_count.get(b, 0)
+        if count_a < min_freq or count_b < min_freq:
+            continue
+        if a == b:
+            continue
+        pmi_val = co_matrix.pmi(a, b)
+        if pmi_val < 1.0:
+            continue
+        scored.append({
+            "a": a,
+            "b": b,
+            "pmi": round(pmi_val, 2),
+            "pair_count": count,
+            "p_a": round(count_a / co_matrix.total_docs, 3),
+            "p_b": round(count_b / co_matrix.total_docs, 3),
+        })
+
+    scored.sort(key=lambda x: -x["pmi"])
+    stats = {}
+    if scored:
+        scores = [s["pmi"] for s in scored]
+        stats = {
+            "mean_pmi": round(sum(scores) / len(scores), 2),
+            "max_pmi": max(scores),
+            "min_pmi": min(scores),
+            "total_pairs_scored": len(scored),
+        }
+
+    return {
+        "schema_version": 1,
+        "path": path,
+        "total_identifiers": len(co_matrix.phrase_count),
+        "total_files": co_matrix.total_docs,
+        "statistics": stats,
+        "anomalies": scored[:top_n],
+        "guardrails": {
+            "mode": "report_only",
+            "caveat": "Anomalies are statistical outliers, not proof of bugs.",
+        },
+    }
+
+
+# ── Incomplete Change Detection ───────────────────────────────────
+
+def incomplete_change_report(
+    path: str = ".",
+    changed_files: list[str] | None = None,
+    diff_ref: str | None = None,
+    threshold: float = 0.5,
+) -> dict:
+    """Detect if a change set is incomplete — files with high co-change
+    affinity that were NOT modified.
+
+    Given a diff or set of changed files, check each against PMI × git
+    co-change scores. Files with fused_score >= threshold that aren't in
+    the diff are flagged as potentially missing.
+    """
+    from quale.scanner import scan_codebase
+    if not vgit.is_repo(path):
+        return {"error": "Not a git repository."}
+    path = os.path.abspath(path)
+
+    if diff_ref:
+        try:
+            changed = vgit.diff_worktree(path, diff_ref)
+        except Exception as e:
+            return {"error": str(e)}
+    elif changed_files:
+        changed = _normalize_preflight_files(path, changed_files)
+    else:
+        return {"error": "provide --files or --diff"}
+
+    changed = list(dict.fromkeys(changed))
+    if not changed:
+        return {"schema_version": 1, "changed_files": [], "missing_files": [], "note": "no changed files"}
+
+    try:
+        co_data = co_change_report(path, files=changed, top_n=20)
+    except Exception as e:
+        return {"error": f"co-change scan failed: {e}"}
+
+    changed_set = set(changed)
+    missing: list[dict] = []
+
+    for entry in co_data.get("files", []):
+        target = entry.get("file", "")
+        for cc in entry.get("co_changes", []):
+            partner = cc.get("file", "")
+            if partner in changed_set:
+                continue
+            fused = cc.get("fused_score", 0.0)
+            if fused >= threshold:
+                missing.append({
+                    "file": partner,
+                    "changed_file": target,
+                    "fused_score": fused,
+                    "pmi": cc.get("pmi", 0.0),
+                    "co_change_prob": cc.get("co_change_prob", 0.0),
+                    "reason": f"co-changes with {target} (score={fused})",
+                })
+
+    missing.sort(key=lambda x: -x["fused_score"])
+    seen = set()
+    deduped = []
+    for m in missing:
+        if m["file"] not in seen:
+            seen.add(m["file"])
+            deduped.append(m)
+
+    return {
+        "schema_version": 1,
+        "path": path,
+        "changed_files": changed,
+        "total_missing": len(deduped),
+        "missing_files": deduped[:10],
+        "threshold": threshold,
+        "guardrails": {
+            "mode": "report_only",
+            "caveat": "Missing files are structural hints, not required additions.",
+        },
+    }

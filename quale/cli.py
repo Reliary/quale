@@ -5262,12 +5262,19 @@ def ci_trend_wrapper(
 @core_app.command(name="risk", rich_help_panel="Code Analysis")
 def risk_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    mode: Annotated[str, typer.Option("--mode", "-m", help="Mode: full, hub, capillary")] = "full",
+    mode: Annotated[str, typer.Option("--mode", "-m", help="Mode: full, hub, capillary, co-change, anomaly")] = "full",
     format: Annotated[str, typer.Option("--format", "-f", help="Output: human, json")] = "human",
     ci: Annotated[bool, typer.Option("--ci", help="CI gate mode")] = False,
+    top_n: Annotated[int, typer.Option("--top-n", help="Results limit")] = 10,
 ) -> None:
-    """Surface risky files — hub, capillary, and their intersection."""
-    from quale.reports import capillary_report, thanatosis_report, vulnerability_report
+    """Surface risky files — hub, capillary, co-change prediction, or anomaly detection."""
+    from quale.reports import (
+        anomaly_report,
+        capillary_report,
+        co_change_report,
+        thanatosis_report,
+        vulnerability_report,
+    )
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True)
@@ -5280,6 +5287,12 @@ def risk_cmd(
         data = capillary_report(path=p)
         dt, cr = [], []
         ch = [c["file"] for c in data.get("capillaries", [])]
+    elif mode == "co-change":
+        data = co_change_report(path=p, top_n=top_n)
+        dt, ch, cr = [], [], data.get("files", [])
+    elif mode == "anomaly":
+        data = anomaly_report(path=p, top_n=top_n)
+        dt, ch, cr = [], [], data.get("anomalies", [])
     else:
         data = vulnerability_report(path=p)
         dt = data.get("don_touch", [])
@@ -5290,6 +5303,9 @@ def risk_cmd(
         raise typer.Exit(1)
     result = {"critical_files": cr, "hub_files": dt, "capillary_files": ch}
     if format == "json":
+        if mode in ("co-change", "anomaly"):
+            typer.echo(json.dumps(data, indent=2))
+            return
         typer.echo(json.dumps(result, indent=2))
     if ci and cr:
         raise typer.Exit(1)
@@ -5297,6 +5313,45 @@ def risk_cmd(
         typer.echo(f"{ICON_CHECK} No critical files — CI gate passed")
     if format == "json":
         return
+    if mode == "co-change":
+        seen_files = set()
+        for entry in data.get("files", []):
+            target = entry.get("file", "")
+            first = True
+            for cc in entry.get("co_changes", []):
+                partner = cc.get("file", "")
+                if partner in seen_files:
+                    continue
+                seen_files.add(partner)
+                if first:
+                    typer.echo(f"{ICON_PRIMARY} Co-change prediction for {target}:")
+                    first = False
+                pmi = cc.get("pmi", 0)
+                cop = cc.get("co_change_prob", 0)
+                fs = cc.get("fused_score", 0)
+                typer.echo(f"  {partner} (pmi={pmi}, co-change={cop}, fused={fs})")
+        if not seen_files:
+            typer.echo("No co-change predictions above threshold.")
+        return
+    if mode == "anomaly":
+        stats = data.get("statistics", {})
+        anomalies = data.get("anomalies", [])
+        if stats:
+            typer.echo(f"{ICON_PRIMARY} PMI anomalies (mean={stats.get('mean_pmi')}, max={stats.get('max_pmi')}, top {len(anomalies)})")
+        for a in anomalies:
+            a_str = a.get("a", "")
+            b_str = a.get("b", "")
+            pmi_val = a.get("pmi", 0)
+            ta = a.get("p_a", 0)
+            tb = a.get("p_b", 0)
+            typer.echo(f"  {ICON_WARN} {a_str} ↔ {b_str}  PMI={pmi_val}  P(a)={ta}, P(b)={tb}")
+        if not anomalies:
+            typer.echo("No structural anomalies found.")
+        return
+    if ci and cr:
+        raise typer.Exit(1)
+    if ci and not cr:
+        typer.echo(f"{ICON_CHECK} No critical files — CI gate passed")
     if cr:
         typer.echo(f"{ICON_WARN} Critical (Hub + Capillary):")
         for f in cr:
@@ -5322,11 +5377,11 @@ def verify_cmd(
     files: Annotated[list[str], typer.Option("--files", help="Changed file(s)")] = None,
     diff: Annotated[str | None, typer.Option("--diff", help="Git ref")] = None,
     task: Annotated[str | None, typer.Option("--task", "-t", help="Task description")] = None,
-    mode: Annotated[str, typer.Option("--mode", "-m", help="Mode: mc, scope, packet, full")] = "full",
+    mode: Annotated[str, typer.Option("--mode", "-m", help="Mode: mc, scope, packet, incomplete, full")] = "full",
     format: Annotated[str, typer.Option("--format", "-f", help="Output: human, json")] = "human",
 ) -> None:
     """Verification pipeline — mc (pre-edit), packet (post-edit), scope (post-edit scope check)."""
-    from quale.reports import cartridge_report, guard_report, preflight_report, verify_scope
+    from quale.reports import cartridge_report, guard_report, incomplete_change_report, preflight_report, verify_scope
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True)
@@ -5339,6 +5394,8 @@ def verify_cmd(
         data = verify_scope(path=p, contract_files=files or None, diff_ref=diff)
     elif mode == "packet":
         data = cartridge_report(path=p, files=files or None, diff_ref=diff, task=task)
+    elif mode == "incomplete":
+        data = incomplete_change_report(path=p, changed_files=files or None, diff_ref=diff)
     else:
         data = guard_report(path=p, file_path=files[0] if files else "", task=task or "")
     if "error" in data:
