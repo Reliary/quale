@@ -19,7 +19,7 @@ class TestCommandCoverage(unittest.TestCase):
     def setUp(self):
         self.env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
 
-    def run_vocab(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    def run_quale(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         result = subprocess.run(
             [sys.executable, "-m", "quale.cli", *args],
             cwd=str(PROJECT_ROOT),
@@ -56,41 +56,41 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_diff_detects_changes(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("diff", "HEAD~1", "HEAD", "--path", str(repo), "--format", "json")
+        result = self.run_quale("diff", "HEAD~1", "HEAD", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("new", data)
 
     def test_diff_no_changes(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("diff", "HEAD", "HEAD", "--path", str(repo), "--format", "json")
+        result = self.run_quale("diff", "HEAD", "HEAD", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data.get("new", []), [])
 
     def test_search_finds_phrase(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("search", "CoreHandler", "--path", str(repo), "--format", "json")
+        result = self.run_quale("search", "CoreHandler", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertTrue(len(data) >= 1)
 
     def test_search_missing_phrase(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("search", "v0.0.0-non-existent", "--path", str(repo), "--format", "json")
+        result = self.run_quale("search", "v0.0.0-non-existent", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data.get("results", []), [])
 
     def test_stable_returns_results(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "stable", "--path", str(repo), "--format", "json", check=False)
+        result = self.run_quale("core", "stable", "--path", str(repo), "--format", "json", check=False)
         self.assertIn(result.returncode, (0, 1))
 
     def test_stable_shallow_repo(self):
         tmp, repo = self._make_repo(commits=1)
-        result = self.run_vocab("core", "stable", "--path", str(repo), "--format", "json", check=False)
+        result = self.run_quale("core", "stable", "--path", str(repo), "--format", "json", check=False)
         self.assertIn(result.returncode, (0, 1))
 
     def test_inspect_returns_overview(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("inspect", "--path", str(repo), "--format", "json")
+        result = self.run_quale("inspect", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         for key in ("schema_version", "explore", "modules", "binding_concepts", "timeline", "avg_concept_age_weeks"):
             self.assertIn(key, data)
@@ -109,13 +109,13 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_preflight_requires_file_scope(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "edit-context", "--path", str(repo), "--format", "json", check=False)
+        result = self.run_quale("core", "edit-context", "--path", str(repo), "--format", "json", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("provide --files or --diff", result.stderr)
 
     def test_preflight_json_for_explicit_files(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--task", "change core handler", "--format", "json")
+        result = self.run_quale("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--task", "change core handler", "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
         self.assertEqual(data["changed_files"], ["src/core.ts"])
@@ -131,13 +131,13 @@ class TestCommandCoverage(unittest.TestCase):
     def test_preflight_diff_uses_worktree_changes(self):
         tmp, repo = self._make_repo()
         self._write(repo, "src/core.ts", "export function CoreHandler() { return 10; }\nexport function CoreNew() { return 3; }\n")
-        result = self.run_vocab("core", "edit-context", "--path", str(repo), "--diff", "HEAD", "--format", "json")
+        result = self.run_quale("core", "edit-context", "--path", str(repo), "--diff", "HEAD", "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("src/core.ts", data["changed_files"])
 
     def test_preflight_checklist_output(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "checklist")
+        result = self.run_quale("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "checklist")
         self.assertIn("VOCAB PREFLIGHT", result.stdout)
         self.assertIn("READ", result.stdout)
         self.assertIn("May be wrong", result.stdout)
@@ -147,7 +147,7 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_preflight_default_is_tool_format(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "edit-context", "--path", str(repo), "--files", "src/core.ts")
+        result = self.run_quale("core", "edit-context", "--path", str(repo), "--files", "src/core.ts")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
         self.assertIn("verification_mc", data)
@@ -158,19 +158,19 @@ class TestCommandCoverage(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "src/consumer.ts", "import { ActiveThing } from './active';\nexport const ActiveConsumer = ActiveThing;\n")
         self._write(repo, "tests/active.test.ts", "import { ActiveThing } from '../src/active';\ntest('active', () => ActiveThing());\n")
-        result = self.run_vocab("core", "edit-context", "--path", str(repo), "--files", "src/active.ts", "--task", "change active thing", "--format", "compact")
+        result = self.run_quale("core", "edit-context", "--path", str(repo), "--files", "src/active.ts", "--task", "change active thing", "--format", "compact")
         self.assertIn("VERIFY", result.stdout)
         self.assertNotIn("VERIFY WITH", result.stdout)
         self.assertNotIn("AVOID EXPANDING INTO", result.stdout)
 
     def test_repo_map_compact_output(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "repo-map", "--path", str(repo))
+        result = self.run_quale("core", "repo-map", "--path", str(repo))
         self.assertEqual(result.returncode, 0)
 
     def test_repo_map_json_has_skeleton(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "repo-map", "--path", str(repo), "--format", "json")
+        result = self.run_quale("core", "repo-map", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("stable_core", data)
         self.assertIn("core_concepts", data)
@@ -179,7 +179,7 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_repo_map_caches_core(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "repo-map", "--path", str(repo), "--format", "json")
+        result = self.run_quale("core", "repo-map", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("stable_core", data)
         self.assertIn("core_concepts", data)
@@ -189,7 +189,7 @@ class TestCommandCoverage(unittest.TestCase):
     def test_verify_mcq_output(self):
         tmp, repo = self._make_repo()
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
-        result = self.run_vocab("core", "verify", "--path", str(repo), "--files", "src/core.ts")
+        result = self.run_quale("core", "verify", "--path", str(repo), "--files", "src/core.ts")
         self.assertIn("Verification Candidates", result.stdout)
         self.assertIn("A.", result.stdout)
         self.assertIn("tests/core.test.ts", result.stdout)
@@ -198,7 +198,7 @@ class TestCommandCoverage(unittest.TestCase):
     def test_verify_json_format(self):
         tmp, repo = self._make_repo()
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
-        result = self.run_vocab("core", "verify", "--path", str(repo), "--files", "src/core.ts", "--format", "json")
+        result = self.run_quale("core", "verify", "--path", str(repo), "--files", "src/core.ts", "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
         self.assertIn("verification_candidates", data)
@@ -207,13 +207,13 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_verify_no_candidates(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "verify", "--path", str(repo), "--files", "src/active.ts", check=False)
+        result = self.run_quale("core", "verify", "--path", str(repo), "--files", "src/active.ts", check=False)
         self.assertNotEqual(result.returncode, 0)
 
     def test_preflight_tool_format(self):
         tmp, repo = self._make_repo()
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
-        result = self.run_vocab("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
+        result = self.run_quale("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
         self.assertIn("verification_mc", data)
@@ -224,7 +224,7 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_preflight_tool_guardrails(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
+        result = self.run_quale("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
         data = json.loads(result.stdout)
         self.assertIn("guardrails", data)
         self.assertEqual(data["guardrails"]["mode"], "report_only")
@@ -232,7 +232,7 @@ class TestCommandCoverage(unittest.TestCase):
     def test_preflight_tool_includes_confidence_and_scope_creep_guard(self):
         tmp, repo = self._make_repo()
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
-        result = self.run_vocab("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
+        result = self.run_quale("core", "edit-context", "--path", str(repo), "--files", "src/core.ts", "--format", "tool")
         data = json.loads(result.stdout)
         self.assertIn("verification_confidence", data)
         self.assertIn(data["verification_confidence"]["level"], {"low", "mixed", "high"})
@@ -243,7 +243,7 @@ class TestCommandCoverage(unittest.TestCase):
     def test_contract_emits_id_coded_scope(self):
         tmp, repo = self._make_repo()
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
-        result = self.run_vocab("core", "contract", "--path", str(repo), "--files", "src/core.ts", "--task", "change core")
+        result = self.run_quale("core", "contract", "--path", str(repo), "--files", "src/core.ts", "--task", "change core")
         data = json.loads(result.stdout)
         self.assertEqual(data["schema_version"], 1)
         self.assertEqual(data["mode"], "scoped_edit")
@@ -257,7 +257,7 @@ class TestCommandCoverage(unittest.TestCase):
     def test_check_plan_validates_ids_and_rejects_raw_paths(self):
         tmp, repo = self._make_repo()
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
-        contract_result = self.run_vocab("core", "contract", "--path", str(repo), "--files", "src/core.ts", "--task", "change core", "--format", "json")
+        contract_result = self.run_quale("core", "contract", "--path", str(repo), "--files", "src/core.ts", "--task", "change core", "--format", "json")
         contract_data = json.loads(contract_result.stdout)
         contract_path = repo / "contract.json"
         contract_path.write_text(json.dumps(contract_data), encoding="utf-8")
@@ -266,13 +266,13 @@ class TestCommandCoverage(unittest.TestCase):
         verify_id = contract_data.get("verify_options", [])[0]
         proposal_path = repo / "proposal.json"
         proposal_path.write_text(json.dumps({"edit_ids": [edit_id], "verify_ids": [verify_id], "expand_scope": []}), encoding="utf-8")
-        ok = self.run_vocab("core", "check-plan", "--contract", str(contract_path), "--proposal", str(proposal_path), "--format", "json")
+        ok = self.run_quale("core", "check-plan", "--contract", str(contract_path), "--proposal", str(proposal_path), "--format", "json")
         ok_data = json.loads(ok.stdout)
         self.assertTrue(ok_data["valid"])
         self.assertEqual(ok_data["edit_paths"], ["src/core.ts"])
 
         proposal_path.write_text(json.dumps({"edit_ids": ["src/core.ts"], "verify_ids": [], "expand_scope": []}), encoding="utf-8")
-        bad = self.run_vocab("core", "check-plan", "--contract", str(contract_path), "--proposal", str(proposal_path), "--format", "json")
+        bad = self.run_quale("core", "check-plan", "--contract", str(contract_path), "--proposal", str(proposal_path), "--format", "json")
         bad_data = json.loads(bad.stdout)
         self.assertFalse(bad_data["valid"])
         codes = {v["code"] for v in bad_data["violations"]}
@@ -282,7 +282,7 @@ class TestCommandCoverage(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "src/consumer.ts", "import { CoreHandler } from './core';\nexport const UseCore = CoreHandler;\n")
         self._write(repo, "tests/core.test.ts", "import { CoreHandler } from '../src/core';\ntest('core', () => CoreHandler());\n")
-        contract_result = self.run_vocab("core", "contract", "--path", str(repo), "--files", "src/core.ts", "--task", "change core", "--format", "json")
+        contract_result = self.run_quale("core", "contract", "--path", str(repo), "--files", "src/core.ts", "--task", "change core", "--format", "json")
         contract_data = json.loads(contract_result.stdout)
         self.assertTrue(contract_data["boundary"])
         contract_path = repo / "contract.json"
@@ -291,7 +291,7 @@ class TestCommandCoverage(unittest.TestCase):
         boundary_id = contract_data["boundary"][0]
         proposal_path = repo / "proposal.json"
         proposal_path.write_text(json.dumps({"edit_ids": [edit_id], "verify_ids": [], "expand_scope": [{"id": boundary_id, "reason": "shared usage"}]}), encoding="utf-8")
-        result = self.run_vocab("core", "check-plan", "--contract", str(contract_path), "--proposal", str(proposal_path), "--format", "json")
+        result = self.run_quale("core", "check-plan", "--contract", str(contract_path), "--proposal", str(proposal_path), "--format", "json")
         data = json.loads(result.stdout)
         self.assertFalse(data["valid"])
         self.assertTrue(data["needs_reflight"])
@@ -299,7 +299,7 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_deserts_json_reports_schema_and_guardrails(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "test-gaps", "--path", str(repo), "--format", "json")
+        result = self.run_quale("core", "test-gaps", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("deserts", data)
         self.assertTrue(data["guardrails"]["not_coverage_proof"])
@@ -307,21 +307,21 @@ class TestCommandCoverage(unittest.TestCase):
     def test_route_prefers_preflight_when_files_known(self):
         tmp, repo = self._make_repo()
         # Sparse 2-commit repo with single small file → routes none (trivial)
-        result = self.run_vocab("core", "route", "--path", str(repo), "--files", "src/core.ts", "--task", "change core", "--format", "json")
+        result = self.run_quale("core", "route", "--path", str(repo), "--files", "src/core.ts", "--task", "change core", "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn(data["action"], ("none", "verify", "human"))
         self.assertIn("intervention_tier", data.get("policy", {}))
 
     def test_route_uses_none_for_vague_unscoped_task(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "route", "--path", str(repo), "--task", "fix bug", "--format", "json")
+        result = self.run_quale("core", "route", "--path", str(repo), "--task", "fix bug", "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data["action"], "none")
         self.assertEqual(data["policy"]["intervention_tier"], "none")
 
     def test_route_avoids_vocab_for_vague_unscoped_task(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("core", "route", "--path", str(repo), "--task", "fix bug", "--format", "json")
+        result = self.run_quale("core", "route", "--path", str(repo), "--task", "fix bug", "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data["action"], "none")
 
@@ -473,7 +473,7 @@ class TestGroundTruthIntegrity(unittest.TestCase):
 
     def test_all_edit_files_exist(self):
         """Every edit_file in CASES must exist on disk."""
-        from scripts.evaluate_vocab_effect import CASES
+        from scripts.evaluate_quale_effect import CASES
         missing = []
         for c in CASES:
             if not os.path.isdir(c.path):
@@ -485,7 +485,7 @@ class TestGroundTruthIntegrity(unittest.TestCase):
 
     def test_all_verify_files_exist(self):
         """Every verify file in CASES must exist on disk."""
-        from scripts.evaluate_vocab_effect import CASES
+        from scripts.evaluate_quale_effect import CASES
         missing = []
         for c in CASES:
             if not os.path.isdir(c.path):

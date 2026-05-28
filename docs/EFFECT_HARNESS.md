@@ -50,8 +50,8 @@ Best for weak models: `verify_scope` (verification-only, removes edit decision).
 ## Using the harness
 
 ```bash
-python scripts/evaluate_vocab_effect.py --dry-run --max-cases 2
-python scripts/evaluate_vocab_effect.py --suite edit-context --trials 3
+python scripts/evaluate_quale_effect.py --dry-run --max-cases 2
+python scripts/evaluate_quale_effect.py --suite edit-context --trials 3
 python scripts/analyze_effect_failures.py /tmp/quale-effect-edit-context-3trial.json
 ```
 
@@ -63,9 +63,9 @@ The harness tested several conditions. Here's how they map to current CLI comman
 |-------------------|-------------|--------|-------|
 | `edit-context --format tool` | `quale ec` or `quale core edit-context --format tool` | ✓ Active | Primary LLM surface, 75% accuracy |
 | `verify_scope` | `quale core verify-scope` | ✓ Active | Verification-only, 83% accuracy on weak models |
-| `verify_entangle` | `quale core verify-entangle` | ✓ Active | Includes git co-change signal, best all-round |
-| `progressive_verify` | `quale core verify-progressive` | ✓ Active | Multi-step verification |
-| `diff_edit-context` | `quale core diff-context` | ✓ Active | For PR/diff workflows, 100% accuracy |
+| `verify_entangle` | `quale vp` (verify-packet has `entangled_candidates`) | ✓ Via JSON field | Closest match includes co-change signal |
+| `progressive_verify` | `quale core veto-cascade` | ✓ Via veto-cascade | Closest match: multi-step deterministic → oscillatory → manual |
+| `diff_edit-context` | `quale ec --diff <ref>` | ✓ Via --diff flag | Same engine, use --diff instead of --files |
 | `candidate_baseline` | N/A | Baseline only | No-quale control condition |
 | `route_policy` | N/A | Internal | Routing logic, not user-facing |
 | `ask` | N/A | ✗ Killed | 0% accuracy, worse than baseline |
@@ -75,8 +75,8 @@ The harness tested several conditions. Here's how they map to current CLI comman
 **Recommended commands for users:**
 - **LLM agents**: Use `quale ec` (edit context) before every edit
 - **Weak models**: Use `quale core verify-scope` for highest accuracy (83%)
-- **PR reviews**: Use `quale core diff-context` for diff-aware context (100% accuracy)
-- **General use**: Use `quale core verify-entangle` for best all-round performance
+- **PR reviews**: Use `quale ec --diff <ref>` for diff-aware context
+- **General use**: Use `quale vp` (verify-packet) for co-change signal
 
 Decision rules:
 - keep `edit-context --format tool` as primary LLM surface: 75% accuracy, 0 extra edits
