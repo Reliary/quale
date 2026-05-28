@@ -1661,43 +1661,6 @@ def orient_cmd(
     typer.echo(f'  {data.get("total_files_in_scope",0)} files in scope')
 
 
-@core_app.command(name="health", rich_help_panel="CI")
-def health_cmd(
-    path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
-    balance: Annotated[bool, typer.Option("--balance", help="Root-to-shoot ratio check")] = False,
-    format: Annotated[str, typer.Option("--format", "-f", help="Output: compact, json")] = "compact",
-):
-    """0-1 health from stability, mirror, churn, concept age. """
-    from quale.reports import structural_health_score
-    p = os.path.abspath(path)
-    if not vgit.is_repo(p):
-        typer.echo("Not a git repository.", err=True)
-        raise typer.Exit(1)
-    data = structural_health_score(path=p, balance=balance)
-    if "error" in data:
-        typer.echo(data["error"], err=True)
-        raise typer.Exit(1)
-    if format == "json":
-        typer.echo(json.dumps(data, indent=2))
-        return
-    h = data.get("health", "?")
-    c = "green" if h == "good" else ("yellow" if h == "moderate" else "red")
-    if h == "good":
-        summary = "Good structural health \u2014 low coupling, good modularity."
-    elif h == "moderate":
-        summary = "Moderate \u2014 some coupling debt, refactoring may help."
-    else:
-        summary = "Poor \u2014 high coupling or weak modularity. Consider refactoring."
-    typer.echo(f"Health: {_color(h.upper(), c)} (debt: {data.get('debt_acceleration',0):.3f})")
-    typer.echo(f"  {summary}")
-    if balance and data.get("root_shoot_ratio"):
-        ratio = data["root_shoot_ratio"]
-        clr = "red" if ratio > 3 else ("green" if ratio < 0.5 else "yellow")
-        typer.echo(f"  Root/Shoot ratio: {ratio}:1 [{_color('Features outgrowing core' if ratio > 3 else 'Core dominates' if ratio < 0.5 else 'Balanced', clr)}]")
-    elif balance:
-        typer.echo(f"  {data.get('phototropism_note', '')}")
-
-
 @core_app.command(name="heisenberg", rich_help_panel="Maintenance")
 def heisenberg_cmd(
     path: Annotated[str, typer.Option("--path", "-p", help="Path to repo")] = ".",
@@ -5304,7 +5267,7 @@ def risk_cmd(
     ci: Annotated[bool, typer.Option("--ci", help="CI gate mode")] = False,
 ) -> None:
     """Surface risky files — hub, capillary, and their intersection."""
-    from quale.reports import vulnerability_report, thanatosis_report, capillary_report
+    from quale.reports import capillary_report, thanatosis_report, vulnerability_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True)
@@ -5356,7 +5319,7 @@ def verify_cmd(
     format: Annotated[str, typer.Option("--format", "-f", help="Output: human, json")] = "human",
 ) -> None:
     """Verification pipeline — mc (pre-edit), packet (post-edit), scope (post-edit scope check)."""
-    from quale.reports import preflight_report, cartridge_report, verify_scope, guard_report
+    from quale.reports import cartridge_report, guard_report, preflight_report, verify_scope
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True)
@@ -5395,7 +5358,7 @@ def health_cmd(
     format: Annotated[str, typer.Option("--format", "-f", help="Output: human, json")] = "human",
 ) -> None:
     """Structural health dashboard — porosity, spectral gap, and debt score."""
-    from quale.reports import repo_health, porosity_report, spectral_gap_report
+    from quale.reports import porosity_report, repo_health, spectral_gap_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True)
@@ -5425,7 +5388,7 @@ def audit_cmd(
     format: Annotated[str, typer.Option("--format", "-f", help="Output: human, json")] = "human",
 ) -> None:
     """Review a diff — structural, CI, and PR reports in one command."""
-    from quale.reports import ci_report, check_pr_report, check_diff_report
+    from quale.reports import check_diff_report, check_pr_report, ci_report
     p = os.path.abspath(path)
     if not vgit.is_repo(p):
         typer.echo("Not a git repository.", err=True)
