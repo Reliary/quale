@@ -434,3 +434,48 @@ class TestCiGateCodes(unittest.TestCase):
         from quale.cli import GATE_CODES
         codes = list(GATE_CODES.values())
         self.assertEqual(len(codes), len(set(codes)))
+
+
+class TestBackwardCompatibility(unittest.TestCase):
+    """Verify the reports package structure is backward compatible."""
+
+    def test_analysis_helpers_still_importable_from_reports(self):
+        from quale.reports import (
+            _safe_islands_data, _spectrum_analysis, _deficit_analysis,
+            _cascade_analysis, _cross_cutting_concerns, _risk_vector,
+            _change_acceleration, _file_in_commit, _boundary_entropy,
+            _module_exposure_analysis, _fused_priority_ranking,
+            _file_temperature, _peer_relative_risk, _safety_envelope,
+        )
+        self.assertTrue(callable(_spectrum_analysis))
+        self.assertTrue(callable(_risk_vector))
+
+    def test_analysis_module_direct_import(self):
+        from quale.reports import analysis
+        from quale.reports.analysis import _spectrum_analysis, _cascade_analysis
+        self.assertTrue(callable(_spectrum_analysis))
+        self.assertTrue(callable(_cascade_analysis))
+
+    def test_public_functions_still_importable_from_reports(self):
+        from quale.reports import (
+            ci_report, review_summary, onboard_plan, refactor_effort,
+            ci_trend, preflight_report, cartridge_report,
+        )
+        self.assertTrue(callable(ci_report))
+        self.assertTrue(callable(preflight_report))
+        self.assertTrue(callable(review_summary))
+        self.assertTrue(callable(onboard_plan))
+        self.assertTrue(callable(refactor_effort))
+
+    def test_helper_functions_used_by_tests_still_importable(self):
+        """Functions used by test_commands.py.TestStructuralDetection."""
+        from quale.reports import (
+            _source_stem, _test_stem,
+            _has_code_phrase, _is_declarative_changed,
+            _same_package_prefix, _deterministic_verify, _co_located_tests,
+        )
+        self.assertTrue(callable(_has_code_phrase))
+        self.assertTrue(callable(_is_declarative_changed))
+        self.assertTrue(callable(_same_package_prefix))
+        self.assertTrue(callable(_deterministic_verify))
+        self.assertTrue(callable(_co_located_tests))

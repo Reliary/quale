@@ -66,13 +66,13 @@ class TestSmoke(unittest.TestCase):
 
     def test_explore_returns_results(self):
         tmp, repo = self._make_repo(weeks=2)
-        result = self.run_vocab("explore", str(repo), "--format", "json")
+        result = self.run_vocab("explore", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIn("files", data)
 
     def test_lifecycle_returns_results(self):
         tmp, repo = self._make_repo(weeks=12)
-        result = self.run_vocab("core", "lifecycle", str(repo), "--format", "json")
+        result = self.run_vocab("core", "lifecycle", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertIsInstance(data, list)
 
@@ -95,12 +95,12 @@ class TestSmoke(unittest.TestCase):
 
     def test_agent_bootstrap_summary(self):
         tmp, repo = self._make_repo(weeks=2)
-        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--summary")
+        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--summary")
         self.assertIn("AGENT BOOTSTRAP", result.stdout)
 
     def test_agent_bootstrap_no_task(self):
         tmp, repo = self._make_repo(weeks=2)
-        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         self.assertEqual(data["task_relevance_score"], 0)
         self.assertEqual(data["related_files_for_task"], [])

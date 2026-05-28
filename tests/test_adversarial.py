@@ -54,7 +54,7 @@ class TestAdversarialContent(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "src.c", b"int main() {\n\x00return 0;\n}\n")
         self._commit(repo)
-        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -62,7 +62,7 @@ class TestAdversarialContent(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "big.txt", "hello world\n" * 50000)
         self._commit(repo)
-        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -73,7 +73,7 @@ class TestAdversarialContent(unittest.TestCase):
             content = '{"a":' + content + "}"
         self._write(repo, "deep.json", content)
         self._commit(repo)
-        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -81,7 +81,7 @@ class TestAdversarialContent(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "src.ts", "export const A\ufffd\ufffdB = true;\nexport const C\ufffdD = false;\n")
         self._commit(repo)
-        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -89,7 +89,7 @@ class TestAdversarialContent(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "src.ts", "export const \u202eLogin = true;\nexport const R\x1b\u202eOrder = false;\n")
         self._commit(repo)
-        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -98,7 +98,7 @@ class TestAdversarialContent(unittest.TestCase):
         for i in range(2000):
             self._write(repo, f"src/file{i}.ts", f"export const Needle{i} = true;\n")
         self._commit(repo)
-        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -107,7 +107,7 @@ class TestAdversarialContent(unittest.TestCase):
         self._write(repo, "normal.ts", "export const Normal = true;\n")
         (repo / "loop").symlink_to(repo)
         self._commit(repo)
-        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 
@@ -115,7 +115,7 @@ class TestAdversarialContent(unittest.TestCase):
         tmp, repo = self._make_repo()
         self._write(repo, "readme.md", "# empty\n")
         self._commit(repo)
-        result = self.run_vocab("core", "agent-bootstrap", str(repo), "--format", "json")
+        result = self.run_vocab("core", "agent-bootstrap", "--path", str(repo), "--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
         json.loads(result.stdout)
 

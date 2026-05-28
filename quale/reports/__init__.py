@@ -12,10 +12,25 @@ from collections import Counter, defaultdict
 from typing import TYPE_CHECKING, Any
 
 from quale import git as vgit
+from quale.reports.analysis import (
+    _boundary_entropy,
+    _cascade_analysis,
+    _change_acceleration,
+    _cross_cutting_concerns,
+    _deficit_analysis,
+    _file_in_commit,
+    _file_temperature,
+    _fused_priority_ranking,
+    _module_exposure_analysis,
+    _peer_relative_risk,
+    _risk_vector,
+    _safety_envelope,
+    _safe_islands_data,
+    _spectrum_analysis,
+)
 
 if TYPE_CHECKING:
     pass
-
 
 # ── CI Report ─────────────────────────────────────────────────────
 
@@ -29,7 +44,6 @@ def _append_ci_metrics(path: str, metrics: dict) -> None:
             f.write(json.dumps(metrics) + "\n")
     except Exception:
         pass  # Non-fatal failure
-
 
 def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
     from quale.scanner import _mirror_signals, scan_codebase
@@ -174,7 +188,6 @@ def ci_report(base_ref: str, head_ref: str, path: str = ".") -> dict:
         ),
     }
 
-
 def review_summary(path: str = ".", base_ref: str = "HEAD~1", head_ref: str = "HEAD") -> dict:
     """Single human review command: wraps ci_report + test-gaps + hub-risk."""
     if not vgit.is_repo(path):
@@ -268,7 +281,6 @@ def review_summary(path: str = ".", base_ref: str = "HEAD~1", head_ref: str = "H
         "review": "PASS" if not (risk_flags or hub_flagged or clone_flagged) else "FAIL",
         "summary": ci.get("summary", ""),
     }
-
 
 def onboard_plan(path: str = ".") -> dict:
     """Produce a 3-step onboarding plan: landmarks, modules, and watch-outs."""
@@ -368,7 +380,6 @@ def onboard_plan(path: str = ".") -> dict:
         "total_files": analysis.total_files,
     }
 
-
 def _safe_islands_data(analysis) -> list[str]:
     """Find structurally isolated blocks safe to edit."""
     safe: list[str] = []
@@ -389,7 +400,6 @@ def _safe_islands_data(analysis) -> list[str]:
         if count < avg_phrases * 0.3 and dir_files.get(d, 0) <= 3:
             safe.append(d)
     return sorted(safe)[:10]
-
 
 def refactor_effort(path: str = ".", file_path: str = "") -> dict:
     """Estimate refactoring effort for a file: blast + escape + clones + hub."""
@@ -459,7 +469,6 @@ def refactor_effort(path: str = ".", file_path: str = "") -> dict:
         "summary": f"Refactoring {file_path} affects {blast_count} other files. Effort: {effort_tier}.",
     }
 
-
 def ci_trend(path: str = ".", weeks: int = 12) -> dict:
     """Read ci history file and report metric trends."""
     import os
@@ -508,7 +517,6 @@ def ci_trend(path: str = ".", weeks: int = 12) -> dict:
         "trends": trends,
     }
 
-
 def _check_hub_risk(path: str, changed: list[str], analysis) -> list[dict]:
     """Find changed files in top 10% hub-risk percentile."""
     if not analysis or not changed:
@@ -525,7 +533,6 @@ def _check_hub_risk(path: str, changed: list[str], analysis) -> list[dict]:
     threshold = max(len(hubs) // 10, 1)
     top_hubs = set(h for h, _ in hubs[:threshold])
     return [{"file": f, "hub_rank": i + 1} for i, f in enumerate(changed) if f in top_hubs]
-
 
 def _check_clone_flag(path: str, changed: list[str], analysis, head_ref: str) -> list[dict]:
     """Find changed files that are structural clones of other files."""
@@ -546,7 +553,6 @@ def _check_clone_flag(path: str, changed: list[str], analysis, head_ref: str) ->
             })
     return flagged
 
-
 def _count_new_identifiers(path: str, base_ref: str, head_ref: str) -> int:
     """Count identifiers in head that don't exist in base."""
     from quale.scanner import _extract_identifiers, scan_codebase
@@ -564,500 +570,7 @@ def _count_new_identifiers(path: str, base_ref: str, head_ref: str) -> int:
     new_ids = head_ids - base_ids
     return len(new_ids)
 
-
-def _spectrum_analysis(file: str, analysis) -> dict:
-    """Classify identifiers into DC (codebase-wide), LF (module), HF (file-specific) bands.
-    Uses the same identifier extraction as scanner.py for consistency.
-    """
-    from quale.scanner import _extract_identifiers
-    co = analysis.co_occurrence
-    if not co:
-        return {"band": "unknown", "hf_ids": [], "lf_ids": [], "pct_hf": 0}
-
-    fv = None
-    for v in analysis.file_vocabs:
-        if v.path == file:
-            fv = v
-            break
-    if not fv:
-        return {"band": "unknown", "hf_ids": [], "lf_ids": [], "pct_hf": 0}
-
-    total = max(co.total_docs, 1)
-    dc_threshold = max(int(total ** 0.5), 3)
-
-    # Module membership for LF band
-    module_files: set[str] = set()
-    for sc in (analysis.structure_clusters or []):
-        if file in sc.get("top_files", []):
-            module_files.update(sc.get("top_files", []))
-            break
-
-    file_identifiers = _extract_identifiers(fv, min_len=4)
-
-    # Fallback to phrase-level when identifiers are sparse (small files)
-    if len(file_identifiers) < 3:
-        for phrase in fv.vocabulary:
-            if any(c.isupper() for c in phrase) and len(phrase) >= 4:
-                file_identifiers.add(phrase)
-        if len(file_identifiers) < 3:
-            # Too small to analyze spectrally
-            return {
-                "hf_ids": [],
-                "lf_ids": [],
-                "pct_hf": 0,
-                "pct_lf": 0,
-                "pct_dc": 0,
-                "note": "file too small for spectral analysis",
-            }
-
-    hf_ids: list[str] = []
-    lf_ids: list[str] = []
-    dc_ids: list[str] = []
-    for ident in file_identifiers:
-        doc_count = co.phrase_count.get(ident, 0)
-        if doc_count >= dc_threshold:
-            dc_ids.append(ident)
-        elif module_files:
-            module_count = sum(1 for v2 in analysis.file_vocabs
-                               if v2.path in module_files and ident in v2.vocabulary
-                               or any(ident in seg for seg in v2.vocabulary))
-            mod_frac = module_count / max(len(module_files), 1)
-            if mod_frac > 0.2:
-                lf_ids.append(ident)
-            else:
-                hf_ids.append(ident)
-        elif doc_count <= 3:
-            hf_ids.append(ident)
-        else:
-            lf_ids.append(ident)
-
-    total_ids = max(len(file_identifiers), 1)
-    return {
-        "hf_ids": hf_ids[:10],
-        "lf_ids": lf_ids[:5],
-        "pct_hf": round(len(hf_ids) / total_ids * 100),
-        "pct_lf": round(len(lf_ids) / total_ids * 100),
-        "pct_dc": round(len(dc_ids) / total_ids * 100),
-        "instruction": "Read HF identifiers first; DC band is codebase-wide boilerplate",
-    }
-
-
-def _deficit_analysis(file: str, analysis) -> dict | None:
-    """Find module-level identifiers missing from a file."""
-    if not analysis.structure_clusters:
-        return None
-    module = None
-    for sc in analysis.structure_clusters:
-        if file in sc.get("top_files", []):
-            module = sc
-            break
-    if not module:
-        return None
-    module_files_list = module.get("top_files", [])
-    if len(module_files_list) < 5:
-        return None
-
-    # Build module-wide identifier frequency (excluding this file)
-    mod_counts: Counter = Counter()
-    for v in analysis.file_vocabs:
-        if v.path in module_files_list and v.path != file:
-            for phrase in v.vocabulary:
-                mod_counts[phrase] += 1
-
-    mod_total = max(len(module_files_list) - 1, 1)
-    file_phrases = set()
-    for v in analysis.file_vocabs:
-        if v.path == file:
-            file_phrases = set(v.vocabulary.keys())
-            break
-
-    missing: list[tuple[str, int]] = []
-    for phrase, count in mod_counts.most_common(20):
-        if phrase not in file_phrases:
-            score = count / mod_total
-            if score >= 0.5:  # present in >50% of module peers
-                missing.append((phrase, count))
-
-    critical = [p for p, c in missing[:3]] if missing else []
-    if not missing:
-        return None
-    return {
-        "missing": len(missing),
-        "missing_ids": [p for p, _ in missing[:5]],
-        "critical": critical,
-        "instruction": "Verify this file belongs in its detected module before editing" if critical else None,
-    }
-
-
-def _cascade_analysis(file: str, analysis, blast: list[dict]) -> dict | None:
-    """Transitive coupling: structural disruption diffusing beyond direct blast radius."""
-    if not blast:
-        return None
-
-    # Build coupling graph from blast + co-occurrence
-    all_vocabs: dict[str, set[str]] = {}
-    for v in analysis.file_vocabs:
-        all_vocabs[v.path] = set(v.vocabulary.keys())
-
-    visited: set[str] = set()
-    visited_with_depth: dict[str, int] = {}
-    queue: list[tuple[str, int]] = [(file, 0)]
-    transitive_count = 0
-    total_damped = 0.0
-    alpha = 0.5
-
-    while queue:
-        current, depth = queue.pop(0)
-        if current in visited or depth > 5:
-            continue
-        visited.add(current)
-        visited_with_depth[current] = depth
-        if depth > 0:
-            transitive_count += 1
-            total_damped += alpha ** depth
-
-        current_ids = all_vocabs.get(current, set())
-        for item in blast:
-            bfile = item.get("file", "")
-            if bfile in visited:
-                continue
-            bf_ids = all_vocabs.get(bfile, set())
-            if current_ids and bf_ids:
-                jaccard = len(current_ids & bf_ids) / max(len(current_ids | bf_ids), 1)
-                if jaccard > 0.05:
-                    queue.append((bfile, depth + 1))
-
-        if analysis.structure_clusters:
-            for sc in analysis.structure_clusters:
-                if current in sc.get("top_files", []):
-                    for peer in sc.get("top_files", []):
-                        if peer not in visited and peer not in [q[0] for q in queue]:
-                            queue.append((peer, depth + 1))
-
-    if transitive_count == 0:
-        return None
-
-    return {
-        "hops": max(visited_with_depth.values()),
-        "transitive_files": transitive_count,
-        "damped_score": round(total_damped, 2),
-        "ratio_to_blast": round(total_damped / max(len(blast), 1), 2),
-        "instruction": "Damped score > blast count means transitive risk exceeds direct risk — verify expansion scope",
-    }
-
-
-def _cross_cutting_concerns(file: str, analysis) -> list[dict]:
-    """Cross-cutting concern detection via identifier-cluster voting.
-    Each identifier votes for every (cluster, file) pair it appears in.
-    Peaks = identifiers spanning ≥2 clusters with ≥4 total files.
-    """
-    from quale.scanner import _extract_identifiers
-    clusters_map: dict[str, set[str]] = {}
-    for sc in (analysis.structure_clusters or []):
-        label = sc.get("label", "?")
-        clusters_map[label] = set(sc.get("top_files", []))
-    if len(clusters_map) < 2:
-        return []
-
-    # For each identifier in the matrix, count clusters + files it spans
-    co = analysis.co_occurrence
-    if not co:
-        return []
-
-    concerns: list[dict] = []
-    seen_ids: set[str] = set()
-    for ident, doc_count in co.phrase_count.items():
-        if doc_count < 3 or ident in seen_ids:
-            continue
-        found_clusters: list[str] = []
-        found_files: set[str] = set()
-        for label, files in clusters_map.items():
-            # Check if any file in this cluster has this identifier
-            for fv in analysis.file_vocabs:
-                if fv.path in files and ident in _extract_identifiers(fv, min_len=4):
-                    found_clusters.append(label)
-                    found_files.add(fv.path)
-                    break
-        if len(found_clusters) >= 2 and len(found_files) >= 4:
-            concerns.append({
-                "id": ident,
-                "cluster_span": len(found_clusters),
-                "file_span": len(found_files),
-                "clusters": found_clusters[:5],
-            })
-            seen_ids.add(ident)
-
-    concerns.sort(key=lambda x: (-x["file_span"], -x["cluster_span"]))
     return concerns[:5]
-
-
-def _risk_vector(stable_touched: list[dict], blast: list[dict],
-                 cascade: dict | None, deficit: dict | None) -> dict:
-    """Softmax-normalized risk decomposition. Cascade weighted 2× (transitive),
-    stable 1.5× (entrenched), deficit 1.2× (misplacement), blast 1×."""
-    weights = {"cascade": 2.0, "stable": 1.5, "deficit": 1.2, "blast": 1.0}
-    raw = {
-        "cascade": (cascade or {}).get("damped_score", 0) * weights["cascade"],
-        "stable": len(stable_touched) * weights["stable"],
-        "deficit": (deficit or {}).get("missing", 0) * weights["deficit"],
-        "blast": len(blast) * weights["blast"],
-    }
-    total = sum(raw.values()) or 1.0
-    vector = {k: round(v / total, 2) for k, v in raw.items()}
-    dominant = max(vector, key=vector.get)
-    desc_map = {
-        "cascade": "Transitive risk exceeds direct — check expansion scope",
-        "stable": "Stable anchors touched — risk from entrenched code",
-        "deficit": "Missing module identifiers — risk from misplacement",
-        "blast": "Direct blast coupling — risk from immediate dependents",
-    }
-    return {
-        "vector": vector,
-        "dominant": dominant,
-        "description": desc_map.get(dominant, ""),
-        "instruction": f"Primary risk: {desc_map.get(dominant, '')}",
-    }
-
-
-def _change_acceleration(file: str, path: str) -> dict | None:
-    """Second derivative of change frequency: acceleration spike detection.
-    Spike ratio > 3 reliably precedes bug clusters in empirical studies."""
-    if not vgit.is_repo(path):
-        return None
-    try:
-        week_data = vgit.weekly_commits(path, weeks=24)
-    except Exception:
-        return None
-    if len(week_data) < 4:
-        return None
-
-    # Per-week commit count for this file
-    counts: list[int] = []
-    for wk in week_data:
-        cnt = sum(1 for sha in wk.get("shas", [])
-                  if sha and _file_in_commit(file, sha, path))
-        counts.append(cnt)
-
-    # Velocity (first difference), acceleration (second difference)
-    velocity = [counts[i + 1] - counts[i] for i in range(len(counts) - 1)]
-    acceleration = [velocity[i + 1] - velocity[i] for i in range(len(velocity) - 1)]
-
-    if not acceleration:
-        return None
-
-    peak_vel = max(velocity) if velocity else 0
-    mean_abs_vel = sum(abs(v) for v in velocity) / max(len(velocity), 1)
-    spike_ratio = peak_vel / max(mean_abs_vel, 0.01)
-    max(acceleration)
-    recent_trend = sum(acceleration[-3:]) / max(len(acceleration[-3:]), 1) if len(acceleration) >= 3 else 0
-
-    trend = "accelerating" if recent_trend > 0.5 else \
-            "decelerating" if recent_trend < -0.5 else "stable"
-
-    if spike_ratio < 2:
-        return None
-
-    return {
-        "peak_velocity": peak_vel,
-        "spike_ratio": round(spike_ratio, 1),
-        "trend": trend,
-        "instruction": f"Change acceleration spike ({spike_ratio:.1f}× normal) — verify intent before editing" if spike_ratio >= 3 else None,
-    }
-
-
-def _file_in_commit(file: str, sha: str, path: str) -> bool:
-    """Quick check if file changed in a commit via git diff-tree."""
-    try:
-        out = vgit._git_bytes("diff-tree", "--no-commit-id", "-r", "--name-only",
-                               sha, cwd=path)
-        return file.encode() in out.split(b"\n")
-    except Exception:
-        return False
-
-
-def _boundary_entropy(file: str, analysis) -> dict | None:
-    """Shannon entropy of cluster membership probabilities.
-    H > 0.3 means the file sits between modules — edit with caution."""
-    from quale.scanner import _extract_identifiers
-    scs = analysis.structure_clusters
-    if not scs or len(scs) < 2:
-        return None
-
-    file_ids = set(_extract_identifiers(
-        next((fv for fv in analysis.file_vocabs if fv.path == file), None),
-        min_len=4)) if any(fv.path == file for fv in analysis.file_vocabs) else set()
-    if not file_ids:
-        return None
-
-    # P(module | file) = shared identifiers / total file identifiers
-    probs: list[float] = []
-    cluster_labels_list: list[str] = []
-    for sc in scs:
-        module_files = set(sc.get("top_files", []))
-        module_ids: set[str] = set()
-        for fv in analysis.file_vocabs:
-            if fv.path in module_files:
-                module_ids |= _extract_identifiers(fv, min_len=4)
-        shared = len(file_ids & module_ids)
-        p = shared / max(len(file_ids), 1)
-        if p > 0:
-            probs.append(p)
-            cluster_labels_list.append(sc.get("label", "?"))
-
-    if not probs:
-        return None
-
-    # Normalize to probability distribution
-    total_p = sum(probs)
-    probs = [p / total_p for p in probs]
-    entropy = -sum(p * __import__("math").log2(p) for p in probs)
-
-    # Normalize to [0, 1] using log2(n_clusters)
-    max_entropy = __import__("math").log2(max(len(probs), 1))
-    norm = round(entropy / max_entropy, 2) if max_entropy > 0 else 0.0
-
-    # Top clusters for instruction
-    ranked = sorted(zip(cluster_labels_list, probs, strict=False), key=lambda x: -x[1])[:3]
-
-    if norm < 0.3:
-        return None
-
-    return {
-        "entropy": norm,
-        "top_clusters": [r[0] for r in ranked],
-        "top_probs": [round(r[1], 2) for r in ranked],
-        "instruction": f"Boundary entropy {norm} — file sits between {', '.join(r[0] for r in ranked)}; verify module before editing",
-    }
-
-
-def _module_exposure_analysis(file: str, analysis) -> dict | None:
-    """Inside-out module boundary: identifiers the file reaches for
-    outside its own module. High exposure = misplaced file."""
-    from quale.scanner import _extract_identifiers
-    scs = analysis.structure_clusters
-    if not scs:
-        return None
-
-    # Find this file's module
-    module = None
-    for sc in scs:
-        if file in sc.get("top_files", []):
-            module = sc
-            break
-    if not module:
-        return None
-
-    module_files_list = module.get("top_files", [])
-    if len(module_files_list) < 3:
-        return None
-
-    file_fv = next((fv for fv in analysis.file_vocabs if fv.path == file), None)
-    if not file_fv:
-        return None
-    file_ids = _extract_identifiers(file_fv, min_len=4)
-
-    # Build module-common identifiers (present in ≥50% of module peers)
-    mod_count: Counter = Counter()
-    for fv in analysis.file_vocabs:
-        if fv.path in module_files_list and fv.path != file:
-            for ident in _extract_identifiers(fv, min_len=4):
-                mod_count[ident] += 1
-
-    mod_total = max(len(module_files_list) - 1, 1)
-    common = {ident for ident, cnt in mod_count.items()
-              if cnt / mod_total >= 0.5}
-
-    everted = [i for i in file_ids if i not in common]
-    ratio = len(everted) / max(len(file_ids), 1)
-
-    if ratio < 0.3:
-        return None
-
-    return {
-        "everted_ids": everted[:8],
-        "everted_count": len(everted),
-        "ratio": round(ratio, 2),
-        "module": module.get("label", "?"),
-        "instruction": f"{len(everted)}/{len(file_ids)} identifiers reach outside module ({ratio:.0%}) — check module placement",
-    }
-
-
-def _fused_priority_ranking(changed: list[str], blast: list[dict], mirror: dict) -> list[str]:
-    """Fused blast + mirror ranking into one list.
-    score = blast + mirror + 2*b*m  (files high in both get super-linear)."""
-    blast_scores: dict[str, int] = {}
-    for item in blast:
-        blast_scores[item.get("file", "")] = item.get("shared_concepts", 1)
-    max_blast = max(blast_scores.values()) if blast_scores else 1
-
-    mirror_files: set[str] = set()
-    if mirror:
-        mirror_files = set(mirror.get("files", []))
-
-    scored: list[tuple[float, str]] = []
-    seen: set[str] = set()
-    for f in changed:
-        seen.add(f)
-    for f, b_score in blast_scores.items():
-        if f in seen:
-            continue
-        seen.add(f)
-        b = b_score / max_blast  # normalize
-        m = 1.0 if f in mirror_files else 0.0
-        sheared = b + m + 2.0 * b * m
-        scored.append((sheared, f))
-    for f in mirror_files:
-        if f not in seen:
-            seen.add(f)
-            scored.append((1.0, f))  # mirror-only
-
-    scored.sort(key=lambda x: -x[0])
-    return [f for _, f in scored]
-
-
-def _file_temperature(file: str, lifecycle_data: list[dict], stability_data: list[dict], entropy_data: dict | None) -> str:
-    """Compute single-word temperature for a file: COLD/WARM/HOT."""
-    for item in lifecycle_data:
-        if item.get("file") == file:
-            signal = item.get("signal", "")
-            if signal in ("EMERGING", "GROWING", "EVOLVING", "SPORADIC"):
-                return "HOT"
-            if signal in ("DECAYING", "ABANDONED", "DEAD"):
-                return "COLD"
-            if signal in ("STABLE", "RENAMED"):
-                return "WARM"
-    for item in stability_data:
-        if item.get("file") == file and item.get("persistence", 0) >= 0.8:
-            return "COLD"
-    return "WARM"
-
-
-def _peer_relative_risk(changed: list[str], blast: list[dict]) -> dict:
-    """Compare blast radius against typical edit in this repo."""
-    total_shared = sum(item.get("shared_concepts", 0) for item in blast[:10])
-    total_impacted = len(blast)
-    multiplier = round(max(total_impacted, 1) / 1.2, 2)  # 1.2 = empirical median
-    return {
-        "blast_file_count": total_impacted,
-        "total_shared_concepts": total_shared,
-        "vs_median_multiplier": multiplier,
-        "peer_text": f"{multiplier}x broader than median edit (blast:{total_impacted})",
-    }
-
-
-def _safety_envelope(changed: list[str], blast: list[dict], stable_touched: list[dict]) -> dict:
-    """Define safety envelope: inside/at-boundary/outside."""
-    inside = list(changed)
-    boundary = list(dict.fromkeys(
-        [item.get("file", "") for item in blast[:10] if item.get("file") not in inside]
-    ))
-    return {
-        "inside": inside[:5],
-        "at_boundary": boundary[:5],
-        "boundary_count": len(boundary),
-        "stable_on_boundary": [s["file"] for s in stable_touched[:3] if s.get("file") not in inside],
-    }
-
 
 def preflight_report(path: str = ".", files: list[str] | None = None,
                      diff_ref: str | None = None, task: str | None = None,
@@ -1277,7 +790,6 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
         },
     }
 
-
 def entanglement_matrix(path: str = ".", lookback_commits: int = 200) -> dict:
     """Build co-change entanglement matrix from git history."""
     from collections import Counter
@@ -1332,7 +844,6 @@ def entanglement_matrix(path: str = ".", lookback_commits: int = 200) -> dict:
         "pairs": pairs[:100],
     }
 
-
 def _entangled_candidates_for_changed(changed: list[str], matrix: dict) -> list[dict]:
     """Given changed files, return entangled verification candidates."""
     candidates = []
@@ -1351,7 +862,6 @@ def _entangled_candidates_for_changed(changed: list[str], matrix: dict) -> list[
                                    "reason": f"co-changed with {b} {pair['co_change_count']} times"})
     candidates.sort(key=lambda x: -x["score"])
     return candidates[:5]
-
 
 def _transmission_tier(det: dict | None, all_candidates: list[str], osc: dict,
                        entangled: list[dict] | None = None,
@@ -1372,7 +882,6 @@ def _transmission_tier(det: dict | None, all_candidates: list[str], osc: dict,
         return "confident"
     return "ambiguous"
 
-
 def _indexed_output(all_candidates: list[str], entangled: list[dict],
                     avoid: list[str], changed: list[str], horizon: list[dict]) -> dict:
     """Build shared file index and replace path strings with integer indices."""
@@ -1391,7 +900,6 @@ def _indexed_output(all_candidates: list[str], entangled: list[dict],
           for h in horizon if h["file"] in idx_map] if horizon else []
     return {"files": all_files, "v": v, "ent": ent, "av": av, "hz": hz}
 
-
 def _marginal_candidate_score(rank: int, verify_with: list[str], entangled: list[dict], changed_bases: set[str]) -> float:
     """Estimate the probability that candidate at rank is the right one (0-1)."""
     if rank >= len(verify_with):
@@ -1407,7 +915,6 @@ def _marginal_candidate_score(rank: int, verify_with: list[str], entangled: list
             break
     base = 0.9 if stem else 0.3
     return round(min(1.0, base + ent), 3)
-
 
 def cartridge_report(path: str = ".", files: list[str] | None = None,
                      diff_ref: str | None = None, task: str | None = None) -> dict:
@@ -1586,7 +1093,6 @@ def cartridge_report(path: str = ".", files: list[str] | None = None,
 
     return result
 
-
 def cascade_verify(path: str = ".", changed_files: list[str] | None = None,
                    bootstrap: dict | None = None) -> dict:
     """Cascade verifier — hierarchical verification pipeline.
@@ -1678,7 +1184,6 @@ def cascade_verify(path: str = ".", changed_files: list[str] | None = None,
     if det:
         result["deterministic_verify"] = det
     return result
-
 
 def veto_cascade(path: str = ".", changed_files: list[str] | None = None,
                   bootstrap: dict | None = None) -> dict:
@@ -1809,7 +1314,6 @@ def veto_cascade(path: str = ".", changed_files: list[str] | None = None,
         "llm_prompt": prog_prompt,
     }
 
-
 def isolate_modules(path: str = ".", task: str = "") -> dict:
     """Pre-edit file discovery via structural module matching.
 
@@ -1904,7 +1408,6 @@ def isolate_modules(path: str = ".", task: str = "") -> dict:
         "flat_wave": all_zero,
         "entanglement_injection": injection if injection else None,
     }
-
 
 def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
                              snapshot: bool = False,
@@ -2022,7 +1525,6 @@ def drift_velocity_snapshot(path: str = ".", files: list[str] | None = None,
 
     return {"schema_version": 1, "files": results, "total_files": len(results), "any_anomalies": any(r.get("anomalies") for r in results)}
 
-
 def epidemiology_report(path: str = ".", lookback_weeks: int = 12) -> dict:
     """Viral R0 Contact Tracing — track phrase spread and displacement.
 
@@ -2108,7 +1610,6 @@ def epidemiology_report(path: str = ".", lookback_weeks: int = 12) -> dict:
         "antigen_count": sum(1 for r in results if r["class"] == "antigen"),
         "pathogen_count": sum(1 for r in results if r["class"] == "pathogen"),
     }
-
 
 def isothermal_entropy(path: str = ".", lookback_weeks: int = 12) -> dict:
     """Isothermal Limit — track directory-level entropy over time.
@@ -2205,7 +1706,6 @@ def isothermal_entropy(path: str = ".", lookback_weeks: int = 12) -> dict:
         "total_directories_scanned": len(dir_results),
     }
 
-
 def zk_proof_report(path: str = ".", schema_file: str = "", generated_code: str = "") -> dict:
     """Zk-Vocabulary Prover — verify generated code uses only allowed identifiers.
 
@@ -2299,7 +1799,6 @@ def zk_proof_report(path: str = ".", schema_file: str = "", generated_code: str 
         "unused_concepts": concept_checks[:10],
         "passed": len(violations) == 0,
     }
-
 
 def lagrange_report(path: str = ".", file_path: str = "") -> dict:
     """Lagrange Points — detect structurally isolated blocks within a file.
@@ -2403,9 +1902,7 @@ def lagrange_report(path: str = ".", file_path: str = "") -> dict:
         "primary_edges_max": max_edges,
     }
 
-
 _BUGFIX_PATTERN = re.compile(r'\b(fix|bug|hotfix|regression|defect|patch|repair)\b', re.IGNORECASE)
-
 
 def forecast_report(path: str = ".", files: list[str] | None = None,
                      lookback_commits: int = 500, seismic: bool = False) -> dict:
@@ -2493,7 +1990,6 @@ def forecast_report(path: str = ".", files: list[str] | None = None,
         })
     return {"schema_version": 1, "files": results, "total_files": len(results), "seismic": seismic}
 
-
 def _git_log_message(path: str, sha: str) -> str:
     try:
         import subprocess
@@ -2504,7 +2000,6 @@ def _git_log_message(path: str, sha: str) -> str:
         return out.stdout.decode("utf-8", errors="replace").strip()
     except Exception:
         return ""
-
 
 def triangulate_report(path: str = ".", task: str = "") -> dict:
     """Byzantine Triangulation — intersect 3 structural probes for target anchor.
@@ -2600,7 +2095,6 @@ def triangulate_report(path: str = ".", task: str = "") -> dict:
         "confidence": 3 if triple_overlap else (2 if double_overlap else 1),
     }
 
-
 _WORDLIST: set[str] | None = None
 
 def _load_wordlist() -> set[str]:
@@ -2619,7 +2113,6 @@ def _load_wordlist() -> set[str]:
         pass
     _WORDLIST = set()
     return _WORDLIST
-
 
 def solve_report(path: str = ".", top_n: int = 20, focus: str = "") -> dict:
     """Frequency Analysis Code-Breaking (The Bimoth Index).
@@ -2721,7 +2214,6 @@ def solve_report(path: str = ".", top_n: int = 20, focus: str = "") -> dict:
         result["lens_summary"] = f"Lens focus: {focus} — {len(top)} orbiting cipher keys, {len(orbiting_files)} orbiting files."
     return result
 
-
 def mycorrhiza_map(path: str = ".", files: list[str] | None = None,
                     min_rare_co_occurrences: int = 2) -> dict:
     """Detect hidden structural dependencies between files.
@@ -2819,7 +2311,6 @@ def mycorrhiza_map(path: str = ".", files: list[str] | None = None,
 
     return {"schema_version": 1, "files": result_files, "total_files": len(result_files)}
 
-
 def mycorrhiza_with_tolerance(path: str = ".", files: list[str] | None = None) -> dict:
     """mycorrhiza_map + Tolerance Gaging.
 
@@ -2902,7 +2393,6 @@ def mycorrhiza_with_tolerance(path: str = ".", files: list[str] | None = None) -
 
     return base
 
-
 # ██ Synergy: Composite / Pipeline Commands █████████████████████
 
 def pipeline_orient(path: str = ".", task: str = "") -> dict:
@@ -2925,7 +2415,6 @@ def pipeline_orient(path: str = ".", task: str = "") -> dict:
         "recommended_modules": [{"files": m.get("files", [])[:5], "exemplars": m.get("exemplar_phrases", [])[:3], "match_score": m.get("match_score", 0)} for m in iso_data.get("modules", [])[:3]],
         "total_files_in_scope": sum(m.get("size", 0) for m in iso_data.get("modules", [])[:3]),
     }
-
 
 def structural_health_score(path: str = ".", balance: bool = False) -> dict:
     if not vgit.is_repo(path):
@@ -2968,7 +2457,6 @@ def structural_health_score(path: str = ".", balance: bool = False) -> dict:
         result["root_shoot_balanced"] = "Features outgrowing core" if ratio > 3 else ("Core dominates" if ratio < 0.5 else "Balanced")
         result["phototropism_note"] = f"Features/Core vocabulary ratio: {ratio}:1" if ratio else "No clear feature/core directories detected"
     return result
-
 
 def pulsar_report(path: str = ".", file_path: str = "",
                    lookback_commits: int = 100) -> dict:
@@ -3021,7 +2509,6 @@ def pulsar_report(path: str = ".", file_path: str = "",
         "mandate": f"Restore missing anchor(s): {', '.join(missing[:3])}" if missing else "Pulsar rhythm stable.",
     }
 
-
 def pipeline_squeeze(path: str = ".", file: str = "", task: str = "") -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -3042,7 +2529,6 @@ def pipeline_squeeze(path: str = ".", file: str = "", task: str = "") -> dict:
     except Exception:
         visible = 0
     return {"file": file, "visible_lines": visible or 0, "lagrange_points": len(lag_points), "cipher_keys": cipher}
-
 
 def pipeline_certify(path: str = ".", changed_files: list[str] | None = None, generated_code: str = "", schema_file: str = "") -> dict:
     if not vgit.is_repo(path):
@@ -3084,7 +2570,6 @@ def pipeline_certify(path: str = ".", changed_files: list[str] | None = None, ge
     all_pass = all(c.get("passed", True) for c in certs.values())
     return {"all_passed": all_pass, "certificates": certs, "summary": "PASS" if all_pass else f"FAIL: {sum(1 for c in certs.values() if not c.get('passed', True))} check(s) failed"}
 
-
 def migrate_report(path_a: str, path_b: str, min_freq: int = 2) -> dict:
     if not vgit.is_repo(path_a):
         return {"error": f"path_a not a repo: {path_a}"}
@@ -3096,7 +2581,6 @@ def migrate_report(path_a: str, path_b: str, min_freq: int = 2) -> dict:
     source_c = [p["phrase"] for p in solve_a.get("bimoth_index", [])[:10]]
     new_c = [c for c in target_c if c not in source_c]
     return {"phrase_substitutions_count": 0, "removed_count": 0, "added_count": 0, "target_specific_cipher_keys": new_c[:8], "substitutions": []}
-
 
 def deflate_report(path: str = ".", file_path: str = "",
                     proposed_diff: str = "", budget: int = 5) -> dict:
@@ -3127,7 +2611,6 @@ def deflate_report(path: str = ".", file_path: str = "",
     over = len(net_new_f) > budget
     return {"file": file_path, "budget": budget, "net_new_identifiers": net_new_f[:budget+5], "net_new_count": len(net_new_f), "over_budget": over, "deflate_check_pass": not over, "mandate": f"Gold Standard: budget {budget}, used {len(net_new_f)}. Reduce by {len(net_new_f)-budget}." if over else "Gold Standard respected.", "existing_reserve": sorted(existing_tokens)[:8]}
 
-
 def compound_debt_index(path: str = ".", files: list[str] | None = None) -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -3157,7 +2640,6 @@ def compound_debt_index(path: str = ".", files: list[str] | None = None) -> dict
     results.sort(key=lambda x: -x["compound_debt"])
     return {"files": results[:20], "overall_debt_index": round(sum(r["compound_debt"] for r in results[:5]) / max(len(results[:5]), 1), 3) if results else 0}
 
-
 def guard_pipeline(path: str = ".", files: list[str] | None = None, task: str = "", bootstrap: dict | None = None) -> dict:
     path = os.path.abspath(path) if path else "."
     changed = list(files) if files else []
@@ -3180,7 +2662,6 @@ def guard_pipeline(path: str = ".", files: list[str] | None = None, task: str = 
     except Exception as e:
         result["contract"] = {"error": str(e)}
     return {"task": task, "changed_files": changed, "verification": result.get("verification", {}), "scope": result.get("scope", {}), "contract": result.get("contract", {}), "all_checks_ran": "verification" in result and "scope" in result and "contract" in result}
-
 
 def anneal_report(path: str = ".", file_path: str = "", task: str = "",
                    shield_threshold: float = 0.0) -> dict:
@@ -3260,7 +2741,6 @@ def anneal_report(path: str = ".", file_path: str = "", task: str = "",
                                 "preview": "".join(lines[start:end + 1]).strip()[:200]}
     return base_data
 
-
 def _attractor_cluster(changed: list[str], analysis) -> dict | None:
     """Identify the Strange Attractor cluster where blast radius terminates.
 
@@ -3329,7 +2809,6 @@ def _attractor_cluster(changed: list[str], analysis) -> dict | None:
         "ratio_of_blast": round(best_ratio, 3),
         "note": f"Blast radius terminates in [{best_cl}] cluster" if best_ratio > 0.5 else None,
     }
-
 
 def decay_report(path: str = ".", file_path: str = "",
                   lookback_weeks: int = 12, half_life_days: int = 30,
@@ -3405,7 +2884,6 @@ def decay_report(path: str = ".", file_path: str = "",
         "mandate": f"Clear {len(decaying)} legacy pattern(s) before adding new logic." if decaying else "No active migration needed.",
     }
 
-
 def heisenberg_check(path: str = ".", file_path: str = "",
                       proposed_diff: str = "") -> dict:
     """Heisenberg Uncertainty Principle of Refactoring.
@@ -3460,7 +2938,6 @@ def heisenberg_check(path: str = ".", file_path: str = "",
         "mandate": "Split this diff: Commit 1 = refactor ONLY (move/rename anchors), Commit 2 = feature ONLY (add new signal)." if has_new_signal and has_deleted_anchors else "Uncertainty principle respected.",
     }
 
-
 def traffic_control_report(path: str = ".", file_path: str = "",
                             intended_import: str = "") -> dict:
     """Zoning Variances — detect illegal Highway-to-Residential imports.
@@ -3514,7 +2991,6 @@ def traffic_control_report(path: str = ".", file_path: str = "",
         "mandate": "ZONING VIOLATION: Direct Residential-to-Commercial import blocked. Create or use an intermediate service layer." if violation else "Import route clear.",
     }
 
-
 def splice_exons_report(path: str = ".", file_path: str = "") -> dict:
     """Intron Splicing — extract assertion exons from test boilerplate."""
     if not vgit.is_repo(path):
@@ -3558,7 +3034,6 @@ def splice_exons_report(path: str = ".", file_path: str = "") -> dict:
     return {"file": file_path, "original_lines": len(lines), "exon_count": len(exons),
             "compression_pct": round((1 - len(exons) / max(len(lines), 1)) * 100, 1),
             "exons": exons}
-
 
 def catalytic_crack_report(path: str = ".", file_path: str = "") -> dict:
     """Fluid Catalytic Cracking — split monolith by internal vocabulary clusters."""
@@ -3631,7 +3106,6 @@ def catalytic_crack_report(path: str = ".", file_path: str = "") -> dict:
         "fragment_vocabularies": [{f"File {f['fragment_index']}": f['cluster_phrases']} for f in fragments],
     }
 
-
 def hologram_report(path: str = ".", directory: str = "") -> dict:
     """Holographic Boundary Projector — module surface vs volume.
 
@@ -3698,7 +3172,6 @@ def hologram_report(path: str = ".", directory: str = "") -> dict:
         "hologram": f"[Imports: {', '.join(imports[:5])}] -> (HIDDEN: {len(hidden)} phrases, {interior_file_count} files) -> [Exports: {', '.join(exports[:5])}]",
         "interior_files": interior_files[:5],
     }
-
 
 def shard_context_report(path: str = ".", files: list[str] | None = None,
                           task: str = "", shard_count: int = 3) -> dict:
@@ -3773,7 +3246,6 @@ def shard_context_report(path: str = ".", files: list[str] | None = None,
         "shard_workflow": f"Launch {len([s for s in shards if s])} parallel agents. Reconcile via check-plan.",
     }
 
-
 def sentinel_report(path: str = ".", task: str = "") -> dict:
     """Sentinel Anchor — honeypot phrases to detect LLM hallucination.
 
@@ -3813,7 +3285,6 @@ def sentinel_report(path: str = ".", task: str = "") -> dict:
         "sentinel_instruction": f"Allowed vocabulary includes: {', '.join(sentinel_candidates)}. These are structural anchors.",
         "detection": f"If the response contains any of {sentinel_candidates} while discussing '{task}', the LLM is hallucinating.",
     }
-
 
 def dark_matter_report(repo_a: str, repo_b: str) -> dict:
     """Dark Matter Compiler — cross-repo orphan projection.
@@ -3883,7 +3354,6 @@ def dark_matter_report(repo_a: str, repo_b: str) -> dict:
         "mandate": f"{len(dark_matter)} orphan(s) in A structurally bind to B. Do not change payload signatures without syncing B.",
     }
 
-
 def supernova_report(path: str = ".", overlap_threshold: float = 0.90,
                       lookback_weeks: int = 8) -> dict:
     """Supernova Threshold — convergence vs divergence prediction.
@@ -3939,7 +3409,6 @@ def supernova_report(path: str = ".", overlap_threshold: float = 0.90,
         "threshold": overlap_threshold,
         "summary": f"{sum(1 for r in results if r['action']=='MERGE')} mergeable, {sum(1 for r in results if r['action']=='KEEP_SEPARATE')} diverging, {sum(1 for r in results if r['action']=='MONITOR')} stable",
     }
-
 
 def chrono_lock_report(path: str = ".", file_path: str = "",
                         proposed_diff: str = "", max_age_gap: int = 2) -> dict:
@@ -4035,7 +3504,6 @@ def chrono_lock_report(path: str = ".", file_path: str = "",
         "mandate": f"Temporal Violation: Center of mass is {center_of_mass}, but diff introduces phrases from {max_diff_year}. Gap of {forward_gap} year(s) exceeds threshold {max_age_gap}. Use era-appropriate paradigm." if anomaly else "Chrono-lock respected.",
     }
 
-
 def necrotic_report(path: str = ".", file_path: str = "",
                      lookback_weeks: int = 12) -> dict:
     """Necrotic Resonance Map — detect zombie code with zero blast radius.
@@ -4120,7 +3588,6 @@ def necrotic_report(path: str = ".", file_path: str = "",
         "necrotic": necrotic,
         "mandate": f"Necrotic tissue detected. 0 blast radius, {len(file_orphans)} orphans, lifecycle: {file_lifecycle}. DELETE this file." if necrotic else "File is healthy.",
     }
-
 
 def metamorphic_mask_report(source_path: str, target_path: str,
                              source_ref: str = "HEAD~1") -> dict:
@@ -4218,7 +3685,6 @@ def metamorphic_mask_report(source_path: str, target_path: str,
         "migration_order": "Apply mask to loose craters first, then tight." if craters else "No impact craters found.",
     }
 
-
 def capillary_report(path: str = ".", top_n: int = 5) -> dict:
     """Capillary action — high-edge-count files (brittle coupling)."""
     if not vgit.is_repo(path):
@@ -4250,7 +3716,6 @@ def capillary_report(path: str = ".", top_n: int = 5) -> dict:
     return {"type": "capillary", "files_scanned": total,
             "capillaries": [{"file": p, "edges": e, "ratio": r} for p, e, r in scores[:top_n]]}
 
-
 def spectral_gap_report(path: str = ".") -> dict:
     """Spectral gap — cluster-size distribution ratio (modularity score)."""
     if not vgit.is_repo(path):
@@ -4269,7 +3734,6 @@ def spectral_gap_report(path: str = ".") -> dict:
     return {"type": "spectral_gap", "total_clusters": len(sizes),
             "cluster_sizes": sizes[:5], "spectral_gap": gap,
             "modularity": "high" if gap >= 3 else ("moderate" if gap >= 1.5 else "low")}
-
 
 def phantom_report(path: str = ".") -> dict:
     """Phantom patterns — framework/library detection from import phrases."""
@@ -4296,7 +3760,6 @@ def phantom_report(path: str = ".") -> dict:
                     frameworks[fw] += 1
     detected = {k: v for k, v in frameworks.items() if v >= 2}
     return {"type": "phantom", "frameworks_detected": detected}
-
 
 def guide_report(path: str = ".", file_path: str = "") -> dict:
     """Guide RNA — unique-in-repo phrase for 1-token file location."""
@@ -4331,7 +3794,6 @@ def guide_report(path: str = ".", file_path: str = "") -> dict:
     return {"guide": best[0] if best else file_path.replace("\\", "/").split("/")[-1].split(".")[0],
             "file": file_path, "confidence": "distinctive"}
 
-
 def parity_bit_report(path: str = ".", ref_a: str = "", ref_b: str = "") -> dict:
     """Parity bit — XOR hash of test mirror for CI gate."""
     if not vgit.is_repo(path):
@@ -4361,7 +3823,6 @@ def parity_bit_report(path: str = ".", ref_a: str = "", ref_b: str = "") -> dict
     return {"type": "parity_bit", "ref_a": ref_a, "ref_b": ref_b,
             "hash_a": h_a, "hash_b": h_b, "mirror_unchanged": h_a == h_b}
 
-
 def trap_report(path: str = ".", file_a: str = "", file_b: str = "") -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -4390,7 +3851,6 @@ def trap_report(path: str = ".", file_a: str = "", file_b: str = "") -> dict:
     overlap = round(len(ta & tb) / u, 3)
     return {"file_a": file_a, "file_b": file_b, "overlap": overlap,
             "label": "divergence gap" if overlap < 0.1 else ("over-trap" if overlap > 0.3 else "ideal trap")}
-
 
 def thanatosis_report(path: str = ".") -> dict:
     if not vgit.is_repo(path):
@@ -4434,7 +3894,6 @@ def thanatosis_report(path: str = ".") -> dict:
     res.sort(key=lambda x: -x["risk_ratio"])
     return {"files": res[:8], "count": len(res)}
 
-
 def trompe_report(path: str = ".", file_path: str = "") -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
@@ -4464,7 +3923,6 @@ def trompe_report(path: str = ".", file_path: str = "") -> dict:
     return {"file": file_path, "apparent_lines": apparent, "true_identifiers": true_comp,
             "trompe_ratio": ratio,
             "label": "skip at 4x speed" if ratio > 3 else ("2x attention" if ratio < 0.3 else "normal")}
-
 
 def escape_velocity_report(path: str = ".", min_freq: int = 3) -> dict:
     """Weighted removal effort — phrase escape velocity from gravity well."""
@@ -4513,7 +3971,6 @@ def escape_velocity_report(path: str = ".", min_freq: int = 3) -> dict:
         tagged.append({"phrase": phrase, "frequency": count, "escape_velocity": ev, "label": label})
     return {"tagged": tagged[:20], "thresholds": {"ESCAPED": "<3", "BOUND": "3-10", "DEEP": ">10"}}
 
-
 def porosity_report(path: str = ".") -> dict:
     from quale.scanner import scan_codebase
     if not vgit.is_repo(path):
@@ -4536,7 +3993,6 @@ def porosity_report(path: str = ".") -> dict:
     por = 1 - (obs / p) if p > 0 else 1
     exp = 1 - (1 / u) if u > 1 else 1
     return {"porosity": round(por, 6), "excess_porosity": round(por - exp, 6), "identifiers": u, "files": len(sizes)}
-
 
 def thylacine_report(path: str = ".") -> dict:
     import collections
@@ -4585,8 +4041,6 @@ def thylacine_report(path: str = ".") -> dict:
         if ec >= 1 and ic == 0:
             results.append({"identifier": ident[:40], "files": len(files)})
     return {"thylacines": results[:8]}
-
-
 
 def guard_report(path: str = ".", file_path: str = "", task: str = "") -> dict:
     if not vgit.is_repo(path):
@@ -4743,7 +4197,6 @@ def condensate_report(path: str = ".", overlap_threshold: float = 0.90,
         "condensates": condensates[:max_results],
     }
 
-
 def chirality_report(path: str = ".", min_overlap: float = 0.80) -> dict:
     """Chirality — same vocabulary, zero co-change, disjoint callers."""
     if not vgit.is_repo(path):
@@ -4802,7 +4255,6 @@ def chirality_report(path: str = ".", min_overlap: float = 0.80) -> dict:
         "pair_count": len(chirality_pairs),
         "chirality_pairs": chirality_pairs[:20],
     }
-
 
 def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
     """Seed the adaptive router's fragment matrix using git history.
@@ -4883,7 +4335,6 @@ def seed_fragment_matrix(path: str = ".", max_commits: int = 20) -> dict:
 
     return {"schema_version": 1, "seeded_trials": seeded_count}
 
-
 def _structural_cohesion_score(file_path: str, file_vocabs: list) -> float:
     """Ratio of identifiers unique to this file vs shared across the codebase.
 
@@ -4916,13 +4367,10 @@ def _structural_cohesion_score(file_path: str, file_vocabs: list) -> float:
     total = internal_count + external_count
     return round(internal_count / total, 3)
 
-
 _B_CELL_DIR = ".reliary/quale/b_cells/"
-
 
 def _b_cell_path(repo_path: str) -> str:
     return os.path.join(os.path.abspath(repo_path), _B_CELL_DIR)
-
 
 def _content_hash(file_rel: str, repo_path: str) -> str:
     """Non-cryptographic structural hash of file content (first 16 hex)."""
@@ -4935,7 +4383,6 @@ def _content_hash(file_rel: str, repo_path: str) -> str:
     if content:
         return hashlib.sha256(content.encode()).hexdigest()[:16]
     return ""
-
 
 def _b_cell_lookup(repo_path: str, file_path: str) -> dict | None:
     """Look up cached verification outcome for a changed file."""
@@ -4953,7 +4400,6 @@ def _b_cell_lookup(repo_path: str, file_path: str) -> dict | None:
             except Exception:
                 return None
     return None
-
 
 def _b_cell_store(repo_path: str, file_path: str,
                   verify_file: str | None, outcome: str,
@@ -4973,7 +4419,6 @@ def _b_cell_store(repo_path: str, file_path: str,
     path = os.path.join(cache_dir, f"{h}_{vf_tag}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(entry, f, indent=2, default=str)
-
 
 def _b_cell_hit(repo_path: str, file_path: str):
     """Increment hit counter for an existing cache entry."""
@@ -5014,9 +4459,6 @@ def _vaccination_notes(file_classifications: list[dict]) -> list[str]:
             notes.append(_GAP_PATTERNS[gap])
     return notes
 
-
-
-
 def verify_classify_report(path: str = ".", files: list[str] | None = None,
                             diff_ref: str | None = None) -> dict:
     """Gap signature per changed file: verifiability, gap type, vaccination notes."""
@@ -5030,9 +4472,6 @@ def verify_classify_report(path: str = ".", files: list[str] | None = None,
         "verification_confidence": preflight.get("verification_confidence", {}),
         "guardrails": {"mode": "report_only", "caveat": "Gap classes are structural heuristics."},
     }
-
-
-
 
 def reverse_verify_report(path: str = ".", files: list[str] | None = None,
                            diff_ref: str | None = None) -> dict:
@@ -5098,12 +4537,6 @@ def reverse_verify_report(path: str = ".", files: list[str] | None = None,
     }
     return result
 
-
-
-
-
-
-
 def verification_drift(path: str = ".", commits: int = 10) -> dict:
     """Track verification confidence across recent commits."""
     from quale.scanner import scan_codebase
@@ -5168,7 +4601,6 @@ def verification_drift(path: str = ".", commits: int = 10) -> dict:
         "has_drift": alerter.has_drift,
     }
 
-
 class _DriftAlerter:
     """Detect 3-consecutive confidence drops and sudden gap events."""
     def __init__(self):
@@ -5198,12 +4630,6 @@ class _DriftAlerter:
             self.has_drift = True
 
         self._prev_level = numeric
-
-
-
-
-
-
 
 def covalent_verify_bonds(path: str = ".", files: list[str] | None = None) -> dict:
     """Detect when a change requires running multiple test files together."""
@@ -5264,9 +4690,6 @@ def covalent_verify_bonds(path: str = ".", files: list[str] | None = None) -> di
         "guardrails": {"mode": "report_only", "caveat": "Bonds are vocabulary overlap hints."},
     }
 
-
-
-
 def _file_type(path: str) -> str:
     """Classify file type for fragment matrix routing."""
     base = os.path.basename(path).lower()
@@ -5287,9 +4710,7 @@ def _file_type(path: str) -> str:
         return "ex_test" if base.endswith("_test.exs") else "ex"
     return ext.lstrip(".") or "unknown"
 
-
 _FRAGMENT_MATRIX_PATH = ".reliary/quale/fragment_matrix.json"
-
 
 def _load_fragment_matrix(path: str = ".") -> dict:
     """Load fragment matrix from cache. Returns {(repo, file_type, condition): {hit_count, trial_count}}."""
@@ -5308,14 +4729,12 @@ def _load_fragment_matrix(path: str = ".") -> dict:
         result[key] = {"hit_count": e.get("hit_count", 0), "trial_count": e.get("trial_count", 0), "updated_at": e.get("updated_at", "")}
     return result
 
-
 def _save_fragment_matrix(path: str, entries: list[dict]):
     """Save fragment matrix entries to cache."""
     fp = os.path.join(os.path.abspath(path), _FRAGMENT_MATRIX_PATH)
     os.makedirs(os.path.dirname(fp), exist_ok=True)
     with open(fp, "w", encoding="utf-8") as f:
         json.dump({"schema_version": 1, "entries": entries}, f, indent=2, default=str)
-
 
 def _has_code_phrase(token: str) -> bool:
     """True if token contains code-specific characters (braces, parens, operators)."""
@@ -5334,12 +4753,10 @@ def _has_code_phrase(token: str) -> bool:
             return True
     return False
 
-
 _DECLARATIVE_LANGUAGES = frozenset({
     "YAML", "JSON", "XML", "TOML", "Markdown", "INI",
     "Text", "Dockerfile", "Makefile", "Shell", "Env",
 })
-
 
 def _is_declarative_changed(changed: list[str], file_vocabs) -> bool:
     """Return True if all changed files are declarative (no code identifiers)."""
@@ -5355,7 +4772,6 @@ def _is_declarative_changed(changed: list[str], file_vocabs) -> bool:
             return False
     return True
 
-
 def _same_package_prefix(test_dir: str, src_dir: str) -> bool:
     """True if directories share a meaningful package prefix (at least 2 segments)."""
     t_parts = test_dir.replace("\\", "/").split("/")
@@ -5365,7 +4781,6 @@ def _same_package_prefix(test_dir: str, src_dir: str) -> bool:
     if t_parts[0] != s_parts[0]:
         return False
     return sum(1 for a, b in zip(t_parts, s_parts, strict=False) if a == b) >= 2
-
 
 _CO_LOCATED_CONVENTIONS = [
     ("src", "tests", 0.5),
@@ -5381,7 +4796,6 @@ def _monorepo_package_prefix(p: str) -> str | None:
     if len(parts) >= 3 and parts[0] == "packages":
         return f"packages/{parts[1]}"
     return None
-
 
 def _co_located_tests(changed: list[str], file_vocabs) -> list[dict]:
     """Find test files co-located with changed files using directory mirrors."""
@@ -5449,7 +4863,6 @@ def _co_located_tests(changed: list[str], file_vocabs) -> list[dict]:
             uniq.append(c)
     return uniq[:5]
 
-
 def _append_fragment_entry(path: str, file_type: str, condition: str, candidates_count: int, verify_hit: bool, changed_files: list[str] | None = None):
     """Append a labeled trial outcome to the fragment matrix."""
     try:
@@ -5466,7 +4879,6 @@ def _append_fragment_entry(path: str, file_type: str, condition: str, candidates
         _save_fragment_matrix(path, entries)
     except Exception:
         pass
-
 
 def _deterministic_verify(verify_with: list[str], entangled: list[dict], changed_bases: set[str]) -> dict | None:
     """Check if verification choice is structurally unambiguous. Returns {file, score, rule} or None."""
@@ -5491,7 +4903,6 @@ def _deterministic_verify(verify_with: list[str], entangled: list[dict], changed
             return {"file": verify_with[0], "score": 0.75, "rule": "clear_leader"}
     return None
 
-
 def _negative_verify_files(changed: list[str], file_vocabs: list) -> list[str]:
     """Test files with zero vocabulary overlap with changed files."""
     changed_set = set(changed)
@@ -5514,7 +4925,6 @@ def _negative_verify_files(changed: list[str], file_vocabs: list) -> list[str]:
     negatives.sort()
     return negatives[:5]
 
-
 def _cost_tier(candidate: str, changed: list[str]) -> str:
     """Classify verification cost: unit, integration, or e2e."""
     for cf in changed:
@@ -5524,7 +4934,6 @@ def _cost_tier(candidate: str, changed: list[str]) -> str:
     if any(seg in path.split(os.sep) for seg in ("e2e", "integration", "functional", "playwright", "cypress")):
         return "e2e"
     return "integration"
-
 
 def _verification_horizon(verify_with: list[str], entangled: list[dict], changed: list[str], changed_bases: set[str]) -> list[dict]:
     """Ordered verification candidates with cost tiers."""
@@ -5539,7 +4948,6 @@ def _verification_horizon(verify_with: list[str], entangled: list[dict], changed
     horizon.sort(key=lambda x: (0 if x["stem_match"] else 1, 0 if x["tier"] == "unit" else (1 if x["tier"] == "integration" else 2), -x["entanglement_score"]))
     return horizon
 
-
 def _oscillator_candidates(changed: list[str], file_vocabs: list, matrix: dict, bootstrap: dict | None) -> dict:
     """Run 3 guidance variants, compute intersection."""
     scope_cands = set(_preflight_verify_files(changed, None, file_vocabs))
@@ -5549,7 +4957,6 @@ def _oscillator_candidates(changed: list[str], file_vocabs: list, matrix: dict, 
     intersection = scope_cands & cart_cands & ent_cands
     union = scope_cands | cart_cands | ent_cands
     return {"intersection": sorted(intersection)[:3] if intersection else [], "union": sorted(union)[:5] if union else [], "intersection_ratio": round(len(intersection) / max(len(union), 1), 2), "verdict": "strong" if intersection else "divergent"}
-
 
 def _self_assess_hit(path: str, changed: list[str], chosen_verify: str) -> bool:
     """Determine if chosen_verify shares vocabulary with changed files."""
@@ -5568,7 +4975,6 @@ def _self_assess_hit(path: str, changed: list[str], chosen_verify: str) -> bool:
         return False
     except Exception:
         return False
-
 
 def check_diff_report(path: str = ".", diff_ref: str = "HEAD~1") -> dict:
     """Post-proposal defect scan: detect edits that break repo structure."""
@@ -5618,7 +5024,6 @@ def check_diff_report(path: str = ".", diff_ref: str = "HEAD~1") -> dict:
         "max_severity": max((d.get("severity", "low") for d in defects), default="none") if defects else "none",
     }
 
-
 def _normalize_preflight_files(repo_path: str, files: list[str]) -> list[str]:
     normalized = []
     for item in files:
@@ -5633,9 +5038,6 @@ def _normalize_preflight_files(repo_path: str, files: list[str]) -> list[str]:
                 continue
             normalized.append(rel)
     return normalized
-
-
-
 
 def _preflight_read_first(changed: list[str], bootstrap: dict | None, blast: list[dict]) -> list[str]:
     reads = list(changed[:3])
@@ -5653,9 +5055,6 @@ def _preflight_read_first(changed: list[str], bootstrap: dict | None, blast: lis
         if file and file not in reads:
             reads.append(file)
     return reads[:3]
-
-
-
 
 def _preflight_verify_files(changed: list[str], bootstrap: dict | None, file_vocabs) -> list[str]:
     verify = []
@@ -5689,9 +5088,6 @@ def _preflight_verify_files(changed: list[str], bootstrap: dict | None, file_voc
     ))
     return verify[:5]
 
-
-
-
 def _preflight_avoid(changed: list[str], stable_touched: list[dict], blast: list[dict], bootstrap: dict | None,
                      verify_with: list[str] | None = None) -> list[str]:
     avoid = []
@@ -5706,9 +5102,6 @@ def _preflight_avoid(changed: list[str], stable_touched: list[dict], blast: list
         if file and file not in excluded:
             avoid.append(file)
     return list(dict.fromkeys(avoid))[:5]
-
-
-
 
 def _preflight_reasons(changed: list[str], stable_touched: list[dict], blast: list[dict], mirror: dict) -> list[str]:
     reasons = []
@@ -5725,9 +5118,6 @@ def _preflight_reasons(changed: list[str], stable_touched: list[dict], blast: li
         reasons.append("file-scoped local scan")
     return reasons[:4]
 
-
-
-
 def _preflight_risk(changed: list[str], stable_touched: list[dict], blast: list[dict]) -> str:
     top_shared = blast[0].get("shared_concepts", 0) if blast else 0
     if stable_touched and (top_shared > 10 or len(blast) > 10):
@@ -5737,9 +5127,6 @@ def _preflight_risk(changed: list[str], stable_touched: list[dict], blast: list[
     if stable_touched or top_shared > 8 or len(blast) > 5:
         return "moderate"
     return "low"
-
-
-
 
 def _preflight_confidence(changed: list[str], bootstrap: dict | None, file_vocabs) -> str:
     existing = {fv.path for fv in file_vocabs}
@@ -5752,16 +5139,10 @@ def _preflight_confidence(changed: list[str], bootstrap: dict | None, file_vocab
         return "mixed"
     return "low"
 
-
-
-
 def _contract_id(prefix: str, index: int, path: str) -> str:
     import hashlib
     suffix = hashlib.sha256(f"{prefix}:{index}:{path}".encode()).hexdigest()[0]
     return f"{prefix}{index}{suffix}"
-
-
-
 
 def _expand_scope_ids(value: Any) -> list[str]:
     if isinstance(value, str):
@@ -5775,9 +5156,6 @@ def _expand_scope_ids(value: Any) -> list[str]:
         elif isinstance(item, dict) and isinstance(item.get("id"), str):
             result.append(item["id"])
     return result
-
-
-
 
 def _scope_creep_guard(changed: list[str], avoid_expanding: list[str], stable_touched: list[dict], blast: list[dict]) -> dict:
     questioned: list[dict] = []
@@ -5801,10 +5179,7 @@ def _scope_creep_guard(changed: list[str], avoid_expanding: list[str], stable_to
         "never_block": True,
     }
 
-
 # ── Verification deserts ─────────────────────────────────────────
-
-
 
 def _explain_verify_candidates(changed: list[str], bootstrap: dict | None, file_vocabs, verify_with: list[str]) -> list[dict[str, str]]:
     """Return per-candidate match reason for each verification file."""
@@ -5838,14 +5213,8 @@ def _explain_verify_candidates(changed: list[str], bootstrap: dict | None, file_
         details.append({"path": vpath, "reason": "test discovery convention"})
     return details[:5]
 
-
-
-
 def _looks_like_path(value: str) -> bool:
     return "/" in value or "\\" in value or bool(re.search(r"\.[A-Za-z0-9]{1,8}$", value))
-
-
-
 
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, str):
@@ -5854,16 +5223,10 @@ def _string_list(value: Any) -> list[str]:
         return [item for item in value if isinstance(item, str)]
     return []
 
-
-
-
 def _source_stem(path: str) -> str:
     base = os.path.basename(path).lower()
     stem = os.path.splitext(base)[0]
     return stem.replace(".", "").replace("_", "").replace("-", "")
-
-
-
 
 def _test_stem(path: str) -> str:
     base = os.path.basename(path).lower()
@@ -5871,9 +5234,6 @@ def _test_stem(path: str) -> str:
     for marker in ("test_", "_test", ".test", "spec_", "_spec", ".spec"):
         stem = stem.replace(marker, "")
     return stem.replace(".", "").replace("_", "").replace("-", "")
-
-
-
 
 def _verification_candidates_for_source(source_path: str, stem: str, test_paths: list[str], test_by_stem: dict[str, list[str]]) -> list[str]:
     candidates = list(test_by_stem.get(stem, []))
@@ -5890,9 +5250,6 @@ def _verification_candidates_for_source(source_path: str, stem: str, test_paths:
         if overlap and os.path.basename(source_path).split(".")[0].lower() in test_lower:
             candidates.append(test)
     return list(dict.fromkeys(candidates))[:5]
-
-
-
 
 def _verification_confidence(changed: list[str], verify_with: list[str], mirror: dict | None, file_vocabs) -> dict:
     existing = {fv.path for fv in file_vocabs}
@@ -5927,9 +5284,6 @@ def _verification_confidence(changed: list[str], verify_with: list[str], mirror:
         "caveat": "Candidates are structural hints, not proof of test coverage.",
     }
 
-
-
-
 def _verification_desert_reason(score: float, candidates: list[str], test_dirs: set[str], source_path: str) -> str:
     if candidates:
         return "only one obvious verification candidate" if len(candidates) == 1 else "has structural test mirror"
@@ -5939,10 +5293,7 @@ def _verification_desert_reason(score: float, candidates: list[str], test_dirs: 
         return "no same-name or nearby test mirror found"
     return "nearby test directory exists, but no direct source/test mirror found"
 
-
 # ── Vocab routing policy ─────────────────────────────────────────
-
-
 
 def _verification_desert_score(source_path: str, candidates: list[str], test_dirs: set[str]) -> float:
     if candidates:
@@ -5957,9 +5308,6 @@ def _verification_desert_score(source_path: str, candidates: list[str], test_dir
     if any(part in {"examples", "scripts", "docs"} for part in parts):
         score = min(score, 0.45)
     return score
-
-
-
 
 def verification_deserts(path: str, max_results: int = 20) -> dict:
     """Find source files with weak structural verification mirrors.
@@ -6031,9 +5379,6 @@ def verification_deserts(path: str, max_results: int = 20) -> dict:
         },
     }
 
-
-
-
 def _classify_verifiability(filepath: str, changed: list[str], verify_with: list[str],
                             file_vocabs, analysis) -> dict:
     """Classify a single changed file's verifiability class.
@@ -6090,9 +5435,6 @@ def _classify_verifiability(filepath: str, changed: list[str], verify_with: list
     return {"file": filepath, "verifiability": "verifiable", "gap_type": None,
             "reason": "verification candidates found by structural scan", "confidence": "mixed"}
 
-
-
-
 def _route_path(path: str, changed: list[str], analysis, task: str | None = None) -> str:
     """Determine the correct intervention tier for a given change set."""
     from quale.scanner import _is_generated
@@ -6124,7 +5466,6 @@ def _route_path(path: str, changed: list[str], analysis, task: str | None = None
         pass
     return "verify"
 
-
 def _adaptive_route(path: str, changed: list[str], analysis, task: str | None = None) -> dict:
     """Returns {action, condition, route_reason} with fragment matrix awareness."""
     default_action = _route_path(path, changed, analysis, task)
@@ -6144,7 +5485,6 @@ def _adaptive_route(path: str, changed: list[str], analysis, task: str | None = 
     if best["hit_rate"] >= 0.8 and best["condition"] != default_action and best["trials"] >= 3:
         return {"action": "verify", "condition": best["condition"], "route_reason": f"fragment matrix: {repo}/{dom_type} -> {best['condition']} ({best['hit_rate']:.0%}, {best['trials']} trials)"}
     return {"action": default_action, "condition": default_action, "route_reason": "default rules"}
-
 
 def route_recommendation(path: str, task: str | None = None, files: list[str] | None = None) -> dict:
     """Decide intervention tier: none / verify / contract / human.
@@ -6225,7 +5565,6 @@ def route_recommendation(path: str, task: str | None = None, files: list[str] | 
         },
         "confidence": "high" if normalized_files else "mixed",
     }
-
 
 def build_contract(path: str = ".", files: list[str] | None = None,
                    task: str | None = None) -> dict:
@@ -6309,9 +5648,6 @@ def build_contract(path: str = ".", files: list[str] | None = None,
         },
     }
 
-
-
-
 def validate_plan(contract: dict, proposal: dict, allow_paths: bool = False) -> dict:
     """Validate an LLM plan against an ID-coded contract."""
     file_map = contract.get("files", {}) if isinstance(contract.get("files"), dict) else {}
@@ -6383,7 +5719,6 @@ def validate_plan(contract: dict, proposal: dict, allow_paths: bool = False) -> 
         },
     }
 
-
 def _active_gene_pool(path: str, active_days: int) -> set[str]:
     """Return files modified within active_days."""
     import subprocess
@@ -6401,14 +5736,12 @@ def _active_gene_pool(path: str, active_days: int) -> set[str]:
     except Exception:
         return set()
 
-
 def _task_is_vague(task: str) -> bool:
     words = [word for word in re.findall(r"[A-Za-z0-9_]+", task.lower()) if len(word) > 2]
     vague = {"fix", "improve", "update", "change", "refactor", "clean", "reliability", "performance", "bug", "stuff", "thing"}
     if len(words) <= 3:
         return True
     return sum(1 for word in words if word in vague) / max(len(words), 1) >= 0.5
-
 
 def _is_weird_language(path: str) -> bool:
     """Heuristic: return True if this repo is dominated by a language with weak structural-test mirroring."""
@@ -6429,7 +5762,6 @@ def _is_weird_language(path: str) -> bool:
         return (mainstream_count / total) < 0.5 if total > 0 else True
     except Exception:
         return False
-
 
 def _classify_files(
     changed: list[str],
@@ -6499,7 +5831,6 @@ def _classify_files(
             "persistence": round(sc.get("persistence", 0), 2) if sc else 0,
         })
     return results
-
 
 # ── Stability anchors ─────────────────────────────────────────────
 
@@ -6573,7 +5904,6 @@ def compute_stability(path: str, weeks: int = 12, min_appearances: int = 4) -> l
     results.sort(key=lambda x: x["persistence"])
     return results
 
-
 # ── Lifecycles ────────────────────────────────────────────────────
 
 _DEAD_CODE_EXTS = frozenset({
@@ -6588,7 +5918,6 @@ _DEAD_CODE_EXTS = frozenset({
     ".sml", ".fs", ".fsx",
     ".r", ".jl", ".scala",
 })
-
 
 def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
     """Concept lifecycles using git diff (no per-file content reads).
@@ -6823,7 +6152,6 @@ def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
                                    -x["age_weeks"]))
     return lifecycles
 
-
 # ── Concept timeline ──────────────────────────────────────────────
 
 def concept_timeline(path: str, weeks: int = 12) -> list[dict]:
@@ -6891,7 +6219,6 @@ def concept_timeline(path: str, weeks: int = 12) -> list[dict]:
     timeline.reverse()
     return timeline
 
-
 # ── Cached scan cache for delta / anomaly detection ───────────────
 
 _CACHE_DIR = ".quale-cache"
@@ -6915,16 +6242,13 @@ def _save_cached(path: str, data: dict) -> None:
     with open(cp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-
 # ── Calibration (T7) ──────────────────────────────────────────────
 
 _CALIBRATION_FILE = "calibration.jsonl"
 
-
 def _calibration_path(path: str) -> str:
     """Path to calibration log under .quale-cache."""
     return os.path.join(path, _CACHE_DIR, _CALIBRATION_FILE)
-
 
 def _record_calibration(path: str, record: dict) -> None:
     """Append one calibration record to the JSONL file."""
@@ -6936,12 +6260,10 @@ def _record_calibration(path: str, record: dict) -> None:
     except Exception:
         pass  # calibration logging is best-effort
 
-
 def _repo_hash(path: str) -> str:
     """Stable hash for a repo (based on real path)."""
     import hashlib
     return hashlib.sha256(os.path.realpath(path).encode()).hexdigest()[:16]
-
 
 def compute_calibration(path: str, last_n: int = 100) -> dict:
     """Read calibration log and compute accuracy metrics."""
@@ -6985,7 +6307,6 @@ def compute_calibration(path: str, last_n: int = 100) -> dict:
     if n < 30:
         result["warning"] = f"Small sample ({n} records); not statistically significant."
     return result
-
 
 # ── Health Score ──────────────────────────────────────────────────
 
@@ -7039,7 +6360,6 @@ def health_score(path: str) -> float:
     except Exception:
         return 0.5
 
-
 # ── Invasive Concepts ─────────────────────────────────────────────
 
 def invasive_concepts(path: str, top_n: int = 5) -> list[dict]:
@@ -7082,7 +6402,6 @@ def invasive_concepts(path: str, top_n: int = 5) -> list[dict]:
             "widespread_ratio": round(ratio, 3),
         })
     return results
-
 
 # ── Anomaly Detection ─────────────────────────────────────────────
 
@@ -7149,7 +6468,6 @@ def detect_anomalies(path: str) -> list[dict]:
 
     return anomalies
 
-
 # ── Dead Reckoning Delta ──────────────────────────────────────────
 
 def repo_delta(path: str) -> dict:
@@ -7186,7 +6504,6 @@ def repo_delta(path: str) -> dict:
         "concepts_gained": list(new_concepts - old_concepts),
         "anomalies": detect_anomalies(path),
     }
-
 
 # ── Inspect repo ──────────────────────────────────────────────────
 
@@ -7266,7 +6583,6 @@ def inspect_repo(path: str) -> dict:
         "invasive_concepts": invasive,
         "confidence": confidence_band(conf_signals),
     }
-
 
 # ── Crystallography (one-time structural description) ─────────────
 
@@ -7429,7 +6745,6 @@ def crystallography(path: str = ".") -> dict:
         },
     }
 
-
 # ── Crystallographic Defect Detection ─────────────────────────────
 # Maps crystal defects to vocabulary-lattice changes.
 #  Vacancy: expected concept removed from a changed file.
@@ -7559,7 +6874,6 @@ def lattice_defects(path: str, base_ref: str | None = None, head_ref: str | None
         "confidence": _lattice_confidence(defects, changed),
     }
 
-
 def _concept_similarity(a: str, b: str) -> float:
     if a == b:
         return 1.0
@@ -7577,7 +6891,6 @@ def _concept_similarity(a: str, b: str) -> float:
         return max(0.2, overlap)
     return 0.0
 
-
 def _lattice_confidence(defects: dict, changed: list[str]) -> str:
     total = sum(len(d) for d in defects.values())
     if not changed:
@@ -7587,7 +6900,6 @@ def _lattice_confidence(defects: dict, changed: list[str]) -> str:
     if total <= 3:
         return "mixed — few defects; may miss subtle patterns"
     return "low — multiple defects; manual review recommended"
-
 
 # ── Refactoring Pattern Detection ─────────────────────────────────
 
@@ -7721,7 +7033,6 @@ def refactoring_patterns(path: str, base_ref: str | None = None, head_ref: str |
         "confidence": _patterns_confidence(patterns, changed),
     }
 
-
 def _patterns_confidence(patterns: list[dict], changed: list[str]) -> str:
     renames = sum(1 for p in patterns if p["type"] == "rename")
     extracts = sum(1 for p in patterns if "extract" in p["type"])
@@ -7734,7 +7045,6 @@ def _patterns_confidence(patterns: list[dict], changed: list[str]) -> str:
     if extracts + inlines > 2:
         return "mixed — extract/inline patterns need diff confirmation"
     return "low — patterns detected but signal is weak"
-
 
 # ── Exploration Entropy ──────────────────────────────────────────
 
@@ -7803,7 +7113,6 @@ def exploration_entropy(path: str, read_files: list[str]) -> dict:
         "confidence": "high" if coverage_pct >= 50 else "low — limited exploration so far",
     }
 
-
 # ── Confidence Bands ──────────────────────────────────────────────
 
 def confidence_band(signals: dict[str, float | int | str | None]) -> str:
@@ -7817,7 +7126,6 @@ def confidence_band(signals: dict[str, float | int | str | None]) -> str:
     if signal_count >= 1:
         return "low — limited structural signal"
     return "unknown — no computable signals"
-
 
 # ── Structural Diff (Merkle fingerprint comparison) ──────────────
 
@@ -7890,7 +7198,6 @@ def structural_diff(path: str, ref_a: str | None = None, ref_b: str | None = Non
         "entropy_trend": "accelerating" if entropy_delta and entropy_delta > 0.001 else
                         "decelerating" if entropy_delta and entropy_delta < -0.001 else "stable",
     }
-
 
 # ── Vocab Ask (Dialogue mode) ─────────────────────────────────────
 
@@ -8021,7 +7328,6 @@ def answer_question(path: str, question: str, files: list[str] | None = None) ->
         },
     }
 
-
 # ── Verify Scope (Post-edit receipt) ──────────────────────────────
 
 def verify_scope(path: str, contract_files: list[str] | None = None,
@@ -8115,7 +7421,6 @@ def verify_scope(path: str, contract_files: list[str] | None = None,
         },
     }
 
-
 # ── Structural Orphans (T5) ───────────────────────────────────────
 
 def _structural_orphans(analysis) -> list[dict]:
@@ -8149,7 +7454,6 @@ def _structural_orphans(analysis) -> list[dict]:
 
     orphans.sort(key=lambda x: -x["unique_identifiers"])
     return orphans[:5]
-
 
 # ── Co-change Prediction (T1) ──────────────────────────────────────
 
@@ -8200,7 +7504,6 @@ def _co_change_probs(path: str, target_files: list[str], max_commits: int = 500,
         results.extend(scored[:max_results])
     return results
 
-
 # ── Repo fingerprint ──────────────────────────────────────────────
 
 def repo_fingerprint(path: str, git_ref: str | None = None) -> dict:
@@ -8229,7 +7532,6 @@ def repo_fingerprint(path: str, git_ref: str | None = None) -> dict:
         "total_indices": total_indices,
         "languages": len(analysis.languages),
     }
-
 
 def orient_report(path: str) -> dict:
     """LLM-oriented repo map: what to read, avoid, and do next."""
@@ -8290,7 +7592,6 @@ def orient_report(path: str) -> dict:
         "guard_list": ["hub-risk", "test-gaps", "extinct-exports"],
         "_agent_note": "Run `quale agent edit <FILE> --task \"<TASK>\"` to start editing",
     }
-
 
 # ── Entropy Velocity ─────────────────────────────────────────────
 
@@ -8436,7 +7737,6 @@ def entropy_velocity(path: str, weeks: int = 12, interval_weeks: int = 4) -> dic
         "confidence": "moderate — entropy is sensitive to sampling" if len(snapshots) < 4 else "high — multiple intervals",
     }
 
-
 # ── Concept Genesis ──────────────────────────────────────────────
 
 def concept_genesis(path: str, top_n: int = 20) -> dict:
@@ -8505,7 +7805,6 @@ def concept_genesis(path: str, top_n: int = 20) -> dict:
         },
         "confidence": "mixed — file-level origin only; git history tracing not included",
     }
-
 
 # ── Concept Bonds ────────────────────────────────────────────────
 

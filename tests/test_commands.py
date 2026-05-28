@@ -90,7 +90,7 @@ class TestCommandCoverage(unittest.TestCase):
 
     def test_inspect_returns_overview(self):
         tmp, repo = self._make_repo()
-        result = self.run_vocab("inspect", str(repo), "--format", "json")
+        result = self.run_vocab("inspect", "--path", str(repo), "--format", "json")
         data = json.loads(result.stdout)
         for key in ("schema_version", "explore", "modules", "binding_concepts", "timeline", "avg_concept_age_weeks"):
             self.assertIn(key, data)
@@ -101,7 +101,7 @@ class TestCommandCoverage(unittest.TestCase):
         bare = Path(tmp.name) / "bare.git"
         subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True, text=True)
         result = subprocess.run(
-            [sys.executable, "-m", "quale.cli", "inspect", str(bare), "--format", "json"],
+            [sys.executable, "-m", "quale.cli", "inspect", "--path", str(bare), "--format", "json"],
             cwd=str(PROJECT_ROOT), env=self.env, text=True, capture_output=True,
         )
         self.assertNotEqual(result.returncode, 0)
