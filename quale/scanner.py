@@ -280,6 +280,12 @@ def scan_codebase(path: str, git_ref: str | None = None, quiet: bool = False,
     )
     if len(_SCAN_CACHE) < _SCAN_CACHE_MAX:
         _SCAN_CACHE[key] = result
+    # Fix 2: when deep=True completes, also populate the deep=False cache entry
+    # since deep vocabulary is a strict superset of shallow
+    if deep:
+        shallow_key = _scan_cache_key(path, git_ref, deep=False)
+        if shallow_key not in _SCAN_CACHE:
+            _SCAN_CACHE[shallow_key] = result
     return result
 
 
