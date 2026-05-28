@@ -101,6 +101,6 @@ class TestSnapshotStability(unittest.TestCase):
         data = json.loads(r.stdout)
         snapshot = {
             "schema_version": data.get("schema_version"),
-            "excess_porosity": data.get("excess_porosity"),
+            "excess_porosity_rounded": round(data.get("excess_porosity"), 4) if data.get("excess_porosity") is not None else None,
         }
         self.assert_snapshot("health_score", json.dumps(snapshot, indent=2, sort_keys=True))

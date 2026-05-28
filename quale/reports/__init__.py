@@ -34,7 +34,7 @@ from quale.reports.analysis import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from quale.scanner import CodebaseAnalysis
 
 # ── CI Report ─────────────────────────────────────────────────────
 
@@ -589,7 +589,7 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
     mirror = _mirror_signals(changed, analysis.file_vocabs)
 
     try:
-        stability_data = compute_stability(path, weeks=12)
+        stability_data = compute_stability(path, weeks=12, analysis=analysis)
     except Exception:
         stability_data = []
 
@@ -628,11 +628,11 @@ def preflight_report(path: str = ".", files: list[str] | None = None,
 
     # Tier 1 signals — temperature per changed file
     try:
-        lifecycle_data = compute_lifecycles(path, weeks=24)
+        lifecycle_data = compute_lifecycles(path, weeks=24, analysis=analysis)
     except Exception:
         lifecycle_data = []
     try:
-        entropy_data = entropy_velocity(path, weeks=12)
+        entropy_data = entropy_velocity(path, weeks=12, analysis=analysis)
     except Exception:
         entropy_data = None
     file_temps = {}
@@ -3666,16 +3666,18 @@ def metamorphic_mask_report(source_path: str, target_path: str,
         "migration_order": "Apply mask to loose craters first, then tight." if craters else "No impact craters found.",
     }
 
-def capillary_report(path: str = ".", top_n: int = 5) -> dict:
+def capillary_report(path: str = ".", top_n: int = 5,
+                      analysis: CodebaseAnalysis | None = None) -> dict:
     """Capillary action — high-edge-count files (brittle coupling)."""
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
     from quale.scanner import scan_codebase
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
+    if analysis is None:
+        try:
+            analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+        except Exception as e:
+            return {"error": f"scan failed: {e}"}
     token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
     code_exts = frozenset({".go", ".ts", ".js", ".py", ".rs", ".rb", ".java", ".c", ".cpp", ".h", ".zig", ".ex", ".exs", ".nix", ".jl"})
     file_tokens: dict[str, set[str]] = {}
@@ -3833,17 +3835,18 @@ def trap_report(path: str = ".", file_a: str = "", file_b: str = "") -> dict:
     return {"file_a": file_a, "file_b": file_b, "overlap": overlap,
             "label": "divergence gap" if overlap < 0.1 else ("over-trap" if overlap > 0.3 else "ideal trap")}
 
-def thanatosis_report(path: str = ".") -> dict:
+def thanatosis_report(path: str = ".", analysis: CodebaseAnalysis | None = None) -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     path = os.path.abspath(path)
     from collections import Counter
 
     from quale.scanner import scan_codebase
-    try:
-        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
-    except Exception as e:
-        return {"error": f"scan failed: {e}"}
+    if analysis is None:
+        try:
+            analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+        except Exception as e:
+            return {"error": f"scan failed: {e}"}
     token_re = re.compile(r'\b[A-Z][a-zA-Z0-9_]{4,40}\b')
     ft = {}
     for fv in analysis.file_vocabs:
@@ -4098,13 +4101,13 @@ def cleanup_list_report(path: str = ".") -> dict:
         items.append({"identifier": t["identifier"], "files": t["files"], "effort": label})
     return {"items": items, "free_to_delete": sum(1 for i in items if i["effort"] == "ESCAPED")}
 
-def vulnerability_report(path: str = ".") -> dict:
+def vulnerability_report(path: str = ".", analysis: CodebaseAnalysis | None = None) -> dict:
     if not vgit.is_repo(path):
         return {"error": "Not a git repository."}
     p = os.path.abspath(path)
     try:
-        tt = thanatosis_report(path=p)
-        cp = capillary_report(path=p)
+        tt = thanatosis_report(path=p, analysis=analysis)
+        cp = capillary_report(path=p, analysis=analysis)
     except Exception as e:
         return {"error": f"scan: {e}"}
     dt = {f["file"] for f in tt.get("files", [])}
@@ -5815,7 +5818,8 @@ def _classify_files(
 
 # ── Stability anchors ─────────────────────────────────────────────
 
-def compute_stability(path: str, weeks: int = 12, min_appearances: int = 4) -> list[dict]:
+def compute_stability(path: str, weeks: int = 12, min_appearances: int = 4,
+                       analysis: CodebaseAnalysis | None = None) -> list[dict]:
     """Per-file stability using git log (single call) instead of N rescans.
 
     Issues ONE `git log --name-only` call for the entire window, buckets file
@@ -5832,7 +5836,8 @@ def compute_stability(path: str, weeks: int = 12, min_appearances: int = 4) -> l
 
     from quale.scanner import scan_codebase
 
-    analysis = scan_codebase(path, quiet=True, max_files=2000, max_seconds=25)
+    if analysis is None:
+        analysis = scan_codebase(path, quiet=True, max_files=2000, max_seconds=25)
     if not analysis.file_vocabs:
         return []
 
@@ -5900,7 +5905,8 @@ _DEAD_CODE_EXTS = frozenset({
     ".r", ".jl", ".scala",
 })
 
-def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
+def compute_lifecycles(path: str, weeks: int = 24,
+                        analysis: CodebaseAnalysis | None = None) -> list[dict]:
     """Concept lifecycles using git diff (no per-file content reads).
 
     Scans HEAD once, then uses git diff --unified=0 between weekly pairs to
@@ -5921,10 +5927,12 @@ def compute_lifecycles(path: str, weeks: int = 24) -> list[dict]:
     rename_pairs: list[tuple[str, str, int]] = []
 
     # Scan HEAD once
-    try:
-        head_analysis = scan_codebase(path, quiet=True, max_files=1500, max_seconds=20)
-    except Exception:
-        head_analysis = None
+    head_analysis = analysis
+    if head_analysis is None:
+        try:
+            head_analysis = scan_codebase(path, quiet=True, max_files=1500, max_seconds=20)
+        except Exception:
+            head_analysis = None
 
     if head_analysis:
         for fv in head_analysis.file_vocabs:
@@ -6318,7 +6326,7 @@ def health_score(path: str) -> float:
 
         # Stability: stable anchor proportion
         try:
-            stability_data = compute_stability(path, weeks=12)
+            stability_data = compute_stability(path, weeks=12, analysis=analysis)
             stable_count = sum(1 for s in stability_data if s["persistence"] >= 0.8)
             stable_ratio = min(stable_count / max(len(stability_data), 1), 1.0)
         except Exception:
@@ -6326,7 +6334,7 @@ def health_score(path: str) -> float:
 
         # Concept age
         try:
-            lifecycle_data = compute_lifecycles(path, weeks=24)
+            lifecycle_data = compute_lifecycles(path, weeks=24, analysis=analysis)
             if lifecycle_data:
                 dead = sum(1 for lc in lifecycle_data if lc["signal"] == "DEAD")
                 total_concepts = len(lifecycle_data)
@@ -7576,7 +7584,8 @@ def orient_report(path: str) -> dict:
 
 # ── Entropy Velocity ─────────────────────────────────────────────
 
-def entropy_velocity(path: str, weeks: int = 12, interval_weeks: int = 4) -> dict:
+def entropy_velocity(path: str, weeks: int = 12, interval_weeks: int = 4,
+                      analysis: CodebaseAnalysis | None = None) -> dict:
     """Shannon entropy of vocabulary distribution over time.
 
     Scans HEAD once, then walks backwards through weekly refs using git diff to
@@ -7599,7 +7608,8 @@ def entropy_velocity(path: str, weeks: int = 12, interval_weeks: int = 4) -> dic
         next_stop = len(week_data) - 1
 
     # Scan HEAD once
-    analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
+    if analysis is None:
+        analysis = scan_codebase(path, quiet=True, max_files=2500, max_seconds=30)
     if not analysis.file_vocabs:
         return {"error": "No files scanned.", "schema_version": 1}
 
