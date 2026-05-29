@@ -18,8 +18,8 @@ These replace multiple old commands with single, mode-switched interfaces.
 
 | Command | Replaces | Description |
 |---------|----------|-------------|
-| `quale risk` | `hub-risk`, `capillary`, `vulnerability-map`, `traffic-control` | Surface risky files: hub, capillary, and their intersection. Modes: `--mode full` (default), `hub`, `capillary` |
-| `quale verify` | `verify-packet`, `verify-scope`, `verify-classify`, `verify-bonds`, `verify-drift`, `guard` | Verification pipeline. Modes: `--mode full` (default), `mc`, `scope`, `packet` |
+| `quale risk` | `hub-risk`, `capillary`, `vulnerability-map`, `traffic-control` | Surface risky files: hub, capillary, and their intersection. Modes: `--mode full` (default), `hub`, `capillary`, `co-change` (PMI × git prediction), `anomaly` (PMI outlier detection) |
+| `quale verify` | `verify-packet`, `verify-scope`, `verify-classify`, `verify-bonds`, `verify-drift`, `guard` | Verification pipeline. Modes: `--mode full` (default), `mc`, `scope`, `packet`, `incomplete` (flags missing co-change partners) |
 | `quale health` | `health-score`, `drift-check`, `parity-bit` | Structural health dashboard. Modes: `--mode dashboard` (default), `score` |
 | `quale audit` | `ci-report`, `pr-report`, `check-diff`, `check-pr` | Review a diff: structural, CI, and PR reports in one command |
 | `quale temporal` | `decay`, `vocabulary-trend`, `origins` | Temporal analysis: decay, vocabulary trends, and phrase lifecycles |
