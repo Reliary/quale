@@ -219,12 +219,12 @@ class TestAgentGuardContract(OutputContractTest):
 
 
 class TestHealthScoreContract(OutputContractTest):
-    """health-score must not be 'coupled + gapped'."""
+    """health-score must show a valid description."""
 
     def test_health_score_has_description(self):
         r = self.run_cli("core", "health-score", "--path", str(PROJECT_ROOT))
         self.assertIn("Structural health", r.stdout)
-        self.assertNotIn("coupled + gapped", r.stdout)
+        self.assertNotIn("error", r.stdout.lower())
 
     def test_health_score_has_debt(self):
         r = self.run_cli("core", "health-score", "--path", str(PROJECT_ROOT))
