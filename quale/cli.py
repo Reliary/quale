@@ -110,7 +110,7 @@ def ec_alias(
     )
     vtypes = _classify_verify_types(verify_candidates[:5] if verify_candidates else [], data.get("changed_files", []))
     tool_data = _build_edit_tool_format(data, verify_candidates, vtypes, ver_confidence, scope_creep, scope_creep_instruction)
-    typer.echo(json.dumps(tool_data, separators=(",", ":")))
+    typer.echo(json.dumps(tool_data, separators=(",", ":"), ensure_ascii=False))
 
 
 @cli.command(name="vp")
@@ -130,7 +130,7 @@ def vp_alias(
     if "error" in data:
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
-    typer.echo(json.dumps(data, indent=2))
+    typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
 
 
 @cli.command(name="o")
@@ -143,11 +143,11 @@ def o_alias(
     try:
         data = orient_report(p)
         if "error" in data:
-            typer.echo(json.dumps(data), err=True)
+            typer.echo(json.dumps(data, ensure_ascii=False), err=True)
             raise typer.Exit(1)
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
     except Exception as e:
-        typer.echo(json.dumps({"error": str(e)}))
+        typer.echo(json.dumps({"error": str(e)}, ensure_ascii=False))
         raise typer.Exit(1)
 
 
@@ -450,7 +450,7 @@ def diff(
             "new": sorted(new_concepts)[:50],
             "retired": sorted(retired_concepts)[:50],
             "stable_count": len(stable_concepts),
-        }, indent=2))
+        }, indent=2, ensure_ascii=False))
         return
 
     typer.echo(_color(f"Comparing {ref_a} → {ref_b}", "header"))
@@ -486,13 +486,13 @@ def search(
     results = search_cross_repo_ranked(phrase, [path])
     if not results:
         if format == "json":
-            typer.echo(json.dumps({"phrase": phrase, "results": []}))
+            typer.echo(json.dumps({"phrase": phrase, "results": []}, ensure_ascii=False))
         else:
             typer.echo(f"'{phrase}' not found in any repo.")
         return
 
     if format == "json":
-        typer.echo(json.dumps({"phrase": phrase, "results": results}, indent=2))
+        typer.echo(json.dumps({"phrase": phrase, "results": results}, indent=2, ensure_ascii=False))
         return
     if format == "compact":
         for r in results:
@@ -650,7 +650,7 @@ def preflight(
     vtypes = _classify_verify_types(verify_candidates[:5] if verify_candidates else [], data.get("changed_files", []))
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     if format == "llm":
         from quale.formats.llm import format_preflight_llm
@@ -673,11 +673,11 @@ def preflight(
         }
         if vac_notes:
             verify_data["vaccination"] = vac_notes
-        typer.echo(json.dumps(verify_data, separators=(",", ":")))
+        typer.echo(json.dumps(verify_data, separators=(",", ":"), ensure_ascii=False))
         return
     if format == "tool":
         tool_data = _build_edit_tool_format(data, verify_candidates, vtypes, ver_confidence, scope_creep, scope_creep_instruction)
-        typer.echo(json.dumps(tool_data, separators=(",", ":")))
+        typer.echo(json.dumps(tool_data, separators=(",", ":"), ensure_ascii=False))
         return
     if format == "full":
         # Full signal set for human inspection or research
@@ -726,7 +726,7 @@ def preflight(
             "boundary": data.get("boundary"),
             "module_exposure": data.get("module_exposure"),
         }
-        typer.echo(json.dumps(tool_data, indent=2))
+        typer.echo(json.dumps(tool_data, indent=2, ensure_ascii=False))
         return
     if format == "checklist":
         _print_preflight_checklist(data)
@@ -762,16 +762,16 @@ def contract(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     if format == "prompt":
         typer.echo("Return exactly one JSON object using IDs only: {\"edit_ids\":[],\"verify_ids\":[],\"expand_scope\":[{\"id\":\"B1\",\"reason\":\"why\"}],\"manual_verify\":[]}")
-        typer.echo(json.dumps(data, separators=(",", ":")))
+        typer.echo(json.dumps(data, separators=(",", ":"), ensure_ascii=False))
         return
     # tool (default) — compact JSON contract with agent note
     data["schema_version"] = 1
     data["_agent_note"] = "--files takes comma-separated paths; return IDs from this contract, not raw paths"
-    typer.echo(json.dumps(data, separators=(",", ":")))
+    typer.echo(json.dumps(data, separators=(",", ":"), ensure_ascii=False))
 
 
 @core_app.command(name="check-plan",  rich_help_panel="Agent Safety")
@@ -796,7 +796,7 @@ def check_plan(
 
     result = validate_plan(contract_data, proposal, allow_paths=allow_paths)
     if format == "json":
-        typer.echo(json.dumps(result, indent=2))
+        typer.echo(json.dumps(result, indent=2, ensure_ascii=False))
         return
     if format == "compact":
         if result.get("valid"):
@@ -809,7 +809,7 @@ def check_plan(
         return
     # tool (default) — compact JSON
     result["_agent_note"] = "--contract and --proposal take file paths, not JSON-inline; pass via file or stdin"
-    typer.echo(json.dumps(result, separators=(",", ":")))
+    typer.echo(json.dumps(result, separators=(",", ":"), ensure_ascii=False))
 
 
 @core_app.command(name="repo-map",  rich_help_panel="Getting Started")
@@ -836,7 +836,7 @@ def crystallography(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -936,7 +936,7 @@ def verify(
                 "mode": "report_only",
                 "caveat": "Candidates are structural hints, not proof of coverage.",
             },
-        }, indent=2))
+        }, indent=2, ensure_ascii=False))
         return
 
     # MCQ format (default) — designed for LLM consumption
@@ -972,7 +972,7 @@ def reverse_verify(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     candidates = data.get("source_candidates", [])
@@ -1002,7 +1002,7 @@ def verify_classify(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     for fc in data.get("changed_files", []):
         gap = fc.get("gap_type") or "—"
@@ -1027,7 +1027,7 @@ def verify_bonds(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     for b in data.get("bonds", []):
         typer.echo(f"  Bond: {b['tests'][0]}  ↔  {b['tests'][1]}  (overlap={b['combined_vocab_overlap']})")
@@ -1048,7 +1048,7 @@ def verify_drift(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     for pt in data.get("series", []):
         marker = "⬇" if pt.get("alerts") else " "
@@ -1082,7 +1082,7 @@ def deserts(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -1121,7 +1121,7 @@ def entangle(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     pairs = data.get("pairs", [])
     if target:
@@ -1166,7 +1166,7 @@ def cascade_verify_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     tier = data.get("tier", "unknown")
     det = data.get("deterministic_verify", {})
@@ -1214,7 +1214,7 @@ def veto_cascade_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     tier = data.get("tier", "?")
     veto_t = data.get("veto_tier", "?")
@@ -1284,7 +1284,7 @@ def isolate_cmd(
             "token_cost": "~100",
             "llm_prompt": prompt,
             "module_scores": [{ "score": m["match_score"], "size": m["size"], "overlap": m["overlap_count"] } for m in mods],
-        }, indent=2))
+        }, indent=2, ensure_ascii=False))
         return
     typer.echo(_color("STRUCTURAL BISECTION", "header"))
     typer.echo(f"Task: {task}")
@@ -1328,7 +1328,7 @@ def fold_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     from quale.formats.llm import format_folded_file
     typer.echo(format_folded_file(data))
@@ -1363,7 +1363,7 @@ def drift_check_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     if snapshot:
         typer.echo(f"Drift baseline saved for {file} ({data.get('phrases_captured', 0)} phrases)")
@@ -1414,7 +1414,7 @@ def mycorrhiza_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     for f in data.get("files", []):
         count = f.get("count", 0)
@@ -1448,7 +1448,7 @@ def solve_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     total_phrases = data.get("total_phrases", 0)
     total_keys = len(data.get("bimoth_index", []))
@@ -1483,7 +1483,7 @@ def deflate_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     used = data.get("net_new_count", 0)
     bud = data.get("budget", 5)
@@ -1534,7 +1534,7 @@ def forecast_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     for res in data.get("files", []):
         note = res.get("note", "")
@@ -1581,7 +1581,7 @@ def triangulate_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2, default=str))
+        typer.echo(json.dumps(data, indent=2, default=str, ensure_ascii=False))
         return
     anchor = data.get("anchor", [])
     conf = data.get("confidence", 1)
@@ -1617,7 +1617,7 @@ def epidemiology_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2, default=str))
+        typer.echo(json.dumps(data, indent=2, default=str, ensure_ascii=False))
         return
     if data.get("pathogen_count", 0) > 0:
         typer.echo(f"Pathogens: {data['pathogen_count']}  Antigens: {data['antigen_count']}  Total tracked: {data['total_tracked']}")
@@ -1652,7 +1652,7 @@ def orient_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     typer.echo(f"Cipher keys: {', '.join(data.get('cipher_keys', [])[:5])}")
     typer.echo(f"Anchor: {', '.join(data.get('anchor', []))}")
@@ -1683,7 +1683,7 @@ def heisenberg_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     if data.get("uncertainty_violated"):
         typer.echo(_color(f'  {ICON_WARN} Mixed change detected', 'red'))
@@ -1717,7 +1717,7 @@ def traffic_control_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     src = data.get("source_zone", "?")
     dst = data.get("import_zone", "?")
@@ -1746,7 +1746,7 @@ def capillary_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     caps = data.get("capillaries", [])[:5]
     typer.echo(f"Files with the most inter-file connections ({len(caps)} shown):")
@@ -1770,7 +1770,7 @@ def spectral_gap_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     g = data.get("spectral_gap", 0)
     data.get("modularity", "?")
@@ -1800,7 +1800,7 @@ def phantom_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     d = data.get("frameworks_detected", {})
     typer.echo("Frameworks detected from import vocabulary:")
@@ -1835,7 +1835,7 @@ def parity_bit_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     u = data.get("mirror_unchanged", False)
     typer.echo(f'Mirror {"UNCHANGED" if u else "CHANGED"}')
@@ -1861,7 +1861,7 @@ def guide_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     g = data.get("guide", "")
     c = data.get("confidence", "")
@@ -1887,7 +1887,7 @@ def decay_cmd(path=".", file="", weeks=12, half_life=30,
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     dp = data.get("decaying_patterns", [])
     if dp:
@@ -1923,7 +1923,7 @@ def entropy_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2, default=str))
+        typer.echo(json.dumps(data, indent=2, default=str, ensure_ascii=False))
         return
     typer.echo("Directory vocabulary spread vs. rolling baseline:")
     if data.get("any_limit_exceeded"):
@@ -1963,7 +1963,7 @@ def zk_proof_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2, default=str))
+        typer.echo(json.dumps(data, indent=2, default=str, ensure_ascii=False))
         return
     if data.get("passed"):
         typer.echo(_color("ZK-PROOF PASSED", "green"))
@@ -2003,7 +2003,7 @@ def lagrange_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2, default=str))
+        typer.echo(json.dumps(data, indent=2, default=str, ensure_ascii=False))
         return
     pts = data.get("lagrange_points", [])
     if pts:
@@ -2044,7 +2044,7 @@ def phase_shift_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2, default=str))
+        typer.echo(json.dumps(data, indent=2, default=str, ensure_ascii=False))
         return
     typer.echo(data.get("mask_summary", ""))
     for s in data.get("substitutions", [])[:10]:
@@ -2088,10 +2088,10 @@ def cartridge(
             "verification_confidence": data.get("verification_confidence", {}),
             "_agent_note": "--files takes comma-separated paths, not repeated flags",
         }
-        typer.echo(json.dumps(tool_data, separators=(",", ":")))
+        typer.echo(json.dumps(tool_data, separators=(",", ":"), ensure_ascii=False))
         return
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     tier = data.get("tier", "unknown")
     conf = data.get("confidence", "—")
@@ -2142,7 +2142,7 @@ def check_diff(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     if not data.get("defects"):
         typer.echo("No structural defects detected.")
@@ -2186,7 +2186,7 @@ def route(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -2279,7 +2279,7 @@ def timeline(
             "schema_version": 1,
             "weeks": weeks,
             "timeline": data,
-        }, indent=2))
+        }, indent=2, ensure_ascii=False))
         return
     typer.echo(c(f"{'━' * 60}", "cyan"))
     typer.echo(c(f"  CONCEPT TIMELINE (last {weeks} weeks)", "header"))
@@ -2326,7 +2326,7 @@ def stable(
                 "churn_hotspots": [],
                 "total_files": 0,
                 "weeks": weeks,
-            }))
+            }, ensure_ascii=False))
         else:
             typer.echo("Not enough snapshot data.")
         return
@@ -2341,7 +2341,7 @@ def stable(
             "churn_hotspots": sorted([x for x in data if x["persistence"] <= 0.3 and x["total_phrases"] >= 5], key=lambda x: x["persistence"]),
             "total_files": len(data),
             "weeks": weeks,
-        }, indent=2))
+        }, indent=2, ensure_ascii=False))
         return
 
     # Anchors (top persistence)
@@ -2402,7 +2402,7 @@ def explore(
         return
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -2765,7 +2765,7 @@ def agent_bootstrap(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     if format == "llm":
@@ -2948,7 +2948,7 @@ def skeleton(
         typer.echo(json.dumps({"schema_version": 1, "skeleton": data.get("skeleton", ""), "skip_directives": [
             f"Generated files: {data.get('generated_pct', 0)}%",
             f"Test convention: {data.get('test_convention', 'unknown')}",
-        ]}, indent=2))
+        ]}, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -2982,7 +2982,7 @@ def delta(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -3062,7 +3062,7 @@ def ci_report_cmd(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         if gate_failures:
             raise typer.Exit(gate_failures[0][0])
         return
@@ -3199,7 +3199,7 @@ def inspect(
         data["anomalies"] = detect_anomalies(path)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -3405,7 +3405,7 @@ def help_agent(
                 {"cmd": cmd, "why": why, "requires_user_value": requires_value}
                 for cmd, why, requires_value in commands
             ],
-        }, indent=2))
+        }, indent=2, ensure_ascii=False))
     else:
         typer.echo(json.dumps({
             "schema_version": 1,
@@ -3414,7 +3414,7 @@ def help_agent(
                 {"cmd": cmd, "why": why, "requires_user_value": requires_value}
                 for cmd, why, requires_value in commands
             ],
-        }, indent=2))
+        }, indent=2, ensure_ascii=False))
 
 
 @core_app.command(rich_help_panel="Cross-Repo")
@@ -3434,7 +3434,7 @@ def compare(
 
     result = compare_repos(repo_a, repo_b, contract_only=contract_only)
     if format == "json":
-        typer.echo(json.dumps(result, indent=2))
+        typer.echo(json.dumps(result, indent=2, ensure_ascii=False))
         if fail_on_drift is not None:
             drift = result.get("drift_score", 1.0)
             if drift >= fail_on_drift:
@@ -3478,7 +3478,7 @@ def provenance(
         raise typer.Exit(1)
     data = phrase_provenance(path, phrase, weeks=weeks)
     if format == "json":
-        typer.echo(json.dumps({"schema_version": 1, "phrase": phrase, "weeks": weeks, "history": data}, indent=2))
+        typer.echo(json.dumps({"schema_version": 1, "phrase": phrase, "weeks": weeks, "history": data}, indent=2, ensure_ascii=False))
         return
     for item in data:
         status = "present" if item["present"] else "absent"
@@ -3490,7 +3490,7 @@ def fingerprint_cmd(target: Annotated[str, typer.Argument(help="File or repo pat
     """Structural fingerprint of a file or entire repo."""
     target = os.path.abspath(target)
     if os.path.isdir(target):
-        typer.echo(json.dumps(repo_fingerprint(target), indent=2))
+        typer.echo(json.dumps(repo_fingerprint(target), indent=2, ensure_ascii=False))
         return
     if not os.path.isfile(target):
         typer.echo("Not a file or directory.", err=True)
@@ -3724,7 +3724,7 @@ def lattice(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -3797,7 +3797,7 @@ def patterns(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -3868,7 +3868,7 @@ def stop(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -3924,7 +3924,7 @@ def entropy(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -3971,7 +3971,7 @@ def genesis(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -4035,7 +4035,7 @@ def bond(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -4101,7 +4101,7 @@ def diff_structural(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -4161,7 +4161,7 @@ def ask(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -4227,7 +4227,7 @@ def verify_scope(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -4298,7 +4298,7 @@ def calibration(
         raise typer.Exit(1)
 
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
 
     def c(t, col):
@@ -4379,7 +4379,7 @@ def escape_velocity_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     tagged = data.get("tagged", [])
     typer.echo("Identifier reach across the repo:")
@@ -4419,7 +4419,7 @@ def trap_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     overlap = data.get("overlap", 0)
     data.get("label", "")
@@ -4448,7 +4448,7 @@ def thanatosis_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     files = data.get("files", [])[:5]
     typer.echo("Files that are highly coupled but rarely edited:")
@@ -4478,7 +4478,7 @@ def trompe_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     typer.echo(f'Trompe: {data.get("trompe_ratio",0)} — {data.get("label","")}')
 
@@ -4499,7 +4499,7 @@ def porosity_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     p = data.get("porosity", 0)
     if p > 0.9:
@@ -4528,7 +4528,7 @@ def thylacine_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     thy = data.get("thylacines", [])
     typer.echo('Exports declared in multiple files but never imported externally:')
@@ -4555,7 +4555,7 @@ def tensegrity_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     pairs = data.get("tensegrity_pairs", [])
     typer.echo("Indirectly coupled file pairs (no direct edge):")
@@ -4582,7 +4582,7 @@ def criticality_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     scores = data.get("scores", [])
     typer.echo("Change amplification risk (k > 1 = changes cascade):")
@@ -4611,7 +4611,7 @@ def guard_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     if format == "tool":
         tool_data = {
@@ -4626,7 +4626,7 @@ def guard_cmd(
             "reverse_blast": data.get("reverse_blast", []),
             "_agent_note": "--file takes a single file path (not --files); no comma-separation",
         }
-        typer.echo(json.dumps(tool_data, separators=(",", ":")))
+        typer.echo(json.dumps(tool_data, separators=(",", ":"), ensure_ascii=False))
         return
     for k, v in data.items():
         if k in ("file", "task") or not v:
@@ -4660,7 +4660,7 @@ def check_pr_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     unch = data.get("parity", {}).get("unchanged", False)
     typer.echo(f"Structural hash: {ICON_CHECK if unch else ICON_WARN} {'unchanged' if unch else 'changed since base ref'}")
@@ -4691,7 +4691,7 @@ def cleanup_list_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     items = data.get("items", [])
     typer.echo(f'{len(items)} candidates for cleanup:')
@@ -4717,7 +4717,7 @@ def vulnerability_map_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     dt = len(data.get("don_touch", []))
     ch = len(data.get("churn_hubs", []))
@@ -4744,7 +4744,7 @@ def health_score_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     coupling = "coupled" if data.get("excess_porosity", 0) < 0 else "sparse"
     mod = "gapped" if data.get("spectral_gap", 0) >= 2 else ("moderate" if data.get("spectral_gap", 0) >= 1 else "flat")
@@ -4784,7 +4784,7 @@ def review_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     typer.echo("")
     typer.echo(_color(f"═══ Review: {base_ref} \u2192 {head_ref} ({len(data.get('changed_files', []))} files) ═══", "header"))
@@ -4876,7 +4876,7 @@ def onboard_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     typer.echo("")
     typer.echo(_color("═══ Onboarding Plan ═══", "header"))
@@ -4931,7 +4931,7 @@ def refactor_cost_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     effort = data.get("effort", "UNKNOWN")
     teal = "\033[36m"
@@ -5011,7 +5011,7 @@ def ci_trend_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     typer.echo("")
     typer.echo(_color(f"═══ CI Trend (last {weeks} weeks) ═══", "header"))
@@ -5079,7 +5079,7 @@ def agent_edit(
     sci = "Before broadening scope, verify each extra file: " + "; ".join(qs) if qs else "Do not propose extra_edits unless the task explicitly requires them."
     vt = _classify_verify_types(cand[:5] if cand else [], report.get("changed_files", []))
     tool_data = _build_edit_tool_format(report, cand, vt, vc, sc, sci)
-    typer.echo(json.dumps(tool_data, separators=(",", ":")))
+    typer.echo(json.dumps(tool_data, separators=(",", ":"), ensure_ascii=False))
 
 @agent_app.command(name="orient")
 def agent_orient(
@@ -5098,11 +5098,11 @@ def agent_orient(
     try:
         data = orient_report(p)
         if "error" in data:
-            typer.echo(json.dumps(data), err=True)
+            typer.echo(json.dumps(data, ensure_ascii=False), err=True)
             raise typer.Exit(1)
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
     except Exception as e:
-        typer.echo(json.dumps({"error": str(e)}))
+        typer.echo(json.dumps({"error": str(e)}, ensure_ascii=False))
         raise typer.Exit(1)
 
 @agent_app.command(name="guard")
@@ -5136,7 +5136,7 @@ def agent_guard(
         "reverse_blast": data.get("reverse_blast", []),
         "_agent_note": "--file takes a single file path; no comma-separation",
     }
-    typer.echo(json.dumps(tool_data, separators=(",", ":")))
+    typer.echo(json.dumps(tool_data, separators=(",", ":"), ensure_ascii=False))
 
 
 # ── CI Namespace ──────────────────────────────────────────────────────────
@@ -5304,9 +5304,9 @@ def risk_cmd(
     result = {"critical_files": cr, "hub_files": dt, "capillary_files": ch}
     if format == "json":
         if mode in ("co-change", "anomaly"):
-            typer.echo(json.dumps(data, indent=2))
+            typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
             return
-        typer.echo(json.dumps(result, indent=2))
+        typer.echo(json.dumps(result, indent=2, ensure_ascii=False))
     if ci and cr:
         raise typer.Exit(1)
     if ci and not cr:
@@ -5402,7 +5402,7 @@ def verify_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     risk = data.get("risk") or data.get("post_edit_risk", "?")
     file = data.get("file", "")
@@ -5447,7 +5447,7 @@ def health_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     porosity = data.get("porosity", {})
     gap = data.get("gap", {})
@@ -5482,7 +5482,7 @@ def audit_cmd(
     diff_data = check_diff_report(path=p, diff_ref=head_ref)
     data = {"ci": ci_data, "pr": pr_data, "diff": diff_data}
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     typer.echo(f"Audit: {base_ref}..{head_ref}")
     if ci_data:
@@ -5519,7 +5519,7 @@ def temporal_cmd(
         typer.echo(data["error"], err=True)
         raise typer.Exit(1)
     if format == "json":
-        typer.echo(json.dumps(data, indent=2))
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
         return
     typer.echo(f"File: {file}")
     decaying = data.get("decaying_patterns", [])
