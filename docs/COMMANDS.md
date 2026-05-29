@@ -77,11 +77,14 @@ These replace multiple old commands with single, mode-switched interfaces.
 quale risk                             # Hub + capillary + vulnerability intersection
 quale risk --mode hub                  # Hub risk only
 quale risk --mode capillary            # Capillary risk only
+quale risk --mode co-change            # Co-change prediction: PMI × git history (agent workflow)
+quale risk --mode anomaly              # PMI outlier detection: identifier pairs with unusual coupling
 
 quale verify --files src/auth.ts       # Combined verification: mc, scope, packet
 quale verify --mode mc                 # Pre-edit multi-choice verification (75% accuracy)
 quale verify --mode packet             # Post-edit co-change signal (80% accuracy)
 quale verify --mode scope              # Post-edit scope verification (83% accuracy)
+quale verify --mode incomplete         # Incomplete change detection: flags missing co-change partners
 
 quale health                           # Structural health dashboard
 quale health --mode score              # Single health score

@@ -183,6 +183,8 @@ Quale provides structural context that helps agents make better decisions about 
    quale o                    # Orient: repo map + landmarks
    quale ec --files <file>    # Edit context: risk + verification candidates
    quale vp --files <file>    # Verify packet: co-change signal
+   quale risk --mode co-change # Co-change prediction: what else to read
+   quale verify --mode incomplete --files <file>  # Detects if a change is incomplete
    ```
 
 **What agents get**:
@@ -215,6 +217,9 @@ See [docs/EFFECT_HARNESS.md](docs/EFFECT_HARNESS.md) for full methodology.
 | `quale ci check <base> <head>` | Runs structural gates, exits 0-7 with bitmask |
 | `quale ci comment <base> <head>` | Posts structural report as GitHub PR comment |
 | `quale ci trend` | Tracks CI metric trends over time |
+| `quale risk --mode co-change` | Co-change prediction: what files change together (PMI × git) |
+| `quale risk --mode anomaly` | Finds identifiers with unusually high PMI (hidden coupling) |
+| `quale verify --mode incomplete` | Detects files missing from a change set (incomplete PRs) |
 
 ### Advanced primitives
 
