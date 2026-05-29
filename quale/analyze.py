@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -22,6 +23,37 @@ class CoOccurrenceMatrix:
             for b in phrases:
                 if a < b:
                     self.pairs[(a, b)] += 1
+
+    def pmi(self, a: str, b: str) -> float:
+        """Pointwise Mutual Information: log2(P(a,b) / P(a)P(b))."""
+        if a == b:
+            return 0.0
+        pair_count = self.pairs.get((a, b) if a < b else (b, a), 0)
+        if pair_count == 0:
+            return 0.0
+        count_a = self.phrase_count.get(a, 0)
+        count_b = self.phrase_count.get(b, 0)
+        total = self.total_docs
+        if count_a == 0 or count_b == 0 or total == 0:
+            return 0.0
+        p_ab = pair_count / total
+        p_a = count_a / total
+        p_b = count_b / total
+        if p_a * p_b == 0:
+            return 0.0
+        return math.log2(p_ab / (p_a * p_b))
+
+    def top_pmi_for(self, phrase: str, limit: int = 10, min_freq: int = 1) -> list[tuple[str, float]]:
+        """Return PMI-sorted partners for a phrase — what co-occurs most surprisingly?"""
+        partners: dict[str, int] = defaultdict(int)
+        for (a, b), count in self.pairs.items():
+            if a == phrase:
+                partners[b] = count
+            elif b == phrase:
+                partners[a] = count
+        scored = [(p, self.pmi(phrase, p)) for p in partners if self.phrase_count.get(p, 0) >= min_freq]
+        scored.sort(key=lambda x: -x[1])
+        return scored[:limit]
 
     def cluster(self, min_cooccurrence: int = 3, min_phrases: int = 2) -> list[list[str]]:
         """Extract co-occurrence clusters — groups of phrases that frequently appear together."""
